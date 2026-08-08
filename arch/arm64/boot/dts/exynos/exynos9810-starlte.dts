@@ -14,12 +14,18 @@
 / {
 	model = "Samsung Galaxy S9 (SM-G960F)";
 	compatible = "samsung,starlte", "samsung,exynos9810";
+	model_info-chip = <9810>;
+	model_info-platform = "android";
+	model_info-subtype = "samsung";
+	model_info-hw_rev = <26>;
+	model_info-hw_rev_end = <255>;
 	chassis-type = "handset";
 
 	chosen {
 		#address-cells = <2>;
 		#size-cells = <1>;
 		ranges;
+		stdout-path = "serial0:115200n8";
 
 		framebuffer@cc000000 {
 			compatible = "simple-framebuffer";
@@ -81,11 +87,37 @@
 			reg = <0x0 0xcc000000 (1440 * 2960 * 4)>;
 			no-map;
 		};
+
+		ramoops@fda10000 {
+			compatible = "ramoops";
+			reg = <0x0 0xfda10000 0x200000>;
+			record-size = <0x80000>;
+			console-size = <0x100000>;
+			pmsg-size = <0x80000>;
+			max-reason = <5>;
+		};
+	};
+
+	ufs_vcc: regulator-ufs-vcc {
+		compatible = "regulator-fixed";
+		regulator-name = "ufs-vcc";
+		gpio = <&gpd0 2 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		regulator-boot-on;
 	};
 };
 
 &oscclk {
 	clock-frequency = <26000000>;
+};
+
+&serial_0 {
+	status = "okay";
+};
+
+&ufs {
+	vcc-supply = <&ufs_vcc>;
+	status = "okay";
 };
 
 &pinctrl_alive {

@@ -25,6 +25,7 @@
 		pinctrl6 = &pinctrl_peric0;
 		pinctrl7 = &pinctrl_peric1;
 		pinctrl8 = &pinctrl_vts;
+		serial0 = &serial_0;
 	};
 
 	cpus {
@@ -126,6 +127,25 @@
 		clock-output-names = "oscclk";
 	};
 
+	/*
+	 * The full Exynos9810 CMU driver is not implemented yet. S-Boot leaves
+	 * these clocks running at the rates below, so expose explicit bootstrap
+	 * clocks for the debug UART and embedded UFS controller in the meantime.
+	 */
+	uart_bootclk: uart-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <200000000>;
+		clock-output-names = "uart_dbg_boot";
+	};
+
+	ufs_bootclk: ufs-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <177666666>;
+		clock-output-names = "ufs_embd_boot";
+	};
+
 	pmu-a55 {
 		compatible = "arm,cortex-a55-pmu";
 		interrupts = <GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>,
@@ -191,16 +211,63 @@
 			interrupts = <GIC_SPI 396 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
+		serial_0: serial@10440000 {
+			compatible = "samsung,exynos9810-uart",
+				     "samsung,exynos8895-uart";
+			reg = <0x10440000 0x100>;
+			interrupts = <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&uart_bootclk>, <&uart_bootclk>;
+			clock-names = "uart", "clk_uart_baud0";
+			pinctrl-0 = <&uart0_bus>;
+			pinctrl-names = "default";
+			samsung,uart-fifosize = <256>;
+			status = "disabled";
+		};
+
 		pinctrl_peric1: pinctrl@10830000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x10830000 0x1000>;
 			interrupts = <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
+		sysreg_fsys0: system-controller@11010000 {
+			compatible = "samsung,exynos9810-fsys0-sysreg", "syscon";
+			reg = <0x11010000 0x1000>;
+		};
+
 		pinctrl_fsys0: pinctrl@11050000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x11050000 0x1000>;
 			interrupts = <GIC_SPI 243 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		ufs: ufs@11120000 {
+			compatible = "samsung,exynos9810-ufs";
+			reg = <0x11120000 0x200>,
+			      <0x11121100 0x200>,
+			      <0x11110000 0x8000>,
+			      <0x11130000 0x100>;
+			reg-names = "hci", "vs_hci", "unipro", "ufsp";
+			interrupts = <GIC_SPI 242 IRQ_TYPE_LEVEL_HIGH>;
+			clocks = <&ufs_bootclk>, <&ufs_bootclk>;
+			clock-names = "core_clk", "sclk_unipro_main";
+			dma-coherent;
+			phys = <&ufs_phy>;
+			phy-names = "ufs-phy";
+			pinctrl-0 = <&ufs_rst_n &ufs_refclk_out>;
+			pinctrl-names = "default";
+			samsung,sysreg = <&sysreg_fsys0 0x700>;
+			status = "disabled";
+		};
+
+		ufs_phy: ufs-phy@11124000 {
+			compatible = "samsung,exynos9810-ufs-phy";
+			reg = <0x11124000 0x800>;
+			reg-names = "phy-pma";
+			clocks = <&oscclk>;
+			clock-names = "ref_clk";
+			#phy-cells = <0>;
+			samsung,pmu-syscon = <&pmu_system_controller 0x724>;
 		};
 
 		pinctrl_fsys1: pinctrl@11430000 {
