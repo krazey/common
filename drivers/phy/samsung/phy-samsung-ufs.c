@@ -242,7 +242,11 @@ static int samsung_ufs_phy_notify_state(struct phy *phy,
 
 	if (state.ufs_state == PHY_UFS_HIBERN8_EXIT) {
 		for_each_phy_lane(ufs_phy, i) {
-			if (ufs_phy->drvdata->wait_for_cdr) {
+			if (ufs_phy->drvdata->wait_for_cdr_hibern8) {
+				err = ufs_phy->drvdata->wait_for_cdr_hibern8(phy, i);
+				if (err)
+					goto err_out;
+			} else if (ufs_phy->drvdata->wait_for_cdr) {
 				err = ufs_phy->drvdata->wait_for_cdr(phy, i);
 				if (err)
 					goto err_out;
@@ -360,6 +364,9 @@ static const struct of_device_id samsung_ufs_phy_match[] = {
 	}, {
 		.compatible = "samsung,exynos7-ufs-phy",
 		.data = &exynos7_ufs_phy,
+	}, {
+		.compatible = "samsung,exynos9810-ufs-phy",
+		.data = &exynos9810_ufs_phy,
 	}, {
 		.compatible = "samsung,exynosautov9-ufs-phy",
 		.data = &exynosautov9_ufs_phy,

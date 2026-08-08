@@ -121,6 +121,7 @@ struct samsung_ufs_phy_drvdata {
 	/* SoC's specific operations */
 	int (*wait_for_cal)(struct phy *phy, u8 lane);
 	int (*wait_for_cdr)(struct phy *phy, u8 lane);
+	int (*wait_for_cdr_hibern8)(struct phy *phy, u8 lane);
 };
 
 struct samsung_ufs_phy {
@@ -155,6 +156,7 @@ void samsung_ufs_phy_config(struct samsung_ufs_phy *phy,
 			    const struct samsung_ufs_phy_cfg *cfg, u8 lane);
 
 extern const struct samsung_ufs_phy_drvdata exynos7_ufs_phy;
+extern const struct samsung_ufs_phy_drvdata exynos9810_ufs_phy;
 extern const struct samsung_ufs_phy_drvdata exynosautov9_ufs_phy;
 extern const struct samsung_ufs_phy_drvdata exynosautov920_ufs_phy;
 extern const struct samsung_ufs_phy_drvdata fsd_ufs_phy;
