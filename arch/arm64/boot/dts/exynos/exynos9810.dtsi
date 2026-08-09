@@ -7,6 +7,7 @@
  */
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
+#include <dt-bindings/clock/samsung,exynos9810.h>
 
 / {
 	compatible = "samsung,exynos9810";
@@ -128,22 +129,36 @@
 	};
 
 	/*
-	 * The full Exynos9810 CMU driver is not implemented yet. S-Boot leaves
-	 * these clocks running at the rates below, so expose explicit bootstrap
-	 * clocks for the debug UART and embedded UFS controller in the meantime.
+	 * CMU_TOP is not implemented yet. S-Boot leaves these domain inputs
+	 * running at the rates below, so describe them as bootstrap clocks until
+	 * the PLL and top-level mux tree is available.
 	 */
-	uart_bootclk: uart-boot-clock {
+	peric0_bus_bootclk: peric0-bus-boot-clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <200000000>;
-		clock-output-names = "uart_dbg_boot";
+		clock-output-names = "dout_clkcmu_peric0_bus";
 	};
 
-	ufs_bootclk: ufs-boot-clock {
+	peric0_ip_bootclk: peric0-ip-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <400000000>;
+		clock-output-names = "dout_clkcmu_peric0_ip";
+	};
+
+	fsys0_bus_bootclk: fsys0-bus-boot-clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <177666666>;
-		clock-output-names = "ufs_embd_boot";
+		clock-output-names = "dout_clkcmu_fsys0_bus";
+	};
+
+	fsys0_ufs_bootclk: fsys0-ufs-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <177666666>;
+		clock-output-names = "dout_clkcmu_fsys0_ufs_embd";
 	};
 
 	pmu-a55 {
@@ -205,6 +220,17 @@
 			#size-cells = <1>;
 		};
 
+		cmu_peric0: clock-controller@10400000 {
+			compatible = "samsung,exynos9810-cmu-peric0";
+			reg = <0x10400000 0x8000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>, <&peric0_bus_bootclk>,
+				 <&peric0_ip_bootclk>;
+			clock-names = "oscclk", "dout_clkcmu_peric0_bus",
+				      "dout_clkcmu_peric0_ip";
+		};
+
 		pinctrl_peric0: pinctrl@10430000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x10430000 0x1000>;
@@ -216,7 +242,8 @@
 				     "samsung,exynos8895-uart";
 			reg = <0x10440000 0x100>;
 			interrupts = <GIC_SPI 397 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&uart_bootclk>, <&uart_bootclk>;
+			clocks = <&cmu_peric0 CLK_GOUT_PERIC0_UART_DBG_PCLK>,
+				 <&cmu_peric0 CLK_GOUT_PERIC0_UART_DBG_IPCLK>;
 			clock-names = "uart", "clk_uart_baud0";
 			pinctrl-0 = <&uart0_bus>;
 			pinctrl-names = "default";
@@ -228,6 +255,17 @@
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x10830000 0x1000>;
 			interrupts = <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		cmu_fsys0: clock-controller@11000000 {
+			compatible = "samsung,exynos9810-cmu-fsys0";
+			reg = <0x11000000 0x8000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>, <&fsys0_bus_bootclk>,
+				 <&fsys0_ufs_bootclk>;
+			clock-names = "oscclk", "dout_clkcmu_fsys0_bus",
+				      "dout_clkcmu_fsys0_ufs_embd";
 		};
 
 		sysreg_fsys0: system-controller@11010000 {
@@ -249,7 +287,8 @@
 			      <0x11130000 0x100>;
 			reg-names = "hci", "vs_hci", "unipro", "ufsp";
 			interrupts = <GIC_SPI 242 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&ufs_bootclk>, <&ufs_bootclk>;
+			clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_ACLK>,
+				 <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_UNIPRO>;
 			clock-names = "core_clk", "sclk_unipro_main";
 			dma-coherent;
 			phys = <&ufs_phy>;
