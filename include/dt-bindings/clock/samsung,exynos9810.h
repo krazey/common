@@ -1,0 +1,26 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
+/*
+ * Copyright (C) 2026 Mathias Gluszczynski <admin@krazey.de>
+ *
+ * Device Tree binding constants for the Exynos9810 clock controller.
+ */
+
+#ifndef _DT_BINDINGS_CLOCK_SAMSUNG_EXYNOS9810_H
+#define _DT_BINDINGS_CLOCK_SAMSUNG_EXYNOS9810_H
+
+/* CMU_FSYS0 */
+#define CLK_MOUT_FSYS0_BUS_USER			1
+#define CLK_MOUT_FSYS0_UFS_EMBD_USER		2
+#define CLK_GOUT_FSYS0_UFS_EMBD_ACLK		3
+#define CLK_GOUT_FSYS0_UFS_EMBD_UNIPRO		4
+
+/* CMU_PERIC0 */
+#define CLK_MOUT_PERIC0_BUS_USER			1
+#define CLK_MOUT_PERIC0_IP_USER			2
+#define CLK_GOUT_PERIC0_UART_DBG			3
+#define CLK_DOUT_PERIC0_UART_DBG			4
+#define CLK_GOUT_PERIC0_UART_DBG_RST		5
+#define CLK_GOUT_PERIC0_UART_DBG_PCLK		6
+#define CLK_GOUT_PERIC0_UART_DBG_IPCLK		7
+
+#endif /* _DT_BINDINGS_CLOCK_SAMSUNG_EXYNOS9810_H */
