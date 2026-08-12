@@ -42,6 +42,57 @@
 #error PAGE_OFFSET must be at least 2MB aligned
 #endif
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	/*
+	 * Store a recovery-readable ramoops record without relying on the MMU,
+	 * device tree, console, or platform drivers. Skip the write if firmware
+	 * entered with address translation enabled because the physical pstore
+	 * address may not be present in its active translation tables.
+	 */
+	.macro	exynos9810_boot_marker stage
+	mrs	x9, CurrentEL
+	cmp	x9, #CurrentEL_EL1
+	b.eq	.Lexynos9810_el1\@
+	cmp	x9, #CurrentEL_EL2
+	b.ne	.Lexynos9810_done\@
+	mrs	x9, sctlr_el2
+	b	.Lexynos9810_check_mmu\@
+.Lexynos9810_el1\@:
+	mrs	x9, sctlr_el1
+.Lexynos9810_check_mmu\@:
+	tst	x9, #SCTLR_ELx_M
+	b.ne	.Lexynos9810_done\@
+
+	movz	x9, #0xfed1, lsl #16
+	movz	w10, #0x4244
+	movk	w10, #0x4347, lsl #16
+	str	w10, [x9]
+	str	wzr, [x9, #4]
+	mov	w10, #18
+	str	w10, [x9, #8]
+	movz	w10, #0x3d3d
+	movk	w10, #0x3d3d, lsl #16
+	str	w10, [x9, #12]
+	movz	w10, #0x2e30
+	movk	w10, #0x2d30, lsl #16
+	str	w10, [x9, #16]
+	movz	w10, #0x0a44
+	movk	w10, #0x3945, lsl #16
+	str	w10, [x9, #20]
+	movz	w10, #0x3138
+	movk	w10, #0x303a, lsl #16
+	str	w10, [x9, #24]
+	mov	w10, #\stage
+	str	w10, [x9, #28]
+	dc	cvac, x9
+	dsb	sy
+.Lexynos9810_done\@:
+	.endm
+#else
+	.macro	exynos9810_boot_marker stage
+	.endm
+#endif
+
 /*
  * Kernel startup entry point.
  * ---------------------------
@@ -83,8 +134,14 @@
 	 *  x21        primary_entry() .. start_kernel()        FDT pointer passed at boot in x0
 	 */
 SYM_CODE_START(primary_entry)
+	/* 01: branch from the Image header reached primary_entry. */
+	exynos9810_boot_marker 0x0a31
 	bl	record_mmu_state
+	/* 02: the firmware MMU state was captured. */
+	exynos9810_boot_marker 0x0a32
 	bl	preserve_boot_args
+	/* 03: the firmware boot arguments were saved. */
+	exynos9810_boot_marker 0x0a33
 
 	adrp	x1, early_init_stack
 	mov	sp, x1
@@ -92,6 +149,8 @@ SYM_CODE_START(primary_entry)
 	adrp	x0, __pi_init_idmap_pg_dir
 	mov	x1, xzr
 	bl	__pi_create_init_idmap
+	/* 04: the initial identity map was built. */
+	exynos9810_boot_marker 0x0a34
 
 	/*
 	 * If the page tables have been populated with non-cacheable
@@ -119,6 +178,8 @@ SYM_CODE_START(primary_entry)
 1:	mov	x0, x19
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	mov	x20, x0
+	/* 05: the exception level was initialized with the MMU disabled. */
+	exynos9810_boot_marker 0x0a35
 
 	/*
 	 * The following calls CPU setup code, see arch/arm64/mm/proc.S for
@@ -127,6 +188,8 @@ SYM_CODE_START(primary_entry)
 	 * the TCR will have been set.
 	 */
 	bl	__cpu_setup			// initialise processor
+	/* 06: the boot CPU is ready to enable its initial MMU mapping. */
+	exynos9810_boot_marker 0x0a36
 	b	__primary_switch
 SYM_CODE_END(primary_entry)
 
@@ -506,6 +569,8 @@ SYM_FUNC_START_LOCAL(__no_granule_support)
 SYM_FUNC_END(__no_granule_support)
 
 SYM_FUNC_START_LOCAL(__primary_switch)
+	/* 07: execution reached the final pre-MMU switch. */
+	exynos9810_boot_marker 0x0a37
 	adrp	x1, reserved_pg_dir
 	adrp	x2, __pi_init_idmap_pg_dir
 	bl	__enable_mmu
