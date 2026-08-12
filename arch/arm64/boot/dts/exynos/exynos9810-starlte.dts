@@ -83,8 +83,33 @@
 		#size-cells = <1>;
 		ranges;
 
+		memory@80000000 {
+			reg = <0x0 0x80000000 0x1000>;
+			no-map;
+		};
+
+		memory@91300000 {
+			reg = <0x0 0x91300000 0x1000>;
+			no-map;
+		};
+
+		memory@c0000000 {
+			reg = <0x0 0xc0000000 0x80000>;
+			no-map;
+		};
+
 		framebuffer@cc000000 {
 			reg = <0x0 0xcc000000 (1440 * 2960 * 4)>;
+			no-map;
+		};
+
+		memory@e1900000 {
+			reg = <0x0 0xe1900000 0x1e00000>;
+			no-map;
+		};
+
+		memory@f0000000 {
+			reg = <0x0 0xf0000000 0xed10000>;
 			no-map;
 		};
 
@@ -93,6 +118,11 @@
 			reg = <0x0 0xfed10000 0x8000>;
 			console-size = <0x4000>;
 			pmsg-size = <0x4000>;
+		};
+
+		memory@fed18000 {
+			reg = <0x0 0xfed18000 0x12e8000>;
+			no-map;
 		};
 	};
 
