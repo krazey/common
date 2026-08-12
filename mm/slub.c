@@ -51,6 +51,13 @@
 #include <linux/debugfs.h>
 #include <trace/events/kmem.h>
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#else
+#define exynos9810_cache_marker(name, first, second) \
+	((void)(name), (void)(first), (void)(second))
+#endif
+
 #include "internal.h"
 
 /*
@@ -8661,6 +8668,8 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 {
 	int err = -EINVAL;
 
+	exynos9810_cache_marker(name, 'F', '0');
+
 	s->name = name;
 	s->size = s->object_size = size;
 
@@ -8674,6 +8683,7 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 	s->useroffset = args->useroffset;
 	s->usersize = args->usersize;
 #endif
+	exynos9810_cache_marker(name, 'F', '1');
 
 	if (!calculate_sizes(args, s))
 		goto out;
@@ -8689,6 +8699,7 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 				goto out;
 		}
 	}
+	exynos9810_cache_marker(name, 'F', '2');
 
 #ifdef system_has_freelist_aba
 	if (system_has_freelist_aba() && !(s->flags & SLAB_NO_CMPXCHG)) {
@@ -8709,6 +8720,7 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 		err = -ENOMEM;
 		goto out;
 	}
+	exynos9810_cache_marker(name, 'F', '3');
 
 #ifdef CONFIG_NUMA
 	s->remote_node_defrag_ratio = 1000;
@@ -8719,9 +8731,11 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 		if (init_cache_random_seq(s))
 			goto out;
 	}
+	exynos9810_cache_marker(name, 'F', '4');
 
 	if (!init_kmem_cache_nodes(s))
 		goto out;
+	exynos9810_cache_marker(name, 'F', '5');
 
 #ifdef CONFIG_SLUB_STATS
 	if (!alloc_kmem_cache_stats(s))
@@ -8731,6 +8745,7 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 	err = init_percpu_sheaves(s);
 	if (err)
 		goto out;
+	exynos9810_cache_marker(name, 'F', '6');
 
 	err = 0;
 
@@ -8749,6 +8764,7 @@ int do_kmem_cache_create(struct kmem_cache *s, const char *name,
 		debugfs_slab_add(s);
 
 out:
+	exynos9810_cache_marker(name, 'F', '7');
 	if (err)
 		__kmem_cache_release(s);
 	return err;

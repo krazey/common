@@ -10,6 +10,13 @@
 #include <linux/slab.h>
 #include <linux/user_namespace.h>
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#else
+#define exynos9810_boot_marker(first, second) \
+	((void)(first), (void)(second))
+#endif
+
 static struct kmem_cache *task_exec_state_cachep;
 
 static void __free_task_exec_state(struct rcu_head *rcu)
@@ -112,8 +119,10 @@ enum task_dumpable task_exec_state_get_dumpable(struct task_struct *task)
 
 void __init exec_state_init(void)
 {
+	exynos9810_boot_marker('E', '0');
 	task_exec_state_cachep = kmem_cache_create("task_exec_state",
 			sizeof(struct task_exec_state), 0,
 			SLAB_HWCACHE_ALIGN | SLAB_PANIC | SLAB_ACCOUNT,
 			NULL);
+	exynos9810_boot_marker('F', 'C');
 }

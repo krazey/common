@@ -30,6 +30,13 @@
 #include <linux/stackdepot.h>
 #include <trace/events/rcu.h>
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#else
+#define exynos9810_cache_marker(name, first, second) \
+	((void)(name), (void)(first), (void)(second))
+#endif
+
 #include "../kernel/rcu/rcu.h"
 #include "internal.h"
 #include "slab.h"
@@ -237,6 +244,8 @@ static struct kmem_cache *create_cache(const char *name,
 	struct kmem_cache *s;
 	int err;
 
+	exynos9810_cache_marker(name, 'E', 'D');
+
 	/* If a custom freelist pointer is requested make sure it's sane. */
 	err = -EINVAL;
 	if (args->use_freeptr_offset &&
@@ -249,12 +258,17 @@ static struct kmem_cache *create_cache(const char *name,
 	s = kmem_cache_zalloc(kmem_cache, GFP_KERNEL);
 	if (!s)
 		goto out;
+	exynos9810_cache_marker(name, 'E', 'E');
+
+	exynos9810_cache_marker(name, 'E', 'F');
 	err = do_kmem_cache_create(s, name, object_size, args, flags);
+	exynos9810_cache_marker(name, 'F', '8');
 	if (err)
 		goto out_free_cache;
 
 	s->refcount = 1;
 	list_add(&s->list, &slab_caches);
+	exynos9810_cache_marker(name, 'F', '9');
 	return s;
 
 out_free_cache:
@@ -269,11 +283,15 @@ __kmem_cache_alias(const char *name, unsigned int size, slab_flags_t flags,
 {
 	struct kmem_cache *s;
 
+	exynos9810_cache_marker(name, 'E', '5');
 	s = find_mergeable(size, flags, name, args);
+	exynos9810_cache_marker(name, 'E', '6');
 	if (s) {
+		exynos9810_cache_marker(name, 'E', '7');
 		if (sysfs_slab_alias(s, name))
 			pr_err("SLUB: Unable to add cache alias %s to sysfs\n",
 			       name);
+		exynos9810_cache_marker(name, 'E', '8');
 
 		s->refcount++;
 
@@ -283,6 +301,7 @@ __kmem_cache_alias(const char *name, unsigned int size, slab_flags_t flags,
 		 */
 		s->object_size = max(s->object_size, size);
 		s->inuse = max(s->inuse, ALIGN(size, sizeof(void *)));
+		exynos9810_cache_marker(name, 'E', '9');
 	}
 
 	return s;
@@ -324,6 +343,8 @@ struct kmem_cache *__kmem_cache_create_args(const char *name,
 	const char *cache_name;
 	int err;
 
+	exynos9810_cache_marker(name, 'E', '1');
+
 #ifdef CONFIG_SLUB_DEBUG
 	/*
 	 * If no slab_debug was enabled globally, the static key is not yet
@@ -347,7 +368,9 @@ struct kmem_cache *__kmem_cache_create_args(const char *name,
 	if (args->sheaf_capacity)
 		flags |= SLAB_NO_MERGE;
 
+	exynos9810_cache_marker(name, 'E', '2');
 	mutex_lock(&slab_mutex);
+	exynos9810_cache_marker(name, 'E', '3');
 
 	err = kmem_cache_sanity_check(name, object_size);
 	if (err) {
@@ -366,7 +389,9 @@ struct kmem_cache *__kmem_cache_create_args(const char *name,
 		    object_size - args->usersize < args->useroffset))
 		args->usersize = args->useroffset = 0;
 
+	exynos9810_cache_marker(name, 'E', '4');
 	s = __kmem_cache_alias(name, object_size, flags, args);
+	exynos9810_cache_marker(name, 'E', 'A');
 	if (s)
 		goto out_unlock;
 
@@ -375,9 +400,12 @@ struct kmem_cache *__kmem_cache_create_args(const char *name,
 		err = -ENOMEM;
 		goto out_unlock;
 	}
+	exynos9810_cache_marker(name, 'E', 'B');
 
 	args->align = calculate_alignment(flags, args->align, object_size);
+	exynos9810_cache_marker(name, 'E', 'C');
 	s = create_cache(cache_name, object_size, args, flags);
+	exynos9810_cache_marker(name, 'F', 'A');
 	if (IS_ERR(s)) {
 		err = PTR_ERR(s);
 		kfree_const(cache_name);
@@ -385,6 +413,7 @@ struct kmem_cache *__kmem_cache_create_args(const char *name,
 
 out_unlock:
 	mutex_unlock(&slab_mutex);
+	exynos9810_cache_marker(name, 'F', 'B');
 
 	if (err) {
 		if (flags & SLAB_PANIC)

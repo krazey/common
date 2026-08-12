@@ -33,6 +33,7 @@
 #include <linux/sched/task.h>
 #include <linux/scs.h>
 #include <linux/mm.h>
+#include <linux/string.h>
 
 #include <asm/acpi.h>
 #include <asm/fixmap.h>
@@ -93,10 +94,10 @@ u64 __cacheline_aligned boot_args[4];
 #define EXYNOS9810_MARKER_SIZE	18
 #define EXYNOS9810_RAM_SIG	0x43474244
 
-static u32 *exynos9810_marker_base __initdata =
+static u32 *exynos9810_marker_base =
 	(u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS;
 
-void __init __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
+void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 {
 	u32 *record = exynos9810_marker_base;
 	u8 *bytes;
@@ -120,6 +121,17 @@ void __init __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 	WRITE_ONCE(record[2], EXYNOS9810_MARKER_SIZE);
 	dcache_clean_poc((unsigned long)record,
 			 (unsigned long)record + 32);
+}
+
+void __no_sanitize_address exynos9810_early_cache_marker(const char *name,
+							 u16 stage)
+{
+	if (!READ_ONCE(exynos9810_marker_base))
+		return;
+	if (strcmp(name, "task_exec_state"))
+		return;
+
+	exynos9810_early_boot_marker(stage);
 }
 
 void __init exynos9810_early_boot_marker_map(void)
