@@ -12,8 +12,14 @@
 #include <asm/kprobes.h>
 #include <asm/text-patching.h>
 #include <asm/sections.h>
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#endif
 
 static DEFINE_RAW_SPINLOCK(patch_lock);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static bool patch_direct;
+#endif
 
 static bool is_exit_text(unsigned long addr)
 {
@@ -32,6 +38,18 @@ static void __kprobes *patch_map(void *addr, int fixmap)
 {
 	phys_addr_t phys;
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('T', '0');
+	/* Keep diagnostic core-image writes off the text-poke fixmap. */
+	if (is_image_text((unsigned long)addr) ||
+	    is_kernel_rodata((unsigned long)addr)) {
+		patch_direct = true;
+		exynos9810_boot_marker('T', '1');
+		return lm_alias(addr);
+	}
+	patch_direct = false;
+#endif
+
 	if (is_image_text((unsigned long)addr)) {
 		phys = __pa_symbol(addr);
 	} else {
@@ -45,6 +63,13 @@ static void __kprobes *patch_map(void *addr, int fixmap)
 
 static void __kprobes patch_unmap(int fixmap)
 {
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (patch_direct) {
+		patch_direct = false;
+		return;
+	}
+#endif
+
 	clear_fixmap(fixmap);
 }
 /*

@@ -447,7 +447,9 @@ void __init smp_cpus_done(unsigned int max_cpus)
 	hyp_mode_check();
 	setup_system_features();
 	setup_user_features();
-	mark_linear_text_alias_ro();
+	/* The diagnostic text-poke path still uses the writable alias. */
+	if (!IS_ENABLED(CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS))
+		mark_linear_text_alias_ro();
 }
 
 void __init smp_prepare_boot_cpu(void)
