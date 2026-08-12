@@ -36,6 +36,13 @@
 #include "mount.h"
 
 #include <asm/runtime-const.h>
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#define exynos9810_vfs_cache_marker(stage) \
+	exynos9810_boot_marker('V', (stage))
+#else
+#define exynos9810_vfs_cache_marker(stage) ((void)(stage))
+#endif
 
 /*
  * Usage:
@@ -3509,12 +3516,21 @@ void __init vfs_caches_init_early(void)
 
 void __init vfs_caches_init(void)
 {
+	exynos9810_vfs_cache_marker('0');
 	filename_init();
+	exynos9810_vfs_cache_marker('1');
 	dcache_init();
+	exynos9810_vfs_cache_marker('2');
 	inode_init();
+	exynos9810_vfs_cache_marker('3');
 	files_init();
+	exynos9810_vfs_cache_marker('4');
 	files_maxfiles_init();
+	exynos9810_vfs_cache_marker('5');
 	mnt_init();
+	exynos9810_vfs_cache_marker('6');
 	bdev_cache_init();
+	exynos9810_vfs_cache_marker('7');
 	chrdev_init();
+	exynos9810_vfs_cache_marker('8');
 }
