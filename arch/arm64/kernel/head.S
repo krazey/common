@@ -49,20 +49,7 @@
 	 * entered with address translation enabled because the physical pstore
 	 * address may not be present in its active translation tables.
 	 */
-	.macro	exynos9810_boot_marker stage
-	mrs	x9, CurrentEL
-	cmp	x9, #CurrentEL_EL1
-	b.eq	.Lexynos9810_el1\@
-	cmp	x9, #CurrentEL_EL2
-	b.ne	.Lexynos9810_done\@
-	mrs	x9, sctlr_el2
-	b	.Lexynos9810_check_mmu\@
-.Lexynos9810_el1\@:
-	mrs	x9, sctlr_el1
-.Lexynos9810_check_mmu\@:
-	tst	x9, #SCTLR_ELx_M
-	b.ne	.Lexynos9810_done\@
-
+	.macro	exynos9810_store_boot_marker stage
 	movz	x9, #0xfed1, lsl #16
 	movz	w10, #0x4244
 	movk	w10, #0x4347, lsl #16
@@ -86,10 +73,33 @@
 	str	w10, [x9, #28]
 	dc	cvac, x9
 	dsb	sy
+	.endm
+
+	.macro	exynos9810_boot_marker stage
+	mrs	x9, CurrentEL
+	cmp	x9, #CurrentEL_EL1
+	b.eq	.Lexynos9810_el1\@
+	cmp	x9, #CurrentEL_EL2
+	b.ne	.Lexynos9810_done\@
+	mrs	x9, sctlr_el2
+	b	.Lexynos9810_check_mmu\@
+.Lexynos9810_el1\@:
+	mrs	x9, sctlr_el1
+.Lexynos9810_check_mmu\@:
+	tst	x9, #SCTLR_ELx_M
+	b.ne	.Lexynos9810_done\@
+	exynos9810_store_boot_marker \stage
 .Lexynos9810_done\@:
+	.endm
+
+	.macro	exynos9810_idmap_boot_marker stage
+	exynos9810_store_boot_marker \stage
 	.endm
 #else
 	.macro	exynos9810_boot_marker stage
+	.endm
+
+	.macro	exynos9810_idmap_boot_marker stage
 	.endm
 #endif
 
@@ -281,6 +291,8 @@ SYM_CODE_END(preserve_boot_args)
  *   x0 = __pa(KERNEL_START)
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
+	/* 0E: execution reached the high kernel mapping. */
+	exynos9810_idmap_boot_marker 0x0a45
 	adr_l	x4, init_task
 	init_cpu_task x4, x5, x6
 
@@ -305,6 +317,8 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 #endif
 	mov	x0, x20
 	bl	finalise_el2			// Prefer VHE if possible
+	/* 0F: the kernel is ready to enter start_kernel. */
+	exynos9810_idmap_boot_marker 0x0a46
 	ldp	x29, x30, [sp], #16
 	bl	start_kernel
 	ASM_BUG()
@@ -520,17 +534,27 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
  */
 	.section ".idmap.text","a"
 SYM_FUNC_START(__enable_mmu)
+	/* 08: execution entered the MMU enable routine. */
+	exynos9810_idmap_boot_marker 0x0a38
 	mrs	x3, ID_AA64MMFR0_EL1
 	ubfx	x3, x3, #ID_AA64MMFR0_EL1_TGRAN_SHIFT, 4
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MIN
 	b.lt    __no_granule_support
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MAX
 	b.gt    __no_granule_support
+	/* 09: the CPU supports the configured translation granule. */
+	exynos9810_idmap_boot_marker 0x0a39
 	phys_to_ttbr x2, x2
 	msr	ttbr0_el1, x2			// load TTBR0
+	/* 0A: the initial identity map was installed in TTBR0. */
+	exynos9810_idmap_boot_marker 0x0a41
 	load_ttbr1 x1, x1, x3
+	/* 0B: the reserved kernel map was installed in TTBR1. */
+	exynos9810_idmap_boot_marker 0x0a42
 
 	set_sctlr_el1	x0
+	/* 0C: address translation was enabled successfully. */
+	exynos9810_idmap_boot_marker 0x0a43
 
 	ret
 SYM_FUNC_END(__enable_mmu)
@@ -581,6 +605,8 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 	mov	x0, x20				// pass the full boot status
 	mov	x1, x21				// pass the FDT
 	bl	__pi_early_map_kernel		// Map and relocate the kernel
+	/* 0D: the early virtual kernel mapping was created. */
+	exynos9810_idmap_boot_marker 0x0a44
 
 	ldr	x8, =__primary_switched
 	adrp	x0, KERNEL_START		// __pa(KERNEL_START)
