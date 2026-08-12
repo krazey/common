@@ -118,6 +118,14 @@
 #include <asm/cacheflush.h>
 #include <asm/tlbflush.h>
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#define exynos9810_proc_cache_marker(stage) \
+	exynos9810_boot_marker('D', (stage))
+#else
+#define exynos9810_proc_cache_marker(stage) ((void)(stage))
+#endif
+
 /* For dup_mmap(). */
 #include "../mm/internal.h"
 
@@ -3128,25 +3136,33 @@ void __init mm_cache_init(void)
 
 void __init proc_caches_init(void)
 {
+	exynos9810_proc_cache_marker('0');
 	sighand_cachep = kmem_cache_create("sighand_cache",
 			sizeof(struct sighand_struct), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_TYPESAFE_BY_RCU|
 			SLAB_ACCOUNT, sighand_ctor);
+	exynos9810_proc_cache_marker('1');
 	signal_cachep = kmem_cache_create("signal_cache",
 			sizeof(struct signal_struct), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
 			NULL);
+	exynos9810_proc_cache_marker('2');
 	exec_state_init();
+	exynos9810_proc_cache_marker('3');
 	files_cachep = kmem_cache_create("files_cache",
 			sizeof(struct files_struct), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
 			NULL);
+	exynos9810_proc_cache_marker('4');
 	fs_cachep = kmem_cache_create("fs_cache",
 			sizeof(struct fs_struct), 0,
 			SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT,
 			NULL);
+	exynos9810_proc_cache_marker('5');
 	mmap_init();
+	exynos9810_proc_cache_marker('6');
 	nsproxy_cache_init();
+	exynos9810_proc_cache_marker('7');
 }
 
 /*
