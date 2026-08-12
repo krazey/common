@@ -154,8 +154,8 @@ config EXYNOS9810_EARLY_BOOT_MARKERS
 	  Write progress markers to the Exynos9810 persistent RAM area while
 	  the primary CPU is starting. Recovery can read the last marker when
 	  the kernel stops before the normal console is available. The marker
-	  path does not depend on the MMU, device tree, console, or platform
-	  drivers.
+	  path does not depend on normal virtual mappings, device tree parsing,
+	  the console, or platform drivers.
 
 config ARCH_K3
 	bool "Texas Instruments Inc. K3 multicore SoC architecture"
