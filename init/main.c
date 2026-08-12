@@ -114,6 +114,12 @@
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
 
+#ifndef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define exynos9810_boot_marker(first, second) \
+	do { (void)(first); (void)(second); } while (0)
+#define exynos9810_early_boot_marker_release() do { } while (0)
+#endif
+
 #define CREATE_TRACE_POINTS
 #include <trace/events/initcall.h>
 
@@ -673,6 +679,7 @@ static noinline void __ref __noreturn rest_init(void)
 	struct task_struct *tsk;
 	int pid;
 
+	exynos9810_boot_marker('4', '0');
 	rcu_scheduler_starting();
 	/*
 	 * We need to spawn init first so that it obtains pid 1, however
@@ -680,6 +687,7 @@ static noinline void __ref __noreturn rest_init(void)
 	 * we schedule it before we create kthreadd, will OOPS.
 	 */
 	pid = user_mode_thread(kernel_init, NULL, CLONE_FS);
+	exynos9810_boot_marker('4', '1');
 	/*
 	 * Pin init on the boot CPU. Task migration is not properly working
 	 * until sched_init_smp() has been run. It will set the allowed
@@ -696,6 +704,7 @@ static noinline void __ref __noreturn rest_init(void)
 	rcu_read_lock();
 	kthreadd_task = find_task_by_pid_ns(pid, &init_pid_ns);
 	rcu_read_unlock();
+	exynos9810_boot_marker('4', '2');
 
 	/*
 	 * Enable might_sleep() and smp_processor_id() checks.
@@ -707,6 +716,7 @@ static noinline void __ref __noreturn rest_init(void)
 	system_state = SYSTEM_SCHEDULING;
 
 	complete(&kthreadd_done);
+	exynos9810_boot_marker('4', '3');
 
 	/*
 	 * The boot idle thread must execute schedule()
@@ -974,12 +984,17 @@ void start_kernel(void)
 	char *command_line;
 	char *after_dashes;
 
+	exynos9810_boot_marker('1', '0');
 	set_task_stack_end_magic(&init_task);
+	exynos9810_boot_marker('1', '1');
 	smp_setup_processor_id();
+	exynos9810_boot_marker('1', '2');
 	debug_objects_early_init();
 	init_vmlinux_build_id();
+	exynos9810_boot_marker('1', '3');
 
 	cgroup_init_early();
+	exynos9810_boot_marker('1', '4');
 
 	local_irq_disable();
 	early_boot_irqs_disabled = true;
@@ -990,8 +1005,11 @@ void start_kernel(void)
 	 */
 	boot_cpu_init();
 	page_address_init();
+	exynos9810_boot_marker('1', '5');
 	pr_notice("%s", linux_banner);
+	exynos9810_boot_marker('1', '6');
 	setup_arch(&command_line);
+	exynos9810_boot_marker('3', '0');
 	mm_core_init_early();
 	/* Static keys and static calls are needed by LSMs */
 	jump_label_init();
@@ -1004,6 +1022,7 @@ void start_kernel(void)
 	smp_prepare_boot_cpu();	/* arch-specific boot-cpu hooks */
 	early_numa_node_init();
 	boot_cpu_hotplug_init();
+	exynos9810_boot_marker('3', '1');
 
 	print_kernel_cmdline(saved_command_line);
 	/* parameters may set static keys */
@@ -1019,6 +1038,7 @@ void start_kernel(void)
 	if (extra_init_args)
 		parse_args("Setting extra init args", extra_init_args,
 			   NULL, 0, -1, -1, NULL, set_init_arg);
+	exynos9810_boot_marker('3', '2');
 
 	/* Architectural and non-timekeeping rng init, before allocator init */
 	random_init_early(command_line);
@@ -1035,6 +1055,7 @@ void start_kernel(void)
 	maple_tree_init();
 	poking_init();
 	ftrace_init();
+	exynos9810_boot_marker('3', '3');
 
 	/* trace_printk can be enabled here */
 	early_trace_init();
@@ -1045,6 +1066,7 @@ void start_kernel(void)
 	 * time - but meanwhile we still have a functioning scheduler.
 	 */
 	sched_init();
+	exynos9810_boot_marker('3', '4');
 
 	if (WARN(!irqs_disabled(),
 		 "Interrupts were enabled *very* early, fixing it\n"))
@@ -1072,6 +1094,7 @@ void start_kernel(void)
 
 	if (initcall_debug)
 		initcall_debug_enable();
+	exynos9810_boot_marker('3', '5');
 
 	context_tracking_init();
 	/* init some links before init_ISA_irqs() */
@@ -1086,6 +1109,7 @@ void start_kernel(void)
 	vdso_setup_data_pages();
 	timekeeping_init();
 	time_init();
+	exynos9810_boot_marker('3', '6');
 
 	/* This must be after timekeeping is initialized */
 	random_init();
@@ -1098,9 +1122,11 @@ void start_kernel(void)
 	profile_init();
 	call_function_init();
 	WARN(!irqs_disabled(), "Interrupts were enabled early\n");
+	exynos9810_boot_marker('3', '7');
 
 	early_boot_irqs_disabled = false;
 	local_irq_enable();
+	exynos9810_boot_marker('3', '8');
 
 	kmem_cache_init_late();
 
@@ -1110,6 +1136,7 @@ void start_kernel(void)
 	 * this. But we do want output early, in case something goes wrong.
 	 */
 	console_init();
+	exynos9810_boot_marker('3', '9');
 	if (panic_later)
 		panic("Too many boot %s vars at `%s'", panic_later,
 		      panic_param);
@@ -1122,6 +1149,7 @@ void start_kernel(void)
 	 * too:
 	 */
 	locking_selftest();
+	exynos9810_boot_marker('3', 'A');
 
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start && !initrd_below_start_ok &&
@@ -1141,6 +1169,7 @@ void start_kernel(void)
 	calibrate_delay();
 
 	arch_cpu_finalize_init();
+	exynos9810_boot_marker('3', 'B');
 
 	pid_idr_init();
 	anon_vma_init();
@@ -1170,6 +1199,7 @@ void start_kernel(void)
 	acpi_subsystem_init();
 	arch_post_acpi_subsys_init();
 	kcsan_init();
+	exynos9810_boot_marker('3', 'C');
 
 	/* Do the rest non-__init'ed, we're now alive */
 	rest_init();
@@ -1398,6 +1428,11 @@ static void __init do_initcall_level(int level, char *command_line)
 {
 	initcall_entry_t *fn;
 
+	if (level < 3)
+		exynos9810_boot_marker('5', '0' + level);
+	if (level == 2)
+		exynos9810_early_boot_marker_release();
+
 	parse_args(initcall_level_names[level],
 		   command_line, __start___param,
 		   __stop___param - __start___param,
@@ -1442,6 +1477,7 @@ static void __init do_basic_setup(void)
 	driver_init();
 	init_irq_proc();
 	do_ctors();
+	exynos9810_boot_marker('4', 'C');
 	do_initcalls();
 }
 
@@ -1544,6 +1580,7 @@ static int __ref kernel_init(void *unused)
 	 * Wait until kthreadd is all set-up.
 	 */
 	wait_for_completion(&kthreadd_done);
+	exynos9810_boot_marker('4', '4');
 
 	kernel_init_freeable();
 	/* need to finish all async __init code before freeing the memory */
@@ -1628,6 +1665,8 @@ void __init console_on_rootfs(void)
 
 static noinline void __init kernel_init_freeable(void)
 {
+	exynos9810_boot_marker('4', '5');
+
 	/* Now the scheduler is fully set up and can do blocking allocations */
 	gfp_allowed_mask = __GFP_BITS_MASK;
 
@@ -1639,21 +1678,26 @@ static noinline void __init kernel_init_freeable(void)
 	cad_pid = get_pid(task_pid(current));
 
 	smp_prepare_cpus(setup_max_cpus);
+	exynos9810_boot_marker('4', '6');
 
 	workqueue_init();
+	exynos9810_boot_marker('4', '7');
 
 	init_mm_internals();
-
+	exynos9810_boot_marker('4', '8');
 	do_pre_smp_initcalls();
 	lockup_detector_init();
+	exynos9810_boot_marker('4', '9');
 
 	smp_init();
 	sched_init_smp();
+	exynos9810_boot_marker('4', 'A');
 
 	workqueue_init_topology();
 	async_init();
 	padata_init();
 	page_alloc_init_late();
+	exynos9810_boot_marker('4', 'B');
 
 	do_basic_setup();
 

@@ -67,10 +67,14 @@
 	movk	w10, #0x3945, lsl #16
 	str	w10, [x9, #20]
 	movz	w10, #0x3138
-	movk	w10, #0x303a, lsl #16
+	movk	w10, #0x003a, lsl #16
 	str	w10, [x9, #24]
 	mov	w10, #\stage
-	str	w10, [x9, #28]
+	strb	w10, [x9, #27]
+	lsr	w10, w10, #8
+	strb	w10, [x9, #28]
+	mov	w10, #0x0a
+	strb	w10, [x9, #29]
 	dc	cvac, x9
 	dsb	sy
 	.endm
@@ -145,13 +149,13 @@
 	 */
 SYM_CODE_START(primary_entry)
 	/* 01: branch from the Image header reached primary_entry. */
-	exynos9810_boot_marker 0x0a31
+	exynos9810_boot_marker 0x3130
 	bl	record_mmu_state
 	/* 02: the firmware MMU state was captured. */
-	exynos9810_boot_marker 0x0a32
+	exynos9810_boot_marker 0x3230
 	bl	preserve_boot_args
 	/* 03: the firmware boot arguments were saved. */
-	exynos9810_boot_marker 0x0a33
+	exynos9810_boot_marker 0x3330
 
 	adrp	x1, early_init_stack
 	mov	sp, x1
@@ -160,7 +164,7 @@ SYM_CODE_START(primary_entry)
 	mov	x1, xzr
 	bl	__pi_create_init_idmap
 	/* 04: the initial identity map was built. */
-	exynos9810_boot_marker 0x0a34
+	exynos9810_boot_marker 0x3430
 
 	/*
 	 * If the page tables have been populated with non-cacheable
@@ -189,7 +193,7 @@ SYM_CODE_START(primary_entry)
 	bl	init_kernel_el			// w0=cpu_boot_mode
 	mov	x20, x0
 	/* 05: the exception level was initialized with the MMU disabled. */
-	exynos9810_boot_marker 0x0a35
+	exynos9810_boot_marker 0x3530
 
 	/*
 	 * The following calls CPU setup code, see arch/arm64/mm/proc.S for
@@ -199,7 +203,7 @@ SYM_CODE_START(primary_entry)
 	 */
 	bl	__cpu_setup			// initialise processor
 	/* 06: the boot CPU is ready to enable its initial MMU mapping. */
-	exynos9810_boot_marker 0x0a36
+	exynos9810_boot_marker 0x3630
 	b	__primary_switch
 SYM_CODE_END(primary_entry)
 
@@ -292,7 +296,7 @@ SYM_CODE_END(preserve_boot_args)
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
 	/* 0E: execution reached the high kernel mapping. */
-	exynos9810_idmap_boot_marker 0x0a45
+	exynos9810_idmap_boot_marker 0x4530
 	adr_l	x4, init_task
 	init_cpu_task x4, x5, x6
 
@@ -318,7 +322,7 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	mov	x0, x20
 	bl	finalise_el2			// Prefer VHE if possible
 	/* 0F: the kernel is ready to enter start_kernel. */
-	exynos9810_idmap_boot_marker 0x0a46
+	exynos9810_idmap_boot_marker 0x4630
 	ldp	x29, x30, [sp], #16
 	bl	start_kernel
 	ASM_BUG()
@@ -535,7 +539,7 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
 	.section ".idmap.text","a"
 SYM_FUNC_START(__enable_mmu)
 	/* 08: execution entered the MMU enable routine. */
-	exynos9810_idmap_boot_marker 0x0a38
+	exynos9810_idmap_boot_marker 0x3830
 	mrs	x3, ID_AA64MMFR0_EL1
 	ubfx	x3, x3, #ID_AA64MMFR0_EL1_TGRAN_SHIFT, 4
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MIN
@@ -543,18 +547,18 @@ SYM_FUNC_START(__enable_mmu)
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MAX
 	b.gt    __no_granule_support
 	/* 09: the CPU supports the configured translation granule. */
-	exynos9810_idmap_boot_marker 0x0a39
+	exynos9810_idmap_boot_marker 0x3930
 	phys_to_ttbr x2, x2
 	msr	ttbr0_el1, x2			// load TTBR0
 	/* 0A: the initial identity map was installed in TTBR0. */
-	exynos9810_idmap_boot_marker 0x0a41
+	exynos9810_idmap_boot_marker 0x4130
 	load_ttbr1 x1, x1, x3
 	/* 0B: the reserved kernel map was installed in TTBR1. */
-	exynos9810_idmap_boot_marker 0x0a42
+	exynos9810_idmap_boot_marker 0x4230
 
 	set_sctlr_el1	x0
 	/* 0C: address translation was enabled successfully. */
-	exynos9810_idmap_boot_marker 0x0a43
+	exynos9810_idmap_boot_marker 0x4330
 
 	ret
 SYM_FUNC_END(__enable_mmu)
@@ -594,7 +598,7 @@ SYM_FUNC_END(__no_granule_support)
 
 SYM_FUNC_START_LOCAL(__primary_switch)
 	/* 07: execution reached the final pre-MMU switch. */
-	exynos9810_boot_marker 0x0a37
+	exynos9810_boot_marker 0x3730
 	adrp	x1, reserved_pg_dir
 	adrp	x2, __pi_init_idmap_pg_dir
 	bl	__enable_mmu
@@ -606,7 +610,7 @@ SYM_FUNC_START_LOCAL(__primary_switch)
 	mov	x1, x21				// pass the FDT
 	bl	__pi_early_map_kernel		// Map and relocate the kernel
 	/* 0D: the early virtual kernel mapping was created. */
-	exynos9810_idmap_boot_marker 0x0a44
+	exynos9810_idmap_boot_marker 0x4430
 
 	ldr	x8, =__primary_switched
 	adrp	x0, KERNEL_START		// __pa(KERNEL_START)
