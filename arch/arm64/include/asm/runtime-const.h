@@ -6,6 +6,17 @@
   #error "Cannot use runtime-const infrastructure from modules"
 #endif
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+
+#define runtime_const_ptr(sym) (sym)
+#define runtime_const_shift_right_32(val, sym) ((u32)(val) >> (sym))
+#define runtime_const_init(type, sym) do { \
+	(void)sizeof(#type); \
+	(void)sizeof(sym); \
+} while (0)
+
+#else
+
 #include <asm/cacheflush.h>
 
 /* Sigh. You can still run arm64 in BE mode */
@@ -88,5 +99,7 @@ static inline void runtime_const_fixup(void (*fn)(void *, unsigned long),
 		start++;
 	}
 }
+
+#endif /* CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS */
 
 #endif
