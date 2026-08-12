@@ -10,6 +10,42 @@
 
 #include "lsm.h"
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+
+static char __init exynos9810_lsm_marker_nibble(unsigned int value)
+{
+	value &= 0xf;
+	return value < 10 ? '0' + value : 'A' + value - 10;
+}
+
+static void __init exynos9810_lsm_order_marker(char stage,
+					       unsigned int index)
+{
+	char marker = exynos9810_lsm_marker_nibble(index);
+
+	exynos9810_boot_marker(stage, marker);
+}
+
+static void __init exynos9810_lsm_hook_marker(char stage,
+					      const struct lsm_id *lsmid)
+{
+	u64 id = lsmid->id;
+	char marker = 'X';
+
+	if (id >= LSM_ID_CAPABILITY && id <= LSM_ID_IPE)
+		marker = exynos9810_lsm_marker_nibble(id - LSM_ID_CAPABILITY);
+	exynos9810_boot_marker(stage, marker);
+}
+#else
+#define exynos9810_boot_marker(first, second) \
+	((void)(first), (void)(second))
+#define exynos9810_lsm_order_marker(stage, index) \
+	((void)(stage), (void)(index))
+#define exynos9810_lsm_hook_marker(stage, lsmid) \
+	((void)(stage), (void)(lsmid))
+#endif
+
 /* LSM enabled constants. */
 static __initdata int lsm_enabled_true = 1;
 static __initdata int lsm_enabled_false = 0;
@@ -200,6 +236,8 @@ static void __init lsm_order_parse(const char *list, const char *src)
 	struct lsm_info *lsm;
 	char *sep, *name, *next;
 
+	exynos9810_boot_marker('P', '0');
+
 	/* Handle any Legacy LSM exclusions if one was specified. */
 	if (lsm_order_legacy) {
 		/*
@@ -217,16 +255,19 @@ static void __init lsm_order_parse(const char *list, const char *src)
 			}
 		}
 	}
+	exynos9810_boot_marker('P', '1');
 
 	/* LSM_ORDER_FIRST */
 	lsm_for_each_raw(lsm) {
 		if (lsm->order == LSM_ORDER_FIRST)
 			lsm_order_append(lsm, "first");
 	}
+	exynos9810_boot_marker('P', '2');
 
 	/* Normal or "mutable" LSMs */
 	sep = kstrdup(list, GFP_KERNEL);
 	next = sep;
+	exynos9810_boot_marker('P', '3');
 	/* Walk the list, looking for matching LSMs. */
 	while ((name = strsep(&next, ",")) != NULL) {
 		lsm_for_each_raw(lsm) {
@@ -236,6 +277,7 @@ static void __init lsm_order_parse(const char *list, const char *src)
 		}
 	}
 	kfree(sep);
+	exynos9810_boot_marker('P', '4');
 
 	/* Legacy LSM if specified. */
 	if (lsm_order_legacy) {
@@ -244,12 +286,14 @@ static void __init lsm_order_parse(const char *list, const char *src)
 				lsm_order_append(lsm, src);
 		}
 	}
+	exynos9810_boot_marker('P', '5');
 
 	/* LSM_ORDER_LAST */
 	lsm_for_each_raw(lsm) {
 		if (lsm->order == LSM_ORDER_LAST)
 			lsm_order_append(lsm, "last");
 	}
+	exynos9810_boot_marker('P', '6');
 
 	/* Disable all LSMs not previously enabled. */
 	lsm_for_each_raw(lsm) {
@@ -258,6 +302,7 @@ static void __init lsm_order_parse(const char *list, const char *src)
 		lsm_enabled_set(lsm, false);
 		lsm_pr_dbg("skip disabled LSM %s:%s\n", src, lsm->id->name);
 	}
+	exynos9810_boot_marker('P', '7');
 }
 
 /**
@@ -346,10 +391,14 @@ static int __init lsm_static_call_init(struct security_hook_list *hl)
 	for (i = 0; i < MAX_LSM_COUNT; i++) {
 		/* Update the first static call that is not used yet */
 		if (!scall->hl) {
+			exynos9810_lsm_hook_marker('K', hl->lsmid);
 			__static_call_update(scall->key, scall->trampoline,
 					     hl->hook.lsm_func_addr);
+			exynos9810_lsm_hook_marker('L', hl->lsmid);
 			scall->hl = hl;
+			exynos9810_lsm_hook_marker('M', hl->lsmid);
 			static_branch_enable(scall->active);
+			exynos9810_lsm_hook_marker('N', hl->lsmid);
 			return 0;
 		}
 		scall++;
@@ -371,12 +420,14 @@ void __init security_add_hooks(struct security_hook_list *hooks, int count,
 {
 	int i;
 
+	exynos9810_lsm_hook_marker('J', lsmid);
 	for (i = 0; i < count; i++) {
 		hooks[i].lsmid = lsmid;
 		if (lsm_static_call_init(&hooks[i]))
 			panic("exhausted LSM callback slots with LSM %s\n",
 			      lsmid->name);
 	}
+	exynos9810_lsm_hook_marker('O', lsmid);
 }
 
 /**
@@ -409,6 +460,8 @@ int __init security_init(void)
 	unsigned int cnt;
 	struct lsm_info **lsm;
 
+	exynos9810_boot_marker('G', '0');
+
 	if (lsm_debug) {
 		struct lsm_info *i;
 
@@ -429,6 +482,7 @@ int __init security_init(void)
 		lsm_early_for_each_raw(i)
 			lsm_pr("enabled LSM early:%s\n", i->id->name);
 	}
+	exynos9810_boot_marker('G', '1');
 
 	if (lsm_order_cmdline) {
 		if (lsm_order_legacy)
@@ -436,9 +490,16 @@ int __init security_init(void)
 		lsm_order_parse(lsm_order_cmdline, "cmdline");
 	} else
 		lsm_order_parse(lsm_order_builtin, "builtin");
+	exynos9810_boot_marker('G', '2');
 
-	lsm_order_for_each(lsm)
+	cnt = 0;
+	lsm_order_for_each(lsm) {
+		exynos9810_lsm_order_marker('Q', cnt);
 		lsm_prepare(*lsm);
+		exynos9810_lsm_order_marker('R', cnt);
+		cnt++;
+	}
+	exynos9810_boot_marker('G', '3');
 
 	if (lsm_debug) {
 		lsm_pr("blob(cred) size %d\n", blob_sizes.lbs_cred);
@@ -461,34 +522,46 @@ int __init security_init(void)
 		lsm_pr("blob(bpf_prog) size %d\n", blob_sizes.lbs_bpf_prog);
 		lsm_pr("blob(bpf_token) size %d\n", blob_sizes.lbs_bpf_token);
 	}
+	exynos9810_boot_marker('G', '4');
 
 	if (blob_sizes.lbs_file)
 		lsm_file_cache = kmem_cache_create("lsm_file_cache",
 						   blob_sizes.lbs_file, 0,
 						   SLAB_PANIC, NULL);
+	exynos9810_boot_marker('G', '5');
 	if (blob_sizes.lbs_backing_file)
 		lsm_backing_file_cache = kmem_cache_create(
 						   "lsm_backing_file_cache",
 						   blob_sizes.lbs_backing_file,
 						   0, SLAB_PANIC, NULL);
+	exynos9810_boot_marker('G', '6');
 	if (blob_sizes.lbs_inode)
 		lsm_inode_cache = kmem_cache_create("lsm_inode_cache",
 						    blob_sizes.lbs_inode, 0,
 						    SLAB_PANIC, NULL);
+	exynos9810_boot_marker('G', '7');
 
 	if (lsm_cred_alloc((struct cred *)unrcu_pointer(current->cred),
 			   GFP_KERNEL))
 		panic("early LSM cred alloc failed\n");
+	exynos9810_boot_marker('G', '8');
 	if (lsm_task_alloc(current))
 		panic("early LSM task alloc failed\n");
+	exynos9810_boot_marker('G', '9');
 
 	cnt = 0;
 	lsm_order_for_each(lsm) {
 		/* skip the "early" LSMs as they have already been setup */
-		if (cnt++ < lsm_count_early)
+		if (cnt < lsm_count_early) {
+			cnt++;
 			continue;
+		}
+		exynos9810_lsm_order_marker('H', cnt);
 		lsm_init_single(*lsm);
+		exynos9810_lsm_order_marker('I', cnt);
+		cnt++;
 	}
+	exynos9810_boot_marker('G', 'A');
 
 	return 0;
 }
