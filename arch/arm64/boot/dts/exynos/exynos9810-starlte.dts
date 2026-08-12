@@ -89,11 +89,6 @@
 			no-map;
 		};
 
-		memory@91300000 {
-			reg = <0x0 0x91300000 0x1000>;
-			no-map;
-		};
-
 		memory@c0000000 {
 			reg = <0x0 0xc0000000 0x80000>;
 			no-map;
