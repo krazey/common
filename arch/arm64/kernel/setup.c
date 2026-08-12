@@ -28,6 +28,7 @@
 #include <linux/memblock.h>
 #include <linux/of_fdt.h>
 #include <linux/efi.h>
+#include <linux/io.h>
 #include <linux/psci.h>
 #include <linux/sched/task.h>
 #include <linux/scs.h>
@@ -86,6 +87,60 @@ static struct resource mem_res[] = {
  * The recorded values of x0 .. x3 upon kernel entry.
  */
 u64 __cacheline_aligned boot_args[4];
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define EXYNOS9810_PSTORE_PHYS	0xfed10000
+#define EXYNOS9810_MARKER_SIZE	18
+#define EXYNOS9810_RAM_SIG	0x43474244
+
+static u32 *exynos9810_marker_base __initdata =
+	(u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS;
+
+void __init __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
+{
+	u32 *record = exynos9810_marker_base;
+	u8 *bytes;
+
+	if (!record)
+		return;
+
+	WRITE_ONCE(record[2], 0);
+	WRITE_ONCE(record[0], EXYNOS9810_RAM_SIG);
+	WRITE_ONCE(record[1], 0);
+	WRITE_ONCE(record[3], 0x3d3d3d3d);
+	WRITE_ONCE(record[4], 0x2d302e30);
+	WRITE_ONCE(record[5], 0x39450a44);
+	WRITE_ONCE(record[6], 0x003a3138);
+
+	bytes = (u8 *)record;
+	WRITE_ONCE(bytes[27], stage);
+	WRITE_ONCE(bytes[28], stage >> 8);
+	WRITE_ONCE(bytes[29], '\n');
+	barrier();
+	WRITE_ONCE(record[2], EXYNOS9810_MARKER_SIZE);
+	dcache_clean_poc((unsigned long)record,
+			 (unsigned long)record + 32);
+}
+
+void __init exynos9810_early_boot_marker_map(void)
+{
+	void *base;
+
+	base = early_memremap(EXYNOS9810_PSTORE_PHYS, PAGE_SIZE);
+	exynos9810_marker_base = base;
+}
+
+void __init exynos9810_early_boot_marker_release(void)
+{
+	u32 *base = exynos9810_marker_base;
+
+	exynos9810_marker_base = NULL;
+	if (!base || base == (u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS)
+		return;
+
+	early_memunmap(base, PAGE_SIZE);
+}
+#endif
 
 void __init smp_setup_processor_id(void)
 {
@@ -281,16 +336,36 @@ EXPORT_SYMBOL_GPL(cpu_logical_map);
 
 void __init __no_sanitize_address setup_arch(char **cmdline_p)
 {
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '0');
+#endif
 	setup_initial_init_mm(_text, _etext, _edata, _end);
 
 	*cmdline_p = boot_command_line;
 
 	kaslr_init();
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '1');
+#endif
+
 	early_fixmap_init();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '2');
+#endif
 	early_ioremap_init();
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_early_boot_marker_map();
+	exynos9810_boot_marker('2', '3');
+#endif
+
 	setup_machine_fdt(__fdt_pointer);
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '4');
+#endif
 
 	/*
 	 * Initialise the static keys early as they may be enabled by the
@@ -300,6 +375,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	parse_early_param();
 
 	dynamic_scs_init();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '5');
+#endif
 
 	/*
 	 * The primary CPU enters the kernel with all DAIF exceptions masked.
@@ -314,14 +393,26 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	 */
 	local_daif_restore(DAIF_PROCCTX_NOIRQ);
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '6');
+#endif
+
 	/*
 	 * TTBR0 is only used for the identity mapping at this stage. Make it
 	 * point to zero page to avoid speculatively fetching new entries.
 	 */
 	cpu_uninstall_idmap();
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '7');
+#endif
+
 	xen_early_init();
 	efi_init();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '8');
+#endif
 
 	if (!efi_enabled(EFI_BOOT)) {
 		if ((u64)_text % MIN_KIMG_ALIGN)
@@ -332,7 +423,15 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 
 	arm64_memblock_init();
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', '9');
+#endif
+
 	paging_init();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', 'A');
+#endif
 
 	acpi_table_upgrade();
 
@@ -342,13 +441,29 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	if (acpi_disabled)
 		unflatten_device_tree();
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', 'B');
+#endif
+
 	bootmem_init();
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', 'C');
+#endif
+
 	kasan_init();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', 'D');
+#endif
 
 	request_standard_resources();
 
 	early_ioremap_reset();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', 'E');
+#endif
 
 	if (acpi_disabled)
 		psci_dt_init();
@@ -360,6 +475,10 @@ void __init __no_sanitize_address setup_arch(char **cmdline_p)
 	init_bootcpu_ops();
 	smp_init_cpus();
 	smp_build_mpidr_hash();
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_boot_marker('2', 'F');
+#endif
 
 #ifdef CONFIG_ARM64_SW_TTBR0_PAN
 	/*
