@@ -15,11 +15,15 @@ extern u64 __cacheline_aligned boot_args[4];
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 void exynos9810_early_boot_marker(u16 stage);
+void exynos9810_early_cache_marker(const char *name, u16 stage);
 void exynos9810_early_boot_marker_map(void);
 void exynos9810_early_boot_marker_release(void);
 
 #define exynos9810_boot_marker(first, second) \
 	exynos9810_early_boot_marker((first) | ((second) << 8))
+
+#define exynos9810_cache_marker(name, first, second) \
+	exynos9810_early_cache_marker(name, (first) | ((second) << 8))
 #endif
 
 static inline bool arch_parse_debug_rodata(char *arg)
