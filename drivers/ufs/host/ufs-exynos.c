@@ -254,20 +254,21 @@ static int exynosauto_ufs_drv_init(struct exynos_ufs *ufs)
 	return exynos_ufs_shareability(ufs);
 }
 
-static void exynos9810_ufs_config_clocks(struct exynos_ufs *ufs)
+static __always_inline void exynos9810_ufs_config_clocks(struct exynos_ufs *ufs)
 {
+	void __iomem *base = ufs->reg_hci;
 	u32 reg;
 
-	reg = hci_readl(ufs, HCI_IOP_ACG_DISABLE);
-	hci_writel(ufs, reg & ~HCI_IOP_ACG_DISABLE_EN,
-		   HCI_IOP_ACG_DISABLE);
+	reg = __raw_readl(base + HCI_IOP_ACG_DISABLE);
+	__raw_writel(reg & ~HCI_IOP_ACG_DISABLE_EN,
+		     base + HCI_IOP_ACG_DISABLE);
 
-	reg = hci_readl(ufs, HCI_UFS_ACG_DISABLE);
-	hci_writel(ufs, reg | HCI_UFS_ACG_DISABLE_EN,
-		   HCI_UFS_ACG_DISABLE);
+	reg = __raw_readl(base + HCI_UFS_ACG_DISABLE);
+	__raw_writel(reg | HCI_UFS_ACG_DISABLE_EN,
+		     base + HCI_UFS_ACG_DISABLE);
 
-	reg = hci_readl(ufs, HCI_MISC);
-	hci_writel(ufs, reg | EXYNOS9810_CLK_CTRL_EN_MASK, HCI_MISC);
+	reg = __raw_readl(base + HCI_MISC);
+	__raw_writel(reg | EXYNOS9810_CLK_CTRL_EN_MASK, base + HCI_MISC);
 }
 
 static int exynos9810_ufs_drv_init(struct exynos_ufs *ufs)
