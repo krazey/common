@@ -91,36 +91,83 @@ u64 __cacheline_aligned boot_args[4];
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 #define EXYNOS9810_PSTORE_PHYS	0xfed10000
-#define EXYNOS9810_MARKER_SIZE	18
+#define EXYNOS9810_MARKER_HEADER_SIZE	10
+#define EXYNOS9810_MARKER_ENTRY_SIZE	8
+#define EXYNOS9810_MARKER_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
+#define EXYNOS9810_MARKER_BOOT_START	('0' | ('1' << 8))
 #define EXYNOS9810_RAM_SIG	0x43474244
 
 static u32 *exynos9810_marker_base =
 	(u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS;
 
-void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
+static bool exynos9810_marker_record_valid(u32 *record)
 {
-	u32 *record = exynos9810_marker_base;
-	u8 *bytes;
+	u8 *bytes = (u8 *)record;
+	u32 size = READ_ONCE(record[2]);
 
-	if (!record)
-		return;
+	if (READ_ONCE(record[0]) != EXYNOS9810_RAM_SIG ||
+	    READ_ONCE(record[1]) != 0)
+		return false;
+	if (size < EXYNOS9810_MARKER_HEADER_SIZE ||
+	    size > EXYNOS9810_MARKER_DATA_SIZE ||
+	    (size - EXYNOS9810_MARKER_HEADER_SIZE) %
+			EXYNOS9810_MARKER_ENTRY_SIZE)
+		return false;
+
+	return READ_ONCE(record[3]) == 0x3d3d3d3d &&
+	       READ_ONCE(record[4]) == 0x2d302e30 &&
+	       READ_ONCE(bytes[20]) == 'D' &&
+	       READ_ONCE(bytes[21]) == '\n';
+}
+
+static void exynos9810_marker_record_init(u32 *record)
+{
+	u8 *bytes = (u8 *)record;
 
 	WRITE_ONCE(record[2], 0);
 	WRITE_ONCE(record[0], EXYNOS9810_RAM_SIG);
 	WRITE_ONCE(record[1], 0);
 	WRITE_ONCE(record[3], 0x3d3d3d3d);
 	WRITE_ONCE(record[4], 0x2d302e30);
-	WRITE_ONCE(record[5], 0x39450a44);
-	WRITE_ONCE(record[6], 0x003a3138);
-
-	bytes = (u8 *)record;
-	WRITE_ONCE(bytes[27], stage);
-	WRITE_ONCE(bytes[28], stage >> 8);
-	WRITE_ONCE(bytes[29], '\n');
+	WRITE_ONCE(bytes[20], 'D');
+	WRITE_ONCE(bytes[21], '\n');
 	barrier();
-	WRITE_ONCE(record[2], EXYNOS9810_MARKER_SIZE);
+	WRITE_ONCE(record[2], EXYNOS9810_MARKER_HEADER_SIZE);
+}
+
+void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
+{
+	u32 *record = exynos9810_marker_base;
+	u8 *entry;
+	u32 size;
+
+	if (!record)
+		return;
+
+	if (stage == EXYNOS9810_MARKER_BOOT_START ||
+	    !exynos9810_marker_record_valid(record))
+		exynos9810_marker_record_init(record);
+
+	size = READ_ONCE(record[2]);
+	if (size > EXYNOS9810_MARKER_DATA_SIZE -
+		   EXYNOS9810_MARKER_ENTRY_SIZE)
+		return;
+
+	entry = (u8 *)&record[3] + size;
+	WRITE_ONCE(entry[0], 'E');
+	WRITE_ONCE(entry[1], '9');
+	WRITE_ONCE(entry[2], '8');
+	WRITE_ONCE(entry[3], '1');
+	WRITE_ONCE(entry[4], ':');
+	WRITE_ONCE(entry[5], stage);
+	WRITE_ONCE(entry[6], stage >> 8);
+	WRITE_ONCE(entry[7], '\n');
+	dcache_clean_poc((unsigned long)entry,
+			 (unsigned long)entry + EXYNOS9810_MARKER_ENTRY_SIZE);
+	barrier();
+	WRITE_ONCE(record[2], size + EXYNOS9810_MARKER_ENTRY_SIZE);
 	dcache_clean_poc((unsigned long)record,
-			 (unsigned long)record + 32);
+			 (unsigned long)&record[3]);
 }
 
 void __no_sanitize_address exynos9810_early_cache_marker(const char *name,
