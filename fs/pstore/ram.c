@@ -121,6 +121,42 @@ struct ramoops_context {
 	struct pstore_info pstore;
 };
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static void exynos9810_ramoops_marker(struct ramoops_context *cxt,
+				      char stage)
+{
+	char marker[] = "E981:R0\n";
+
+	if (!cxt->cprz)
+		return;
+
+	marker[6] = stage;
+	persistent_ram_write(cxt->cprz, marker, sizeof(marker) - 1);
+}
+
+static void exynos9810_ramoops_handoff(struct ramoops_context *cxt)
+{
+	void *old;
+	size_t size;
+
+	exynos9810_ramoops_marker(cxt, '0');
+	size = persistent_ram_old_size(cxt->cprz);
+	old = persistent_ram_old(cxt->cprz);
+	if (old && size)
+		persistent_ram_write(cxt->cprz, old, size);
+	exynos9810_ramoops_marker(cxt, '1');
+}
+#else
+static inline void exynos9810_ramoops_marker(struct ramoops_context *cxt,
+					     char stage)
+{
+}
+
+static inline void exynos9810_ramoops_handoff(struct ramoops_context *cxt)
+{
+}
+#endif
+
 static struct platform_device *dummy;
 
 static int ramoops_pstore_open(struct pstore_info *psi)
@@ -810,11 +846,13 @@ static int ramoops_probe(struct platform_device *pdev)
 			       cxt->console_size, 0);
 	if (err)
 		goto fail_init;
+	exynos9810_ramoops_handoff(cxt);
 
 	err = ramoops_init_prz("pmsg", dev, cxt, &cxt->mprz, &paddr,
 				cxt->pmsg_size, 0);
 	if (err)
 		goto fail_init;
+	exynos9810_ramoops_marker(cxt, '2');
 
 	cxt->max_ftrace_cnt = (cxt->flags & RAMOOPS_FLAG_FTRACE_PER_CPU)
 				? nr_cpu_ids
@@ -826,6 +864,7 @@ static int ramoops_probe(struct platform_device *pdev)
 					? PRZ_FLAG_NO_LOCK : 0);
 	if (err)
 		goto fail_init;
+	exynos9810_ramoops_marker(cxt, '3');
 
 	cxt->pstore.data = cxt;
 	/*
@@ -860,12 +899,14 @@ static int ramoops_probe(struct platform_device *pdev)
 			goto fail_clear;
 		}
 	}
+	exynos9810_ramoops_marker(cxt, '4');
 
 	err = pstore_register(&cxt->pstore);
 	if (err) {
 		pr_err("registering with pstore failed\n");
 		goto fail_buf;
 	}
+	exynos9810_ramoops_marker(cxt, '5');
 
 	/*
 	 * Update the module parameter variables as well so they are visible
