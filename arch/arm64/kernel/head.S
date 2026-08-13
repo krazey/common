@@ -99,6 +99,20 @@
 	.macro	exynos9810_idmap_boot_marker stage
 	exynos9810_store_boot_marker \stage
 	.endm
+
+	.macro	exynos9810_store_hex value
+	mov	x19, #60
+.Lexynos9810_hex\@:
+	lsr	x10, \value, x19
+	and	w10, w10, #0xf
+	cmp	w10, #9
+	add	w20, w10, #'0'
+	add	w21, w10, #('a' - 10)
+	csel	w10, w20, w21, ls
+	strb	w10, [x11], #1
+	subs	x19, x19, #4
+	b.ge	.Lexynos9810_hex\@
+	.endm
 #else
 	.macro	exynos9810_boot_marker stage
 	.endm
@@ -341,6 +355,120 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	ASM_BUG()
 SYM_FUNC_END(__primary_switched)
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	.macro	exynos9810_mmu_vector marker
+	.align	7
+	mov	w12, #\marker
+	b	exynos9810_mmu_fault
+	.endm
+
+	.align	11
+SYM_CODE_START_LOCAL(exynos9810_mmu_vectors)
+	exynos9810_mmu_vector 0x5330
+	exynos9810_mmu_vector 0x4930
+	exynos9810_mmu_vector 0x4630
+	exynos9810_mmu_vector 0x4530
+	exynos9810_mmu_vector 0x5358
+	exynos9810_mmu_vector 0x4958
+	exynos9810_mmu_vector 0x4658
+	exynos9810_mmu_vector 0x4558
+	exynos9810_mmu_vector 0x5355
+	exynos9810_mmu_vector 0x4955
+	exynos9810_mmu_vector 0x4655
+	exynos9810_mmu_vector 0x4555
+	exynos9810_mmu_vector 0x5343
+	exynos9810_mmu_vector 0x4943
+	exynos9810_mmu_vector 0x4643
+	exynos9810_mmu_vector 0x4543
+	.align	11
+SYM_CODE_END(exynos9810_mmu_vectors)
+
+SYM_CODE_START_LOCAL(exynos9810_mmu_fault)
+	msr	daifset, #0xf
+	mrs	x13, esr_el1
+	mrs	x14, far_el1
+	mrs	x15, elr_el1
+	mrs	x16, spsr_el1
+	mrs	x17, sctlr_el1
+	bic	x18, x17, #SCTLR_ELx_M
+	bic	x18, x18, #SCTLR_ELx_C
+	dsb	sy
+	pre_disable_mmu_workaround
+	msr	sctlr_el1, x18
+	isb
+
+	movz	x9, #0xfed1, lsl #16
+	movz	w10, #0x4244
+	movk	w10, #0x4347, lsl #16
+	str	w10, [x9]
+	str	wzr, [x9, #4]
+	str	wzr, [x9, #8]
+	movz	w10, #0x3d3d
+	movk	w10, #0x3d3d, lsl #16
+	str	w10, [x9, #12]
+	movz	w10, #0x2e30
+	movk	w10, #0x2d30, lsl #16
+	str	w10, [x9, #16]
+	movz	w10, #0x0a44
+	movk	w10, #0x3945, lsl #16
+	str	w10, [x9, #20]
+	movz	w10, #0x3138
+	movk	w10, #0x003a, lsl #16
+	str	w10, [x9, #24]
+	strb	w12, [x9, #27]
+	lsr	w10, w12, #8
+	strb	w10, [x9, #28]
+	mov	w10, #'\n'
+	strb	w10, [x9, #29]
+	add	x11, x9, #30
+
+	mov	w10, #'E'
+	strb	w10, [x11], #1
+	mov	w10, #'='
+	strb	w10, [x11], #1
+	exynos9810_store_hex x13
+	mov	w10, #'\n'
+	strb	w10, [x11], #1
+	mov	w10, #'F'
+	strb	w10, [x11], #1
+	mov	w10, #'='
+	strb	w10, [x11], #1
+	exynos9810_store_hex x14
+	mov	w10, #'\n'
+	strb	w10, [x11], #1
+	mov	w10, #'L'
+	strb	w10, [x11], #1
+	mov	w10, #'='
+	strb	w10, [x11], #1
+	exynos9810_store_hex x15
+	mov	w10, #'\n'
+	strb	w10, [x11], #1
+	mov	w10, #'P'
+	strb	w10, [x11], #1
+	mov	w10, #'='
+	strb	w10, [x11], #1
+	exynos9810_store_hex x16
+	mov	w10, #'\n'
+	strb	w10, [x11], #1
+	mov	w10, #'S'
+	strb	w10, [x11], #1
+	mov	w10, #'='
+	strb	w10, [x11], #1
+	exynos9810_store_hex x17
+	mov	w10, #'\n'
+	strb	w10, [x11]
+	mov	w10, #113
+	str	w10, [x9, #8]
+	dc	cvac, x9
+	add	x10, x9, #64
+	dc	cvac, x10
+	dsb	sy
+1:	wfe
+	wfi
+	b	1b
+SYM_CODE_END(exynos9810_mmu_fault)
+#endif
+
 /*
  * end early head section, begin head code that is also used for
  * hotplug and needs to have the same protections as the text region
@@ -566,6 +694,11 @@ SYM_FUNC_START(__enable_mmu)
 	/* 0A: the initial identity map was installed in TTBR0. */
 	exynos9810_idmap_boot_marker 0x4130
 	load_ttbr1 x1, x1, x3
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	adr_l	x3, exynos9810_mmu_vectors
+	msr	vbar_el1, x3
+	isb
+#endif
 	/* 0B: the reserved kernel map was installed in TTBR1. */
 	exynos9810_idmap_boot_marker 0x4230
 
