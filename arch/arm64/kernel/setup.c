@@ -93,6 +93,7 @@ u64 __cacheline_aligned boot_args[4];
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 #define EXYNOS9810_PSTORE_PHYS	0xfed10000
+#define EXYNOS9810_PSTORE_CONSOLE_PHYS	(EXYNOS9810_PSTORE_PHYS + 0x4000)
 #define EXYNOS9810_MARKER_HEADER_SIZE	10
 #define EXYNOS9810_MARKER_ENTRY_SIZE	8
 #define EXYNOS9810_MARKER_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
@@ -103,6 +104,7 @@ u64 __cacheline_aligned boot_args[4];
 
 static u32 *exynos9810_marker_base =
 	(u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS;
+static u32 *exynos9810_marker_mirror;
 
 static bool exynos9810_marker_record_valid(u32 *record)
 {
@@ -139,9 +141,9 @@ static void exynos9810_marker_record_init(u32 *record)
 	WRITE_ONCE(record[2], EXYNOS9810_MARKER_HEADER_SIZE);
 }
 
-void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
+static void __no_sanitize_address
+exynos9810_marker_record_append(u32 *record, u16 stage)
 {
-	u32 *record = exynos9810_marker_base;
 	u8 *entry;
 	u32 size;
 
@@ -173,6 +175,16 @@ void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 	WRITE_ONCE(record[2], size + EXYNOS9810_MARKER_ENTRY_SIZE);
 	dcache_clean_poc((unsigned long)record,
 			 (unsigned long)&record[3]);
+}
+
+void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
+{
+	u32 *record = READ_ONCE(exynos9810_marker_base);
+	u32 *mirror = READ_ONCE(exynos9810_marker_mirror);
+
+	exynos9810_marker_record_append(record, stage);
+	if (mirror && mirror != record)
+		exynos9810_marker_record_append(mirror, stage);
 }
 
 static noinline __no_sanitize_address u8 *
@@ -307,21 +319,31 @@ void __no_sanitize_address exynos9810_early_cache_marker(const char *name,
 
 void __init exynos9810_early_boot_marker_map(void)
 {
-	void *base;
+	void *base, *mirror;
 
 	base = early_memremap(EXYNOS9810_PSTORE_PHYS, PAGE_SIZE);
+	mirror = early_memremap(EXYNOS9810_PSTORE_CONSOLE_PHYS, PAGE_SIZE);
 	exynos9810_marker_base = base;
+	exynos9810_marker_mirror = mirror;
+	if (mirror) {
+		exynos9810_marker_record_init(mirror);
+		dcache_clean_poc((unsigned long)mirror,
+				 (unsigned long)mirror + 32);
+	}
 }
 
 void __init exynos9810_early_boot_marker_release(void)
 {
 	u32 *base = exynos9810_marker_base;
+	u32 *mirror = exynos9810_marker_mirror;
 
 	exynos9810_marker_base = NULL;
-	if (!base || base == (u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS)
-		return;
-
-	early_memunmap(base, PAGE_SIZE);
+	exynos9810_marker_mirror = NULL;
+	if (base && base != (u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS)
+		early_memunmap(base, PAGE_SIZE);
+	if (mirror &&
+	    mirror != (u32 *)(unsigned long)EXYNOS9810_PSTORE_CONSOLE_PHYS)
+		early_memunmap(mirror, PAGE_SIZE);
 }
 #endif
 
