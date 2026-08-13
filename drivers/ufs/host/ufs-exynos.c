@@ -69,6 +69,9 @@
 				 UNIPRO_PCLK_STOP)
 /* HCI_MISC is also known as HCI_FORCE_HCS */
 #define HCI_MISC		0xB4
+#define REFCLKOUT_CTRL_EN	BIT(11)
+#define MPHY_APBCLK_CTRL_EN	BIT(10)
+#define UFSP_DRCG_CTRL_EN	BIT(8)
 #define REFCLK_CTRL_EN		BIT(7)
 #define UNIPRO_PCLK_CTRL_EN	BIT(6)
 #define UNIPRO_MCLK_CTRL_EN	BIT(5)
@@ -76,7 +79,13 @@
 #define CLK_CTRL_EN_MASK	(REFCLK_CTRL_EN |\
 				 UNIPRO_PCLK_CTRL_EN |\
 				 UNIPRO_MCLK_CTRL_EN)
+#define EXYNOS9810_CLK_CTRL_EN_MASK	(REFCLKOUT_CTRL_EN |\
+					 MPHY_APBCLK_CTRL_EN |\
+					 UFSP_DRCG_CTRL_EN |\
+					 CLK_CTRL_EN_MASK)
 
+#define HCI_UFS_ACG_DISABLE	0xFC
+#define HCI_UFS_ACG_DISABLE_EN	BIT(0)
 #define HCI_IOP_ACG_DISABLE	0x100
 #define HCI_IOP_ACG_DISABLE_EN	BIT(0)
 
@@ -245,8 +254,26 @@ static int exynosauto_ufs_drv_init(struct exynos_ufs *ufs)
 	return exynos_ufs_shareability(ufs);
 }
 
+static void exynos9810_ufs_config_clocks(struct exynos_ufs *ufs)
+{
+	u32 reg;
+
+	reg = hci_readl(ufs, HCI_IOP_ACG_DISABLE);
+	hci_writel(ufs, reg & ~HCI_IOP_ACG_DISABLE_EN,
+		   HCI_IOP_ACG_DISABLE);
+
+	reg = hci_readl(ufs, HCI_UFS_ACG_DISABLE);
+	hci_writel(ufs, reg | HCI_UFS_ACG_DISABLE_EN,
+		   HCI_UFS_ACG_DISABLE);
+
+	reg = hci_readl(ufs, HCI_MISC);
+	hci_writel(ufs, reg | EXYNOS9810_CLK_CTRL_EN_MASK, HCI_MISC);
+}
+
 static int exynos9810_ufs_drv_init(struct exynos_ufs *ufs)
 {
+	exynos9810_ufs_config_clocks(ufs);
+
 	return exynos_ufs_shareability(ufs);
 }
 
@@ -1860,6 +1887,8 @@ static int exynos9810_ufs_pre_link(struct exynos_ufs *ufs)
 	struct exynos_ufs_uic_attr *attr = ufs->drv_data->uic_attr;
 	struct ufs_hba *hba = ufs->hba;
 	int i;
+
+	exynos9810_ufs_config_clocks(ufs);
 
 	ufshcd_dme_set(hba, UIC_ARG_MIB(attr->pa_dbg_clk_period_off),
 		       DIV_ROUND_UP(NSEC_PER_SEC, ufs->mclk_rate));
