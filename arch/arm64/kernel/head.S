@@ -100,6 +100,19 @@
 	exynos9810_store_boot_marker \stage
 	.endm
 
+	/* Update an initialized record without rewriting its metadata. */
+	.macro	exynos9810_update_boot_marker stage, cached
+	movz	x9, #0xfed1, lsl #16
+	mov	w10, #\stage
+	strb	w10, [x9, #27]
+	lsr	w10, w10, #8
+	strb	w10, [x9, #28]
+	.if	\cached
+	dc	cvac, x9
+	.endif
+	dsb	sy
+	.endm
+
 	.macro	exynos9810_store_hex value
 	mov	x19, #60
 .Lexynos9810_hex\@:
@@ -118,6 +131,9 @@
 	.endm
 
 	.macro	exynos9810_idmap_boot_marker stage
+	.endm
+
+	.macro	exynos9810_update_boot_marker stage, cached
 	.endm
 #endif
 
@@ -390,37 +406,30 @@ SYM_CODE_START_LOCAL(exynos9810_mmu_fault)
 	mrs	x15, elr_el1
 	mrs	x16, spsr_el1
 	mrs	x17, sctlr_el1
-	bic	x18, x17, #SCTLR_ELx_M
-	bic	x18, x18, #SCTLR_ELx_C
-	dsb	sy
-	pre_disable_mmu_workaround
-	msr	sctlr_el1, x18
-	isb
 
 	movz	x9, #0xfed1, lsl #16
+	add	x9, x9, #4, lsl #12
 	movz	w10, #0x4244
 	movk	w10, #0x4347, lsl #16
 	str	w10, [x9]
 	str	wzr, [x9, #4]
-	str	wzr, [x9, #8]
-	movz	w10, #0x3d3d
-	movk	w10, #0x3d3d, lsl #16
+	movz	w10, #0x3945
+	movk	w10, #0x3138, lsl #16
 	str	w10, [x9, #12]
-	movz	w10, #0x2e30
-	movk	w10, #0x2d30, lsl #16
-	str	w10, [x9, #16]
-	movz	w10, #0x0a44
-	movk	w10, #0x3945, lsl #16
-	str	w10, [x9, #20]
-	movz	w10, #0x3138
-	movk	w10, #0x003a, lsl #16
-	str	w10, [x9, #24]
-	strb	w12, [x9, #27]
+	mov	w10, #':'
+	strb	w10, [x9, #16]
+	strb	w12, [x9, #17]
 	lsr	w10, w12, #8
-	strb	w10, [x9, #28]
+	strb	w10, [x9, #18]
 	mov	w10, #'\n'
-	strb	w10, [x9, #29]
-	add	x11, x9, #30
+	strb	w10, [x9, #19]
+	mov	w10, #8
+	str	w10, [x9, #8]
+	tst	x17, #SCTLR_ELx_C
+	b.eq	1f
+	dc	cvac, x9
+1:	dsb	sy
+	add	x11, x9, #20
 
 	mov	w10, #'E'
 	strb	w10, [x11], #1
@@ -457,15 +466,17 @@ SYM_CODE_START_LOCAL(exynos9810_mmu_fault)
 	exynos9810_store_hex x17
 	mov	w10, #'\n'
 	strb	w10, [x11]
-	mov	w10, #113
+	mov	w10, #103
 	str	w10, [x9, #8]
+	tst	x17, #SCTLR_ELx_C
+	b.eq	2f
 	dc	cvac, x9
 	add	x10, x9, #64
 	dc	cvac, x10
-	dsb	sy
-1:	wfe
+2:	dsb	sy
+3:	wfe
 	wfi
-	b	1b
+	b	3b
 SYM_CODE_END(exynos9810_mmu_fault)
 #endif
 
@@ -700,11 +711,17 @@ SYM_FUNC_START(__enable_mmu)
 	isb
 #endif
 	/* 0B: the reserved kernel map was installed in TTBR1. */
-	exynos9810_idmap_boot_marker 0x4230
+	exynos9810_update_boot_marker 0x4230, 0
 
-	set_sctlr_el1	x0
+	msr	sctlr_el1, x0
+	isb
+	/* M1: translation was enabled and the context synchronized. */
+	exynos9810_update_boot_marker 0x314d, 1
+	ic	iallu
+	dsb	nsh
+	isb
 	/* 0C: address translation was enabled successfully. */
-	exynos9810_idmap_boot_marker 0x4330
+	exynos9810_update_boot_marker 0x4330, 1
 
 	ret
 SYM_FUNC_END(__enable_mmu)
