@@ -30,7 +30,17 @@
 #define SWAPPER_PGTABLE_LEVELS		(CONFIG_PGTABLE_LEVELS - SWAPPER_SKIP_LEVEL)
 #define INIT_IDMAP_PGTABLE_LEVELS	(IDMAP_LEVELS - SWAPPER_SKIP_LEVEL)
 
+/*
+ * Samsung's legacy firmware enters the Exynos9810 kernel with the Image
+ * outside the placement required by the arm64 boot protocol. Keep its first
+ * translation regime identical to the working downstream kernel and use the
+ * configured 39-bit VA width rather than adding a fourth table level.
+ */
+#ifdef CONFIG_EXYNOS9810_UNALIGNED_IMAGE
+#define IDMAP_VA_BITS		CONFIG_ARM64_VA_BITS
+#else
 #define IDMAP_VA_BITS		48
+#endif
 #define IDMAP_LEVELS		ARM64_HW_PGTABLE_LEVELS(IDMAP_VA_BITS)
 #define IDMAP_ROOT_LEVEL	(4 - IDMAP_LEVELS)
 
