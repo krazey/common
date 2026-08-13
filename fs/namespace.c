@@ -38,6 +38,15 @@
 #include "pnode.h"
 #include "internal.h"
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#define exynos9810_mount_marker(first, second) \
+	exynos9810_boot_marker((first), (second))
+#else
+#define exynos9810_mount_marker(first, second) \
+	((void)(first), (void)(second))
+#endif
+
 /* Maximum number of mounts in a mount namespace */
 static unsigned int sysctl_mount_max __read_mostly = 100000;
 
@@ -6183,6 +6192,8 @@ static void __init init_mount_tree(void)
 	struct mount *mnt_root;
 	struct path root;
 
+	exynos9810_mount_marker('Y', '0');
+
 	/*
 	 * We create two mounts:
 	 *
@@ -6194,13 +6205,16 @@ static void __init init_mount_tree(void)
 	nullfs_mnt = vfs_kern_mount(&nullfs_fs_type, 0, "nullfs", NULL);
 	if (IS_ERR(nullfs_mnt))
 		panic("VFS: Failed to create nullfs");
+	exynos9810_mount_marker('Y', '1');
 
 	mnt = vfs_kern_mount(&rootfs_fs_type, 0, "rootfs", initramfs_options);
 	if (IS_ERR(mnt))
 		panic("Can't create rootfs");
+	exynos9810_mount_marker('Y', '2');
 
 	VFS_WARN_ON_ONCE(real_mount(nullfs_mnt)->mnt_id != 1);
 	VFS_WARN_ON_ONCE(real_mount(mnt)->mnt_id != 2);
+	exynos9810_mount_marker('Y', '3');
 
 	/* The namespace root is the nullfs mnt. */
 	mnt_root		= real_mount(nullfs_mnt);
@@ -6209,12 +6223,15 @@ static void __init init_mount_tree(void)
 	/* Mount mutable rootfs on top of nullfs. */
 	root.mnt		= nullfs_mnt;
 	root.dentry		= nullfs_mnt->mnt_root;
+	exynos9810_mount_marker('Y', '4');
 
 	LOCK_MOUNT_EXACT(mp, &root);
 	if (unlikely(IS_ERR(mp.parent)))
 		panic("VFS: Failed to mount rootfs on nullfs");
+	exynos9810_mount_marker('Y', '5');
 	scoped_guard(mount_writer)
 		attach_mnt(real_mount(mnt), mp.parent, mp.mp);
+	exynos9810_mount_marker('Y', '6');
 
 	pr_info("VFS: Finished mounting rootfs on nullfs\n");
 
@@ -6228,9 +6245,11 @@ static void __init init_mount_tree(void)
 		mnt_add_to_ns(&init_mnt_ns, p);
 		init_mnt_ns.nr_mounts++;
 	}
+	exynos9810_mount_marker('Y', '7');
 
 	init_task.nsproxy->mnt_ns = &init_mnt_ns;
 	get_mnt_ns(&init_mnt_ns);
+	exynos9810_mount_marker('Y', '8');
 
 	/* The root and pwd always point to the mutable rootfs. */
 	root.mnt	= mnt;
@@ -6239,20 +6258,24 @@ static void __init init_mount_tree(void)
 	set_fs_root(current->fs, &root);
 
 	ns_tree_add(&init_mnt_ns);
+	exynos9810_mount_marker('Y', '9');
 }
 
 void __init mnt_init(void)
 {
 	int err;
 
+	exynos9810_mount_marker('W', '0');
 	mnt_cache = kmem_cache_create("mnt_cache", sizeof(struct mount),
 			0, SLAB_HWCACHE_ALIGN|SLAB_PANIC|SLAB_ACCOUNT, NULL);
+	exynos9810_mount_marker('W', '1');
 
 	mount_hashtable = alloc_large_system_hash("Mount-cache",
 				sizeof(struct hlist_head),
 				mhash_entries, 19,
 				HASH_ZERO,
 				&m_hash_shift, &m_hash_mask, 0, 0);
+	exynos9810_mount_marker('W', '2');
 	mountpoint_hashtable = alloc_large_system_hash("Mountpoint-cache",
 				sizeof(struct hlist_head),
 				mphash_entries, 19,
@@ -6261,19 +6284,26 @@ void __init mnt_init(void)
 
 	if (!mount_hashtable || !mountpoint_hashtable)
 		panic("Failed to allocate mount hash table\n");
+	exynos9810_mount_marker('W', '3');
 
 	kernfs_init();
+	exynos9810_mount_marker('W', '4');
 
 	err = sysfs_init();
 	if (err)
 		printk(KERN_WARNING "%s: sysfs_init error: %d\n",
 			__func__, err);
+	exynos9810_mount_marker('W', '5');
 	fs_kobj = kobject_create_and_add("fs", NULL);
 	if (!fs_kobj)
 		printk(KERN_WARNING "%s: kobj create error\n", __func__);
+	exynos9810_mount_marker('W', '6');
 	shmem_init();
+	exynos9810_mount_marker('W', '7');
 	init_rootfs();
+	exynos9810_mount_marker('W', '8');
 	init_mount_tree();
+	exynos9810_mount_marker('W', '9');
 }
 
 void put_mnt_ns(struct mnt_namespace *ns)
