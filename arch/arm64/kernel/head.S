@@ -336,7 +336,7 @@ SYM_CODE_END(preserve_boot_args)
  *
  * x1 = physical address of the first instruction after the MMU switch
  *
- * Preserves x0-x2 and x18-x30. The caller has already installed TTBR0/TTBR1.
+ * Preserves x0-x3 and x18-x30. The caller has already installed TTBR0/TTBR1.
  */
 SYM_CODE_START_LOCAL(exynos9810_store_boot_snapshot)
 	mov	x11, x1
@@ -403,8 +403,8 @@ SYM_CODE_START_LOCAL(exynos9810_store_boot_snapshot)
 	and	x9, x9, #0x1ff
 	ldr	x15, [x10, x9, lsl #3]
 9:
-	movz	x3, #0xfed1, lsl #16
-	add	x4, x3, #30
+	movz	x10, #0xfed1, lsl #16
+	add	x4, x10, #30
 
 	mov	x5, #1
 	exynos9810_snapshot_entry 0x5653	/* SV */
@@ -463,10 +463,10 @@ SYM_CODE_START_LOCAL(exynos9810_store_boot_snapshot)
 	mov	x5, x15
 	exynos9810_snapshot_entry 0x334c	/* L3 */
 
-	sub	x5, x4, x3
+	sub	x5, x4, x10
 	sub	w5, w5, #12
-	str	w5, [x3, #8]
-	mov	x5, x3
+	str	w5, [x10, #8]
+	mov	x5, x10
 1:	dc	cvac, x5
 	add	x5, x5, #64
 	cmp	x5, x4
@@ -895,9 +895,9 @@ SYM_FUNC_START(__enable_mmu)
 	msr	vbar_el1, x3
 	isb
 	adr	x1, 1f
-	str	x30, [sp, #-16]!
+	mov	x3, x30			// preserve LR without a pre-MMU stack
 	bl	exynos9810_store_boot_snapshot
-	ldr	x30, [sp], #16
+	mov	x30, x3
 #endif
 	/* 0B: the reserved kernel map was installed in TTBR1. */
 	exynos9810_update_boot_marker 0x4230, 0
