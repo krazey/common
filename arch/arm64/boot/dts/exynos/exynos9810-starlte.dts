@@ -113,7 +113,7 @@
 			compatible = "ramoops";
 			reg = <0x0 0xfed10000 0x8000>;
 			record-size = <0x4000>;
-			pmsg-size = <0x4000>;
+			console-size = <0x4000>;
 		};
 
 		memory@fed18000 {
