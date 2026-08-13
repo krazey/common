@@ -94,9 +94,12 @@ u64 __cacheline_aligned boot_args[4];
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 #define EXYNOS9810_PSTORE_PHYS	0xfed10000
 #define EXYNOS9810_PSTORE_CONSOLE_PHYS	(EXYNOS9810_PSTORE_PHYS + 0x4000)
+#define EXYNOS9810_PSTORE_CONSOLE_SIZE	0x4000
 #define EXYNOS9810_MARKER_HEADER_SIZE	10
 #define EXYNOS9810_MARKER_ENTRY_SIZE	8
-#define EXYNOS9810_MARKER_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
+#define EXYNOS9810_MARKER_BASE_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
+#define EXYNOS9810_MARKER_MIRROR_DATA_SIZE \
+	(EXYNOS9810_PSTORE_CONSOLE_SIZE - 3 * sizeof(u32))
 #define EXYNOS9810_MARKER_PANIC_RESERVE	384
 #define EXYNOS9810_BAD_STACK_LOG_SIZE	256
 #define EXYNOS9810_MARKER_BOOT_START	('0' | ('1' << 8))
@@ -106,7 +109,7 @@ static u32 *exynos9810_marker_base =
 	(u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS;
 static u32 *exynos9810_marker_mirror;
 
-static bool exynos9810_marker_record_valid(u32 *record)
+static bool exynos9810_marker_record_valid(u32 *record, u32 capacity)
 {
 	u8 *bytes = (u8 *)record;
 	u32 size = READ_ONCE(record[2]);
@@ -115,7 +118,7 @@ static bool exynos9810_marker_record_valid(u32 *record)
 	    READ_ONCE(record[1]) != 0)
 		return false;
 	if (size < EXYNOS9810_MARKER_HEADER_SIZE ||
-	    size > EXYNOS9810_MARKER_DATA_SIZE ||
+	    size > capacity ||
 	    (size - EXYNOS9810_MARKER_HEADER_SIZE) %
 			EXYNOS9810_MARKER_ENTRY_SIZE)
 		return false;
@@ -142,7 +145,7 @@ static void exynos9810_marker_record_init(u32 *record)
 }
 
 static void __no_sanitize_address
-exynos9810_marker_record_append(u32 *record, u16 stage)
+exynos9810_marker_record_append(u32 *record, u16 stage, u32 capacity)
 {
 	u8 *entry;
 	u32 size;
@@ -151,11 +154,11 @@ exynos9810_marker_record_append(u32 *record, u16 stage)
 		return;
 
 	if (stage == EXYNOS9810_MARKER_BOOT_START ||
-	    !exynos9810_marker_record_valid(record))
+	    !exynos9810_marker_record_valid(record, capacity))
 		exynos9810_marker_record_init(record);
 
 	size = READ_ONCE(record[2]);
-	if (size > EXYNOS9810_MARKER_DATA_SIZE -
+	if (size > capacity -
 		   EXYNOS9810_MARKER_ENTRY_SIZE -
 		   EXYNOS9810_MARKER_PANIC_RESERVE)
 		return;
@@ -182,9 +185,11 @@ void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 	u32 *record = READ_ONCE(exynos9810_marker_base);
 	u32 *mirror = READ_ONCE(exynos9810_marker_mirror);
 
-	exynos9810_marker_record_append(record, stage);
+	exynos9810_marker_record_append(record, stage,
+					EXYNOS9810_MARKER_BASE_DATA_SIZE);
 	if (mirror && mirror != record)
-		exynos9810_marker_record_append(mirror, stage);
+		exynos9810_marker_record_append(mirror, stage,
+						EXYNOS9810_MARKER_MIRROR_DATA_SIZE);
 }
 
 static noinline __no_sanitize_address u8 *
@@ -228,11 +233,13 @@ exynos9810_early_bad_stack_log(const struct pt_regs *regs,
 	u8 *entry, *start;
 	u32 size;
 
-	if (!record || !exynos9810_marker_record_valid(record))
+	if (!record ||
+	    !exynos9810_marker_record_valid(record,
+				    EXYNOS9810_MARKER_BASE_DATA_SIZE))
 		return;
 
 	size = READ_ONCE(record[2]);
-	if (size > EXYNOS9810_MARKER_DATA_SIZE -
+	if (size > EXYNOS9810_MARKER_BASE_DATA_SIZE -
 		   EXYNOS9810_BAD_STACK_LOG_SIZE)
 		return;
 	start = (u8 *)&record[3] + size;
@@ -279,19 +286,21 @@ void __no_sanitize_address exynos9810_early_panic_log(const char *message)
 	u32 size;
 	unsigned int i;
 
-	if (!record || !exynos9810_marker_record_valid(record))
+	if (!record ||
+	    !exynos9810_marker_record_valid(record,
+				    EXYNOS9810_MARKER_BASE_DATA_SIZE))
 		return;
 
 	size = READ_ONCE(record[2]);
-	if (size >= EXYNOS9810_MARKER_DATA_SIZE)
+	if (size >= EXYNOS9810_MARKER_BASE_DATA_SIZE)
 		return;
 	entry = (u8 *)&record[3] + size;
 
 	for (i = 0; i < sizeof(prefix) - 1 &&
-	     size < EXYNOS9810_MARKER_DATA_SIZE - 1; i++, size++)
+	     size < EXYNOS9810_MARKER_BASE_DATA_SIZE - 1; i++, size++)
 		WRITE_ONCE(*entry++, prefix[i]);
 
-	while (*message && size < EXYNOS9810_MARKER_DATA_SIZE - 1) {
+	while (*message && size < EXYNOS9810_MARKER_BASE_DATA_SIZE - 1) {
 		WRITE_ONCE(*entry++, *message++);
 		size++;
 	}
@@ -322,7 +331,8 @@ void __init exynos9810_early_boot_marker_map(void)
 	void *base, *mirror;
 
 	base = early_memremap(EXYNOS9810_PSTORE_PHYS, PAGE_SIZE);
-	mirror = early_memremap(EXYNOS9810_PSTORE_CONSOLE_PHYS, PAGE_SIZE);
+	mirror = early_memremap(EXYNOS9810_PSTORE_CONSOLE_PHYS,
+				EXYNOS9810_PSTORE_CONSOLE_SIZE);
 	exynos9810_marker_base = base;
 	exynos9810_marker_mirror = mirror;
 	if (mirror) {
@@ -343,7 +353,7 @@ void __init exynos9810_early_boot_marker_release(void)
 		early_memunmap(base, PAGE_SIZE);
 	if (mirror &&
 	    mirror != (u32 *)(unsigned long)EXYNOS9810_PSTORE_CONSOLE_PHYS)
-		early_memunmap(mirror, PAGE_SIZE);
+		early_memunmap(mirror, EXYNOS9810_PSTORE_CONSOLE_SIZE);
 }
 #endif
 
