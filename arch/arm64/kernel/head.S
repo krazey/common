@@ -44,39 +44,16 @@
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	/*
-	 * Store a recovery-readable ramoops record without relying on the MMU,
-	 * device tree, console, or platform drivers. Skip the write if firmware
-	 * entered with address translation enabled because the physical pstore
-	 * address may not be present in its active translation tables.
+	 * Append to a recovery-readable ramoops journal without relying on the
+	 * MMU, device tree, console, or platform drivers. Skip the write if
+	 * firmware entered with address translation enabled because the physical
+	 * pstore address may not be present in its active translation tables.
 	 */
 	.macro	exynos9810_store_boot_marker stage
-	movz	x9, #0xfed1, lsl #16
-	movz	w10, #0x4244
-	movk	w10, #0x4347, lsl #16
-	str	w10, [x9]
-	str	wzr, [x9, #4]
-	mov	w10, #18
-	str	w10, [x9, #8]
-	movz	w10, #0x3d3d
-	movk	w10, #0x3d3d, lsl #16
-	str	w10, [x9, #12]
-	movz	w10, #0x2e30
-	movk	w10, #0x2d30, lsl #16
-	str	w10, [x9, #16]
-	movz	w10, #0x0a44
-	movk	w10, #0x3945, lsl #16
-	str	w10, [x9, #20]
-	movz	w10, #0x3138
-	movk	w10, #0x003a, lsl #16
-	str	w10, [x9, #24]
+	mov	x11, x30
 	mov	w10, #\stage
-	strb	w10, [x9, #27]
-	lsr	w10, w10, #8
-	strb	w10, [x9, #28]
-	mov	w10, #0x0a
-	strb	w10, [x9, #29]
-	dc	cvac, x9
-	dsb	sy
+	bl	__exynos9810_store_boot_marker
+	mov	x30, x11
 	.endm
 
 	.macro	exynos9810_boot_marker stage
@@ -535,8 +512,70 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
  *
  * Checks if the selected granule size is supported by the CPU.
  * If it isn't, park the CPU
- */
+	 */
 	.section ".idmap.text","a"
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+SYM_CODE_START_LOCAL(__exynos9810_store_boot_marker)
+	mov	w12, w10
+	mov	w10, #0x3130
+	cmp	w12, w10
+	movz	x9, #0xfed1, lsl #16
+	b.eq	.Lexynos9810_reset
+	ldr	w10, [x9, #8]
+	cmp	w10, #10
+	b.lo	.Lexynos9810_reset
+	cmp	w10, #0xfe0
+	b.hi	.Lexynos9810_done
+	b	.Lexynos9810_append
+
+.Lexynos9810_reset:
+	str	wzr, [x9, #8]
+	movz	w10, #0x4244
+	movk	w10, #0x4347, lsl #16
+	str	w10, [x9]
+	str	wzr, [x9, #4]
+	movz	w10, #0x3d3d
+	movk	w10, #0x3d3d, lsl #16
+	str	w10, [x9, #12]
+	movz	w10, #0x2e30
+	movk	w10, #0x2d30, lsl #16
+	str	w10, [x9, #16]
+	mov	w10, #0x44
+	strb	w10, [x9, #20]
+	mov	w10, #0x0a
+	strb	w10, [x9, #21]
+	mov	w10, #10
+	str	w10, [x9, #8]
+
+.Lexynos9810_append:
+	add	x9, x9, w10, uxtw
+	add	x9, x9, #12
+	movz	w10, #0x3945
+	movk	w10, #0x3138, lsl #16
+	str	w10, [x9]
+	mov	w10, #0x3a
+	strb	w10, [x9, #4]
+	strb	w12, [x9, #5]
+	lsr	w12, w12, #8
+	strb	w12, [x9, #6]
+	mov	w10, #0x0a
+	strb	w10, [x9, #7]
+	dc	cvac, x9
+	add	x12, x9, #7
+	dc	cvac, x12
+	dsb	sy
+	movz	x10, #0xfed1, lsl #16
+	sub	x9, x9, x10
+	sub	w9, w9, #4
+	str	w9, [x10, #8]
+	dc	cvac, x10
+	dsb	sy
+
+.Lexynos9810_done:
+	ret
+SYM_CODE_END(__exynos9810_store_boot_marker)
+#endif
+
 SYM_FUNC_START(__enable_mmu)
 	/* 08: execution entered the MMU enable routine. */
 	exynos9810_idmap_boot_marker 0x3830
