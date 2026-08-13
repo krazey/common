@@ -16,6 +16,7 @@ extern u64 __cacheline_aligned boot_args[4];
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 void exynos9810_early_boot_marker(u16 stage);
 void exynos9810_early_cache_marker(const char *name, u16 stage);
+void exynos9810_early_panic_log(const char *message);
 void exynos9810_early_boot_marker_map(void);
 void exynos9810_early_boot_marker_release(void);
 

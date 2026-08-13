@@ -94,6 +94,7 @@ u64 __cacheline_aligned boot_args[4];
 #define EXYNOS9810_MARKER_HEADER_SIZE	10
 #define EXYNOS9810_MARKER_ENTRY_SIZE	8
 #define EXYNOS9810_MARKER_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
+#define EXYNOS9810_MARKER_PANIC_RESERVE	256
 #define EXYNOS9810_MARKER_BOOT_START	('0' | ('1' << 8))
 #define EXYNOS9810_RAM_SIG	0x43474244
 
@@ -150,7 +151,8 @@ void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 
 	size = READ_ONCE(record[2]);
 	if (size > EXYNOS9810_MARKER_DATA_SIZE -
-		   EXYNOS9810_MARKER_ENTRY_SIZE)
+		   EXYNOS9810_MARKER_ENTRY_SIZE -
+		   EXYNOS9810_MARKER_PANIC_RESERVE)
 		return;
 
 	entry = (u8 *)&record[3] + size;
@@ -166,6 +168,41 @@ void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 			 (unsigned long)entry + EXYNOS9810_MARKER_ENTRY_SIZE);
 	barrier();
 	WRITE_ONCE(record[2], size + EXYNOS9810_MARKER_ENTRY_SIZE);
+	dcache_clean_poc((unsigned long)record,
+			 (unsigned long)&record[3]);
+}
+
+void __no_sanitize_address exynos9810_early_panic_log(const char *message)
+{
+	static const char prefix[] = "PANIC: ";
+	u32 *record = READ_ONCE(exynos9810_marker_base);
+	u8 *entry;
+	u32 size;
+	unsigned int i;
+
+	if (!record || !exynos9810_marker_record_valid(record))
+		return;
+
+	size = READ_ONCE(record[2]);
+	if (size >= EXYNOS9810_MARKER_DATA_SIZE)
+		return;
+	entry = (u8 *)&record[3] + size;
+
+	for (i = 0; i < sizeof(prefix) - 1 &&
+	     size < EXYNOS9810_MARKER_DATA_SIZE - 1; i++, size++)
+		WRITE_ONCE(*entry++, prefix[i]);
+
+	while (*message && size < EXYNOS9810_MARKER_DATA_SIZE - 1) {
+		WRITE_ONCE(*entry++, *message++);
+		size++;
+	}
+
+	WRITE_ONCE(*entry++, '\n');
+	size++;
+	dcache_clean_poc((unsigned long)&record[3] + READ_ONCE(record[2]),
+			 (unsigned long)entry);
+	barrier();
+	WRITE_ONCE(record[2], size);
 	dcache_clean_poc((unsigned long)record,
 			 (unsigned long)&record[3]);
 }
