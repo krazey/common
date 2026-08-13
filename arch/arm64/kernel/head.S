@@ -298,6 +298,19 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	/* 0E: execution reached the high kernel mapping. */
 	exynos9810_idmap_boot_marker 0x4530
 	adr_l	x4, init_task
+#ifdef CONFIG_EXYNOS9810_UNALIGNED_IMAGE
+	/* Firmware placement can disturb the link-time stack alignment. */
+	adr_l	x5, exynos9810_init_stack
+	mov	x6, #(THREAD_ALIGN - 1)
+	add	x5, x5, x6
+	bic	x5, x5, x6
+	mov	x7, x5
+	add	x8, x5, #THREAD_SIZE
+1:	stp	xzr, xzr, [x7], #16
+	cmp	x7, x8
+	b.lo	1b
+	str	x5, [x4, #TSK_STACK]
+#endif
 	init_cpu_task x4, x5, x6
 
 	adr_l	x8, vectors			// load VBAR_EL1 with virtual
