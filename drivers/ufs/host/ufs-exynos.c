@@ -171,6 +171,21 @@ enum {
 #define UNIPRO_DME_POWERMODE_REQ_REMOTEL2TIMER1	0x78BC
 #define UNIPRO_DME_POWERMODE_REQ_REMOTEL2TIMER2	0x78C0
 
+#define UNIPRO_DME_LINKSTARTUP_CNF_RESULT	0x7854
+#define UNIPRO_DME_INTR_STATUS_LSB		0x7B00
+#define UNIPRO_DME_INTR_STATUS_MSB		0x7B04
+#define UNIPRO_DME_INTR_ERROR_CODE		0x7B20
+#define UNIPRO_DME_DBG_CTRL_FSM			0x7D00
+#define UNIPRO_DME_DBG_FLAG_STATUS		0x7D14
+#define UNIPRO_DME_DBG_LINKCFG_FSM		0x7D18
+
+#define UNIPRO_DBG_AUTO_DME_LINKSTARTUP		0x158
+#define UNIPRO_DBG_PA_CTRL_STATE			0x15C
+#define UNIPRO_DBG_PA_TX_STATE			0x160
+#define UNIPRO_DBG_BREAK_DME_CTRL_STATE		0x164
+#define UNIPRO_DBG_STEP_DME_CTRL_STATE		0x168
+#define UNIPRO_DBG_NEXT_DME_CTRL_STATE		0x16C
+
 /*
  * UFS Protector registers
  */
@@ -2105,6 +2120,63 @@ static int gs101_ufs_pre_pwr_change(struct exynos_ufs *ufs,
 	return 0;
 }
 
+static void exynos9810_ufs_link_startup_failed(struct exynos_ufs *ufs,
+					       u32 err)
+{
+	struct ufs_hba *hba = ufs->hba;
+	unsigned long core_rate = 0;
+	unsigned long unipro_rate = 0;
+
+	if (ufs->clk_hci_core)
+		core_rate = clk_get_rate(ufs->clk_hci_core);
+	if (ufs->clk_unipro_main)
+		unipro_rate = clk_get_rate(ufs->clk_unipro_main);
+
+	dev_err(hba->dev,
+		"link failure %d: hcs=%08x intr=%08x uic=%08x/%08x/%08x/%08x\n",
+		(s32)err, ufshcd_readl(hba, REG_CONTROLLER_STATUS),
+		ufshcd_readl(hba, REG_INTERRUPT_STATUS),
+		ufshcd_readl(hba, REG_UIC_COMMAND),
+		ufshcd_readl(hba, REG_UIC_COMMAND_ARG_1),
+		ufshcd_readl(hba, REG_UIC_COMMAND_ARG_2),
+		ufshcd_readl(hba, REG_UIC_COMMAND_ARG_3));
+	dev_err(hba->dev,
+		"clock state: core=%lu unipro=%lu lanes=%d/%d misc=%08x stop=%08x acg=%08x/%08x gpio=%08x\n",
+		core_rate, unipro_rate, ufs->avail_ln_rx, ufs->avail_ln_tx,
+		hci_readl(ufs, HCI_MISC), hci_readl(ufs, HCI_CLKSTOP_CTRL),
+		hci_readl(ufs, HCI_UFS_ACG_DISABLE),
+		hci_readl(ufs, HCI_IOP_ACG_DISABLE),
+		hci_readl(ufs, HCI_GPIO_OUT));
+	dev_err(hba->dev,
+		"UniPro: link=%08x intr=%08x:%08x err=%08x fsm=%08x flags=%08x cfg=%08x\n",
+		unipro_readl(ufs, UNIPRO_DME_LINKSTARTUP_CNF_RESULT),
+		unipro_readl(ufs, UNIPRO_DME_INTR_STATUS_MSB),
+		unipro_readl(ufs, UNIPRO_DME_INTR_STATUS_LSB),
+		unipro_readl(ufs, UNIPRO_DME_INTR_ERROR_CODE),
+		unipro_readl(ufs, UNIPRO_DME_DBG_CTRL_FSM),
+		unipro_readl(ufs, UNIPRO_DME_DBG_FLAG_STATUS),
+		unipro_readl(ufs, UNIPRO_DME_DBG_LINKCFG_FSM));
+	dev_err(hba->dev,
+		"UniPro PA: auto=%08x ctrl=%08x tx=%08x break=%08x step=%08x next=%08x\n",
+		unipro_readl(ufs, UNIPRO_DBG_AUTO_DME_LINKSTARTUP),
+		unipro_readl(ufs, UNIPRO_DBG_PA_CTRL_STATE),
+		unipro_readl(ufs, UNIPRO_DBG_PA_TX_STATE),
+		unipro_readl(ufs, UNIPRO_DBG_BREAK_DME_CTRL_STATE),
+		unipro_readl(ufs, UNIPRO_DBG_STEP_DME_CTRL_STATE),
+		unipro_readl(ufs, UNIPRO_DBG_NEXT_DME_CTRL_STATE));
+}
+
+static void exynos_ufs_event_notify(struct ufs_hba *hba,
+				    enum ufs_event_type evt, void *data)
+{
+	struct exynos_ufs *ufs = ufshcd_get_variant(hba);
+	u32 err = data ? *(u32 *)data : 0;
+
+	if (evt == UFS_EVT_LINK_STARTUP_FAIL &&
+	    ufs->drv_data->link_startup_failed)
+		ufs->drv_data->link_startup_failed(ufs, err);
+}
+
 static const struct ufs_hba_variant_ops ufs_hba_exynos_ops = {
 	.name				= "exynos_ufs",
 	.init				= exynos_ufs_init,
@@ -2120,6 +2192,7 @@ static const struct ufs_hba_variant_ops ufs_hba_exynos_ops = {
 	.suspend			= exynos_ufs_suspend,
 	.resume				= exynos_ufs_resume,
 	.fill_crypto_prdt		= exynos_ufs_fmp_fill_prdt,
+	.event_notify			= exynos_ufs_event_notify,
 };
 
 static struct ufs_hba_variant_ops ufs_hba_exynosauto_vh_ops = {
@@ -2305,6 +2378,7 @@ static const struct exynos_ufs_drv_data exynos9810_ufs_drvs = {
 	.pre_link		= exynos9810_ufs_pre_link,
 	.post_link		= fsd_ufs_post_link,
 	.pre_pwr_change		= exynos9810_ufs_pre_pwr_change,
+	.link_startup_failed	= exynos9810_ufs_link_startup_failed,
 };
 
 static const struct exynos_ufs_drv_data fsd_ufs_drvs = {

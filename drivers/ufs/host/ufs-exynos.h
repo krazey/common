@@ -193,6 +193,7 @@ struct exynos_ufs_drv_data {
 	int (*pre_hce_enable)(struct exynos_ufs *ufs);
 	int (*post_hce_enable)(struct exynos_ufs *ufs);
 	int (*suspend)(struct exynos_ufs *ufs);
+	void (*link_startup_failed)(struct exynos_ufs *ufs, u32 err);
 };
 
 struct ufs_phy_time_cfg {
