@@ -157,6 +157,15 @@ config EXYNOS9810_EARLY_BOOT_MARKERS
 	  marker path does not depend on normal virtual mappings, device tree
 	  parsing, the console, or platform drivers.
 
+config EXYNOS9810_UNALIGNED_IMAGE
+	bool "Support unaligned Exynos9810 kernel placement"
+	depends on ARCH_EXYNOS
+	help
+	  Reserve alignment slack for the initial task stack and realign it
+	  after applying the kernel image relocation. This supports legacy
+	  firmware which does not provide the 2 MiB placement required by the
+	  arm64 boot protocol.
+
 config ARCH_K3
 	bool "Texas Instruments Inc. K3 multicore SoC architecture"
 	select SOC_TI

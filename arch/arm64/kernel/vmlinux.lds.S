@@ -367,6 +367,11 @@ SECTIONS
 	. += SZ_4K;		/* stack for the early C runtime */
 	early_init_stack = .;
 
+#ifdef CONFIG_EXYNOS9810_UNALIGNED_IMAGE
+	exynos9810_init_stack = .;
+	. += THREAD_SIZE + THREAD_ALIGN;
+#endif
+
 	. = ALIGN(SEGMENT_ALIGN);
 	__pecoff_data_size = ABSOLUTE(. - __initdata_begin);
 	_end = .;
