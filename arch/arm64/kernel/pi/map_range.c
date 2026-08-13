@@ -105,17 +105,10 @@ asmlinkage phys_addr_t __init create_init_idmap(pgd_t *pg_dir, ptval_t clrmask)
 		  (phys_addr_t)__initdata_begin, data_prot, IDMAP_ROOT_LEVEL,
 		  (pte_t *)pg_dir, false, 0);
 
-	if (IS_ENABLED(CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS)) {
-		map_range(&ptep, (u64)_text, (u64)_stext,
-			  (phys_addr_t)_text, text_prot, IDMAP_ROOT_LEVEL,
-			  (pte_t *)pg_dir, false, 0);
-		map_range(&ptep, 0xcc000000, 0xcc200000, 0xcc000000,
-			  data_prot, IDMAP_ROOT_LEVEL, (pte_t *)pg_dir,
-			  false, 0);
+	if (IS_ENABLED(CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS))
 		map_range(&ptep, 0xfed10000, 0xfed18000, 0xfed10000,
 			  data_prot, IDMAP_ROOT_LEVEL, (pte_t *)pg_dir,
 			  false, 0);
-	}
 
 	return ptep;
 }

@@ -93,16 +93,6 @@ u64 __cacheline_aligned boot_args[4];
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 #define EXYNOS9810_PSTORE_PHYS	0xfed10000
-#define EXYNOS9810_FRAMEBUFFER_PHYS	0xcc000000
-#define EXYNOS9810_FRAMEBUFFER_STRIDE	5760
-#define EXYNOS9810_STAGE_BLOCK_WIDTH	32
-#define EXYNOS9810_STAGE_BLOCK_HEIGHT	20
-#define EXYNOS9810_STAGE_ROWS	(2 * EXYNOS9810_STAGE_BLOCK_HEIGHT)
-#define EXYNOS9810_STAGE_DRAW_SIZE	(EXYNOS9810_STAGE_ROWS * \
-					 EXYNOS9810_FRAMEBUFFER_STRIDE)
-#define EXYNOS9810_STAGE_ZERO_COLOR	0xff00ff00
-#define EXYNOS9810_STAGE_ONE_COLOR	0xffff00ff
-#define EXYNOS9810_STAGE_ANCHOR_COLOR	0xffffffff
 #define EXYNOS9810_MARKER_HEADER_SIZE	10
 #define EXYNOS9810_MARKER_ENTRY_SIZE	8
 #define EXYNOS9810_MARKER_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
@@ -113,41 +103,6 @@ u64 __cacheline_aligned boot_args[4];
 
 static u32 *exynos9810_marker_base =
 	(u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS;
-static u32 *exynos9810_framebuffer_base =
-	(u32 *)(unsigned long)EXYNOS9810_FRAMEBUFFER_PHYS;
-
-static void __no_sanitize_address exynos9810_draw_boot_stage(u16 stage)
-{
-	u8 *base = (u8 *)READ_ONCE(exynos9810_framebuffer_base);
-	unsigned int row, bit, pixel;
-
-	if (!base)
-		return;
-
-	for (row = 0; row < EXYNOS9810_STAGE_ROWS; row++) {
-		u32 *output = (u32 *)(base +
-				      row * EXYNOS9810_FRAMEBUFFER_STRIDE);
-		u8 value = row < EXYNOS9810_STAGE_BLOCK_HEIGHT ?
-			   stage : stage >> 8;
-
-		for (pixel = 0; pixel < EXYNOS9810_STAGE_BLOCK_WIDTH; pixel++)
-			WRITE_ONCE(*output++, EXYNOS9810_STAGE_ANCHOR_COLOR);
-
-		for (bit = 8; bit-- > 0;) {
-			u32 color = value & BIT(bit) ?
-				    EXYNOS9810_STAGE_ONE_COLOR :
-				    EXYNOS9810_STAGE_ZERO_COLOR;
-
-			for (pixel = 0; pixel < EXYNOS9810_STAGE_BLOCK_WIDTH;
-			     pixel++)
-				WRITE_ONCE(*output++, color);
-		}
-
-		dcache_clean_poc((unsigned long)(base +
-				 row * EXYNOS9810_FRAMEBUFFER_STRIDE),
-			 (unsigned long)output);
-	}
-}
 
 static bool exynos9810_marker_record_valid(u32 *record)
 {
@@ -189,8 +144,6 @@ void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 	u32 *record = exynos9810_marker_base;
 	u8 *entry;
 	u32 size;
-
-	exynos9810_draw_boot_stage(stage);
 
 	if (!record)
 		return;
@@ -354,29 +307,21 @@ void __no_sanitize_address exynos9810_early_cache_marker(const char *name,
 
 void __init exynos9810_early_boot_marker_map(void)
 {
-	void *base, *framebuffer;
+	void *base;
 
 	base = early_memremap(EXYNOS9810_PSTORE_PHYS, PAGE_SIZE);
 	exynos9810_marker_base = base;
-	framebuffer = early_memremap(EXYNOS9810_FRAMEBUFFER_PHYS,
-				     EXYNOS9810_STAGE_DRAW_SIZE);
-	exynos9810_framebuffer_base = framebuffer;
 }
 
 void __init exynos9810_early_boot_marker_release(void)
 {
 	u32 *base = exynos9810_marker_base;
-	u32 *framebuffer = exynos9810_framebuffer_base;
 
 	exynos9810_marker_base = NULL;
-	exynos9810_framebuffer_base = NULL;
 	if (!base || base == (u32 *)(unsigned long)EXYNOS9810_PSTORE_PHYS)
-		base = NULL;
-	if (base)
-		early_memunmap(base, PAGE_SIZE);
-	if (framebuffer && framebuffer !=
-			   (u32 *)(unsigned long)EXYNOS9810_FRAMEBUFFER_PHYS)
-		early_memunmap(framebuffer, EXYNOS9810_STAGE_DRAW_SIZE);
+		return;
+
+	early_memunmap(base, PAGE_SIZE);
 }
 #endif
 
