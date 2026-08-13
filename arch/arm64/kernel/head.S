@@ -190,6 +190,22 @@ SYM_CODE_START(primary_entry)
 	adrp	x1, early_init_stack
 	mov	sp, x1
 	mov	x29, xzr
+
+	/*
+	 * Firmware may leave stale cache lines covering the bootstrap page
+	 * tables across a warm boot. Invalidate and clear the entire allocation
+	 * before the position-independent map builder follows any descriptors.
+	 */
+	adrp	x0, __pi_init_idmap_pg_dir
+	adr_l	x1, __pi_init_idmap_pg_end
+	adr_l	x2, dcache_inval_poc
+	blr	x2
+	adrp	x0, __pi_init_idmap_pg_dir
+	adr_l	x1, __pi_init_idmap_pg_end
+1:	stp	xzr, xzr, [x0], #16
+	cmp	x0, x1
+	b.lo	1b
+
 	adrp	x0, __pi_init_idmap_pg_dir
 	mov	x1, xzr
 	bl	__pi_create_init_idmap
