@@ -125,7 +125,7 @@ struct ramoops_context {
 static void exynos9810_ramoops_marker(struct ramoops_context *cxt,
 				      char stage)
 {
-	char marker[] = "E981:R0\n";
+	char marker[] = "E981:Z0\n";
 
 	if (!cxt->cprz)
 		return;

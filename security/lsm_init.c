@@ -19,12 +19,6 @@ static char __init exynos9810_lsm_marker_nibble(unsigned int value)
 	return value < 10 ? '0' + value : 'A' + value - 10;
 }
 
-static char __init exynos9810_lsm_marker_base36(unsigned int value)
-{
-	value %= 36;
-	return value < 10 ? '0' + value : 'A' + value - 10;
-}
-
 static void __init exynos9810_lsm_order_marker(char stage,
 					       unsigned int index)
 {
@@ -43,25 +37,6 @@ static void __init exynos9810_lsm_hook_marker(char stage,
 		marker = exynos9810_lsm_marker_nibble(id - LSM_ID_CAPABILITY);
 	exynos9810_boot_marker(stage, marker);
 }
-
-static void __init
-exynos9810_lsm_hook_index_marker(const struct lsm_id *lsmid,
-				 unsigned int index)
-{
-	char first;
-	char second;
-
-	if (lsmid->id != LSM_ID_SELINUX)
-		return;
-	if (index >= 6 * 36) {
-		exynos9810_boot_marker('X', 'X');
-		return;
-	}
-
-	first = 'a' + index / 36;
-	second = exynos9810_lsm_marker_base36(index);
-	exynos9810_boot_marker(first, second);
-}
 #else
 #define exynos9810_boot_marker(first, second) \
 	((void)(first), (void)(second))
@@ -69,8 +44,6 @@ exynos9810_lsm_hook_index_marker(const struct lsm_id *lsmid,
 	((void)(stage), (void)(index))
 #define exynos9810_lsm_hook_marker(stage, lsmid) \
 	((void)(stage), (void)(lsmid))
-#define exynos9810_lsm_hook_index_marker(lsmid, index) \
-	((void)(lsmid), (void)(index))
 #endif
 
 /* LSM enabled constants. */
@@ -410,8 +383,7 @@ static void __init lsm_init_single(struct lsm_info *lsm)
  * lsm_static_call_init - Initialize a LSM's static calls
  * @hl: LSM hook list
  */
-static int __init lsm_static_call_init(struct security_hook_list *hl,
-				       unsigned int index)
+static int __init lsm_static_call_init(struct security_hook_list *hl)
 {
 	struct lsm_static_call *scall = hl->scalls;
 	int i;
@@ -419,15 +391,10 @@ static int __init lsm_static_call_init(struct security_hook_list *hl,
 	for (i = 0; i < MAX_LSM_COUNT; i++) {
 		/* Update the first static call that is not used yet */
 		if (!scall->hl) {
-			exynos9810_lsm_hook_marker('K', hl->lsmid);
 			__static_call_update(scall->key, scall->trampoline,
 					     hl->hook.lsm_func_addr);
-			exynos9810_lsm_hook_marker('L', hl->lsmid);
 			scall->hl = hl;
-			exynos9810_lsm_hook_marker('M', hl->lsmid);
-			exynos9810_lsm_hook_index_marker(hl->lsmid, index);
 			static_branch_enable(scall->active);
-			exynos9810_lsm_hook_marker('N', hl->lsmid);
 			return 0;
 		}
 		scall++;
@@ -452,7 +419,7 @@ void __init security_add_hooks(struct security_hook_list *hooks, int count,
 	exynos9810_lsm_hook_marker('J', lsmid);
 	for (i = 0; i < count; i++) {
 		hooks[i].lsmid = lsmid;
-		if (lsm_static_call_init(&hooks[i], i))
+		if (lsm_static_call_init(&hooks[i]))
 			panic("exhausted LSM callback slots with LSM %s\n",
 			      lsmid->name);
 	}
