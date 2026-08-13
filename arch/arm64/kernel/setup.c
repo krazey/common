@@ -44,7 +44,9 @@
 #include <asm/cpufeature.h>
 #include <asm/cpu_ops.h>
 #include <asm/kasan.h>
+#include <asm/memory.h>
 #include <asm/numa.h>
+#include <asm/ptrace.h>
 #include <asm/rsi.h>
 #include <asm/scs.h>
 #include <asm/sections.h>
@@ -94,7 +96,8 @@ u64 __cacheline_aligned boot_args[4];
 #define EXYNOS9810_MARKER_HEADER_SIZE	10
 #define EXYNOS9810_MARKER_ENTRY_SIZE	8
 #define EXYNOS9810_MARKER_DATA_SIZE	(PAGE_SIZE - 3 * sizeof(u32))
-#define EXYNOS9810_MARKER_PANIC_RESERVE	256
+#define EXYNOS9810_MARKER_PANIC_RESERVE	384
+#define EXYNOS9810_BAD_STACK_LOG_SIZE	256
 #define EXYNOS9810_MARKER_BOOT_START	('0' | ('1' << 8))
 #define EXYNOS9810_RAM_SIG	0x43474244
 
@@ -168,6 +171,90 @@ void __no_sanitize_address exynos9810_early_boot_marker(u16 stage)
 			 (unsigned long)entry + EXYNOS9810_MARKER_ENTRY_SIZE);
 	barrier();
 	WRITE_ONCE(record[2], size + EXYNOS9810_MARKER_ENTRY_SIZE);
+	dcache_clean_poc((unsigned long)record,
+			 (unsigned long)&record[3]);
+}
+
+static noinline __no_sanitize_address u8 *
+exynos9810_marker_write_string(u8 *entry, const char *string)
+{
+	while (*string) {
+		WRITE_ONCE(*entry, *string);
+		entry++;
+		string++;
+	}
+
+	return entry;
+}
+
+static noinline __no_sanitize_address u8 *
+exynos9810_marker_write_hex(u8 *entry, unsigned long value)
+{
+	unsigned int shift;
+
+	for (shift = 60; ; shift -= 4) {
+		u8 digit = (value >> shift) & 0xf;
+
+		WRITE_ONCE(*entry, digit < 10 ? '0' + digit : 'a' + digit - 10);
+		entry++;
+		if (!shift)
+			break;
+	}
+
+	return entry;
+}
+
+void __no_sanitize_address
+exynos9810_early_bad_stack_log(const struct pt_regs *regs,
+			       unsigned long esr, unsigned long far,
+			       unsigned long task_stack,
+			       unsigned long irq_stack,
+			       unsigned long overflow_stack)
+{
+	u32 *record = READ_ONCE(exynos9810_marker_base);
+	unsigned long offset = kaslr_offset();
+	u8 *entry, *start;
+	u32 size;
+
+	if (!record || !exynos9810_marker_record_valid(record))
+		return;
+
+	size = READ_ONCE(record[2]);
+	if (size > EXYNOS9810_MARKER_DATA_SIZE -
+		   EXYNOS9810_BAD_STACK_LOG_SIZE)
+		return;
+	start = (u8 *)&record[3] + size;
+	entry = start;
+
+	entry = exynos9810_marker_write_string(entry, "BADSTACK pc=");
+	entry = exynos9810_marker_write_hex(entry, regs->pc);
+	entry = exynos9810_marker_write_string(entry, " lr=");
+	entry = exynos9810_marker_write_hex(entry, regs->regs[30]);
+	entry = exynos9810_marker_write_string(entry, " off=");
+	entry = exynos9810_marker_write_hex(entry, offset);
+	entry = exynos9810_marker_write_string(entry, " sp=");
+	entry = exynos9810_marker_write_hex(entry, regs->sp);
+	entry = exynos9810_marker_write_string(entry, " fp=");
+	entry = exynos9810_marker_write_hex(entry, regs->regs[29]);
+	entry = exynos9810_marker_write_string(entry, "\nFAULT esr=");
+	entry = exynos9810_marker_write_hex(entry, esr);
+	entry = exynos9810_marker_write_string(entry, " far=");
+	entry = exynos9810_marker_write_hex(entry, far);
+	entry = exynos9810_marker_write_string(entry, " pstate=");
+	entry = exynos9810_marker_write_hex(entry, regs->pstate);
+	entry = exynos9810_marker_write_string(entry, "\nSTACK task=");
+	entry = exynos9810_marker_write_hex(entry, task_stack);
+	entry = exynos9810_marker_write_string(entry, " irq=");
+	entry = exynos9810_marker_write_hex(entry, irq_stack);
+	entry = exynos9810_marker_write_string(entry, " ovf=");
+	entry = exynos9810_marker_write_hex(entry, overflow_stack);
+	entry = exynos9810_marker_write_string(entry, "\nEND\n");
+
+	if (entry != start + EXYNOS9810_BAD_STACK_LOG_SIZE)
+		return;
+	dcache_clean_poc((unsigned long)start, (unsigned long)entry);
+	barrier();
+	WRITE_ONCE(record[2], size + EXYNOS9810_BAD_STACK_LOG_SIZE);
 	dcache_clean_poc((unsigned long)record,
 			 (unsigned long)&record[3]);
 }

@@ -46,6 +46,9 @@
 #include <asm/smp.h>
 #include <asm/stack_pointer.h>
 #include <asm/stacktrace.h>
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#endif
 #include <asm/system_misc.h>
 #include <asm/sysreg.h>
 
@@ -905,6 +908,11 @@ void __noreturn panic_bad_stack(struct pt_regs *regs, unsigned long esr, unsigne
 	unsigned long tsk_stk = (unsigned long)current->stack;
 	unsigned long irq_stk = (unsigned long)this_cpu_read(irq_stack_ptr);
 	unsigned long ovf_stk = (unsigned long)this_cpu_ptr(overflow_stack);
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_early_bad_stack_log(regs, esr, far, tsk_stk, irq_stk,
+				       ovf_stk);
+#endif
 
 	console_verbose();
 	pr_emerg("Insufficient stack space to handle exception!");

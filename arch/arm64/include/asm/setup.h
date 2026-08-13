@@ -14,8 +14,15 @@ extern phys_addr_t __fdt_pointer __initdata;
 extern u64 __cacheline_aligned boot_args[4];
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+struct pt_regs;
+
 void exynos9810_early_boot_marker(u16 stage);
 void exynos9810_early_cache_marker(const char *name, u16 stage);
+void exynos9810_early_bad_stack_log(const struct pt_regs *regs,
+				    unsigned long esr, unsigned long far,
+				    unsigned long task_stack,
+				    unsigned long irq_stack,
+				    unsigned long overflow_stack);
 void exynos9810_early_panic_log(const char *message);
 void exynos9810_early_boot_marker_map(void);
 void exynos9810_early_boot_marker_release(void);
