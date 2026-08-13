@@ -39,6 +39,9 @@
 #include <linux/sys_info.h>
 #include <trace/events/error_report.h>
 #include <asm/sections.h>
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#endif
 #include <kunit/test-bug.h>
 
 #define PANIC_TIMER_STEP 100
@@ -581,6 +584,10 @@ void vpanic(const char *fmt, va_list args)
 	int state = 0;
 	bool _crash_kexec_post_notifiers = crash_kexec_post_notifiers;
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	panic_timeout = 0;
+#endif
+
 	if (panic_on_warn) {
 		/*
 		 * This thread may hit another WARN() in the panic path.
@@ -636,6 +643,10 @@ void vpanic(const char *fmt, va_list args)
 
 	if (len && buf[len - 1] == '\n')
 		buf[len - 1] = '\0';
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	exynos9810_early_panic_log(buf);
+#endif
 
 	pr_emerg("Kernel panic - not syncing: %s\n", buf);
 	/*
