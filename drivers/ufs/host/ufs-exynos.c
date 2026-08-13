@@ -2269,7 +2269,8 @@ static const struct exynos_ufs_drv_data exynos9810_ufs_drvs = {
 				  UFSHCI_QUIRK_SKIP_RESET_INTR_AGGR,
 	.opts			= EXYNOS_UFS_OPT_HAS_APB_CLK_CTRL |
 				  EXYNOS_UFS_OPT_BROKEN_AUTO_CLK_CTRL |
-				  EXYNOS_UFS_OPT_SKIP_CONFIG_PHY_ATTR,
+				  EXYNOS_UFS_OPT_SKIP_CONFIG_PHY_ATTR |
+				  EXYNOS_UFS_OPT_UFSPR_SECURE,
 	.drv_init		= exynos9810_ufs_drv_init,
 	.pre_link		= exynos9810_ufs_pre_link,
 	.post_link		= fsd_ufs_post_link,
