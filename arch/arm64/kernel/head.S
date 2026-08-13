@@ -49,7 +49,7 @@
 	 * entered with address translation enabled because the physical pstore
 	 * address may not be present in its active translation tables.
 	 */
-	.macro	exynos9810_store_boot_marker stage, draw=1
+	.macro	exynos9810_store_boot_marker stage
 	movz	x9, #0xfed1, lsl #16
 	movz	w10, #0x4244
 	movk	w10, #0x4347, lsl #16
@@ -77,10 +77,6 @@
 	strb	w10, [x9, #29]
 	dc	cvac, x9
 	dsb	sy
-	.if	\draw
-	mov	w10, #\stage
-	bl	exynos9810_draw_boot_stage
-	.endif
 	.endm
 
 	.macro	exynos9810_boot_marker stage
@@ -104,10 +100,6 @@
 	exynos9810_store_boot_marker \stage
 	.endm
 
-	.macro	exynos9810_high_boot_marker stage
-	exynos9810_store_boot_marker \stage, 0
-	.endm
-
 	/* Update an initialized record without rewriting its metadata. */
 	.macro	exynos9810_update_boot_marker stage, cached
 	movz	x9, #0xfed1, lsl #16
@@ -119,8 +111,6 @@
 	dc	cvac, x9
 	.endif
 	dsb	sy
-	mov	w10, #\stage
-	bl	exynos9810_draw_boot_stage
 	.endm
 
 	.macro	exynos9810_store_hex value
@@ -141,9 +131,6 @@
 	.endm
 
 	.macro	exynos9810_idmap_boot_marker stage
-	.endm
-
-	.macro	exynos9810_high_boot_marker stage
 	.endm
 
 	.macro	exynos9810_update_boot_marker stage, cached
@@ -178,59 +165,6 @@
 	.long	.Lpe_header_offset		// Offset to the PE header.
 
 	__EFI_PE_HEADER
-
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	/*
-	 * Draw the two stage bytes as two rows of colored bits. Each row starts
-	 * with a white block, followed by bits 7 through 0. A magenta block is
-	 * one and a green block is zero.
-	 *
-	 * Input:  w10 = stage
-	 * Output: w10 = stage
-	 * Clobbers x5-x17 except x10
-	 */
-SYM_CODE_START_LOCAL(exynos9810_draw_boot_stage)
-	mov	w12, w10
-	movz	x5, #0xcc00, lsl #16
-	mov	x6, #5760
-	mov	w8, #40
-	mov	w11, #-1
-	movz	w13, #0xff00
-	movk	w13, #0xff00, lsl #16
-	movz	w14, #0x00ff
-	movk	w14, #0xffff, lsl #16
-1:	mov	x7, x5
-	mov	w15, #32
-2:	str	w11, [x7], #4
-	subs	w15, w15, #1
-	b.ne	2b
-	lsr	w16, w12, #8
-	cmp	w8, #20
-	csel	w16, w12, w16, hi
-	mov	w9, #7
-3:	lsrv	w17, w16, w9
-	tst	w17, #1
-	csel	w17, w14, w13, ne
-	mov	w15, #32
-4:	str	w17, [x7], #4
-	subs	w15, w15, #1
-	b.ne	4b
-	subs	w9, w9, #1
-	b.ge	3b
-	mov	x7, x5
-	mov	w15, #18
-5:	dc	cvac, x7
-	add	x7, x7, #64
-	subs	w15, w15, #1
-	b.ne	5b
-	add	x5, x5, x6
-	subs	w8, w8, #1
-	b.ne	1b
-	dsb	sy
-	mov	w10, w12
-	ret
-SYM_CODE_END(exynos9810_draw_boot_stage)
-#endif
 
 	.section ".idmap.text","a"
 
@@ -392,7 +326,7 @@ SYM_CODE_END(preserve_boot_args)
  */
 SYM_FUNC_START_LOCAL(__primary_switched)
 	/* 0E: execution reached the high kernel mapping. */
-	exynos9810_high_boot_marker 0x4530
+	exynos9810_idmap_boot_marker 0x4530
 	adr_l	x4, init_task
 #ifdef CONFIG_EXYNOS9810_UNALIGNED_IMAGE
 	/* Firmware placement can disturb the link-time stack alignment. */
@@ -431,7 +365,7 @@ SYM_FUNC_START_LOCAL(__primary_switched)
 	mov	x0, x20
 	bl	finalise_el2			// Prefer VHE if possible
 	/* 0F: the kernel is ready to enter start_kernel. */
-	exynos9810_high_boot_marker 0x4630
+	exynos9810_idmap_boot_marker 0x4630
 	ldp	x29, x30, [sp], #16
 	bl	start_kernel
 	ASM_BUG()
@@ -756,7 +690,6 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
  */
 	.section ".idmap.text","a"
 SYM_FUNC_START(__enable_mmu)
-	mov	x4, x30
 	/* 08: execution entered the MMU enable routine. */
 	exynos9810_idmap_boot_marker 0x3830
 	mrs	x3, ID_AA64MMFR0_EL1
@@ -790,7 +723,6 @@ SYM_FUNC_START(__enable_mmu)
 	/* 0C: address translation was enabled successfully. */
 	exynos9810_update_boot_marker 0x4330, 1
 
-	mov	x30, x4
 	ret
 SYM_FUNC_END(__enable_mmu)
 
