@@ -290,6 +290,7 @@
 			clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_ACLK>,
 				 <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_UNIPRO>;
 			clock-names = "core_clk", "sclk_unipro_main";
+			freq-table-hz = <0 0>, <0 0>;
 			dma-coherent;
 			phys = <&ufs_phy>;
 			phy-names = "ufs-phy";
