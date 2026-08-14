@@ -93,10 +93,16 @@ static int ufs_rpmb_route_frames(struct device *dev, u8 *req, unsigned int req_l
 
 	protocol_id = ufs_rpmb->region_id << 8 | UFS_RPMB_SEC_PROTOCOL_ID;
 
+	ret = scsi_autopm_get_device(hba->ufs_rpmb_wlun);
+	if (ret) {
+		dev_err(dev, "Failed to resume RPMB WLUN: %d\n", ret);
+		return ret;
+	}
+
 	ret = ufs_sec_submit(hba, protocol_id, req, req_len, true);
 	if (ret) {
 		dev_err(dev, "Command failed with ret=%d\n", ret);
-		return ret;
+		goto out_pm;
 	}
 
 	if (need_result_read) {
@@ -107,7 +113,7 @@ static int ufs_rpmb_route_frames(struct device *dev, u8 *req, unsigned int req_l
 		ret = ufs_sec_submit(hba, protocol_id, resp, resp_len, true);
 		if (ret) {
 			dev_err(dev, "Result read request failed with ret=%d\n", ret);
-			return ret;
+			goto out_pm;
 		}
 	}
 
@@ -117,6 +123,8 @@ static int ufs_rpmb_route_frames(struct device *dev, u8 *req, unsigned int req_l
 			dev_err(dev, "Response read failed with ret=%d\n", ret);
 	}
 
+out_pm:
+	scsi_autopm_put_device(hba->ufs_rpmb_wlun);
 	return ret;
 }
 
