@@ -19,6 +19,7 @@
 #include <linux/pstore.h>
 #include <linux/string.h>
 #include <linux/timer.h>
+#include <linux/timekeeping.h>
 #include <linux/slab.h>
 #include <linux/uaccess.h>
 #include <linux/jiffies.h>
@@ -397,6 +398,18 @@ static void pstore_console_write(struct console *con, const char *s, unsigned c)
 
 	if (!c)
 		return;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	/*
+	 * The recovery kernel only exposes a 16 KiB view of this console
+	 * record.  Preserve the early bring-up window once userspace starts
+	 * producing enough output to wrap it, while still retaining selected
+	 * diagnostics and complete oops output.
+	 */
+	if (ktime_get_boottime_seconds() >= 8 && !oops_in_progress &&
+	    !strnstr(s, "E981D:", c))
+		return;
+#endif
 
 	pstore_record_init(&record, psinfo);
 	record.type = PSTORE_TYPE_CONSOLE;
