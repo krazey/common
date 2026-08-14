@@ -19,7 +19,16 @@
 
 #include <asm/cpu_ops.h>
 #include <asm/errno.h>
+#include <asm/setup.h>
 #include <asm/smp_plat.h>
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define exynos9810_psci_marker(first, cpu) \
+	exynos9810_boot_marker((first), '0' + (cpu))
+#else
+#define exynos9810_psci_marker(first, cpu) \
+	do { (void)(first); (void)(cpu); } while (0)
+#endif
 
 static int __init cpu_psci_cpu_init(unsigned int cpu)
 {
@@ -39,7 +48,11 @@ static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 static int cpu_psci_cpu_boot(unsigned int cpu)
 {
 	phys_addr_t pa_secondary_entry = __pa_symbol(secondary_entry);
-	int err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
+	int err;
+
+	exynos9810_psci_marker('P', cpu);
+	err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
+	exynos9810_psci_marker('Q', cpu);
 	if (err && err != -EPERM)
 		pr_err("failed to boot CPU%d (%d)\n", cpu, err);
 
@@ -121,4 +134,3 @@ const struct cpu_operations cpu_psci_ops = {
 	.cpu_kill	= cpu_psci_cpu_kill,
 #endif
 };
-
