@@ -19,9 +19,24 @@ struct cdev;
 struct mc_uuid_t;
 struct tee_object;
 
+enum mc_admin_start_stage {
+	MC_ADMIN_START_NONE,
+	MC_ADMIN_START_LOGGING,
+	MC_ADMIN_START_NQ,
+	MC_ADMIN_START_MCP,
+	MC_ADMIN_START_IWP,
+	MC_ADMIN_START_SCHEDULER,
+	MC_ADMIN_START_PM,
+	MC_ADMIN_START_VERSION,
+	MC_ADMIN_START_NOTIFIER,
+	MC_ADMIN_START_USER_DEVICE,
+	MC_ADMIN_START_READY,
+};
+
 int mc_admin_init(struct cdev *cdev, int (*tee_start_cb)(void),
 		  void (*tee_stop_cb)(void));
 void mc_admin_exit(void);
+void mc_admin_diag_set_start(enum mc_admin_start_stage stage, int ret);
 
 struct tee_object *tee_object_select(const struct mc_uuid_t *uuid);
 struct tee_object *tee_object_get(const struct mc_uuid_t *uuid, bool is_gp);

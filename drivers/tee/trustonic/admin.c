@@ -91,10 +91,14 @@ static struct {
 	atomic_t ioctl_done_count;
 	atomic_t ioctl_types[ADMIN_DIAG_IOCTL_TYPES];
 	atomic_t ioctl_other_count;
+	atomic_t teardown_count;
 	struct delayed_work work;
+	bool initialized;
 	unsigned int sample;
 	pid_t last_tgid;
 	int last_open_ret;
+	int start_stage;
+	int start_ret;
 	unsigned int last_ioctl_cmd;
 	int last_ioctl_nr;
 	long last_ioctl_ret;
@@ -107,7 +111,6 @@ static void admin_diag_work(struct work_struct *work)
 	pid_t active_tgid;
 	int client_state;
 	int server_state;
-	int start_ret;
 
 	mutex_lock(&admin_ctx.admin_tgid_mutex);
 	active_tgid = admin_ctx.admin_tgid;
@@ -119,10 +122,14 @@ static void admin_diag_work(struct work_struct *work)
 	request_id = g_request.request_id;
 	mutex_unlock(&g_request.states_mutex);
 
-	start_ret = READ_ONCE(admin_ctx.last_start_ret);
 	sample = ++admin_diag.sample;
-	pr_info("E981D: Trustonic admin sample=%u start=%d active=%d\n",
-		sample, start_ret, active_tgid);
+	pr_info("E981D: Trustonic admin sample=%u active=%d teardown=%d\n",
+		sample, active_tgid,
+		atomic_read(&admin_diag.teardown_count));
+	pr_info("E981D: Trustonic start stage=%d ret=%d cached=%d\n",
+		READ_ONCE(admin_diag.start_stage),
+		READ_ONCE(admin_diag.start_ret),
+		READ_ONCE(admin_ctx.last_start_ret));
 	pr_info("E981D: Trustonic open=%d ok=%d close=%d pid=%d ret=%d\n",
 		atomic_read(&admin_diag.open_count),
 		atomic_read(&admin_diag.open_success_count),
@@ -184,10 +191,19 @@ static void admin_diag_trace_ioctl_exit(long ret)
 	atomic_inc(&admin_diag.ioctl_done_count);
 }
 
+void mc_admin_diag_set_start(enum mc_admin_start_stage stage, int ret)
+{
+	WRITE_ONCE(admin_diag.start_stage, stage);
+	WRITE_ONCE(admin_diag.start_ret, ret);
+}
+
 static void admin_diag_init(void)
 {
 	unsigned int i;
 
+	if (admin_diag.initialized)
+		return;
+	admin_diag.initialized = true;
 	atomic_set(&admin_diag.open_count, 0);
 	atomic_set(&admin_diag.open_success_count, 0);
 	atomic_set(&admin_diag.release_count, 0);
@@ -196,9 +212,12 @@ static void admin_diag_init(void)
 	for (i = 0; i < ARRAY_SIZE(admin_diag.ioctl_types); i++)
 		atomic_set(&admin_diag.ioctl_types[i], 0);
 	atomic_set(&admin_diag.ioctl_other_count, 0);
+	atomic_set(&admin_diag.teardown_count, 0);
 	admin_diag.sample = 0;
 	admin_diag.last_tgid = 0;
 	admin_diag.last_open_ret = 0;
+	admin_diag.start_stage = MC_ADMIN_START_NONE;
+	admin_diag.start_ret = TEE_START_NOT_TRIGGERED;
 	admin_diag.last_ioctl_cmd = 0;
 	admin_diag.last_ioctl_nr = -1;
 	admin_diag.last_ioctl_ret = 0;
@@ -208,7 +227,7 @@ static void admin_diag_init(void)
 
 static void admin_diag_exit(void)
 {
-	cancel_delayed_work_sync(&admin_diag.work);
+	atomic_inc(&admin_diag.teardown_count);
 }
 #else
 static inline void admin_diag_trace_open(int ret) { }
@@ -217,6 +236,7 @@ static inline void admin_diag_trace_ioctl_enter(unsigned int cmd) { }
 static inline void admin_diag_trace_ioctl_exit(long ret) { }
 static inline void admin_diag_init(void) { }
 static inline void admin_diag_exit(void) { }
+void mc_admin_diag_set_start(enum mc_admin_start_stage stage, int ret) { }
 #endif
 
 #if KERNEL_VERSION(3, 13, 0) <= LINUX_VERSION_CODE
