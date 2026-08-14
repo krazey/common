@@ -309,6 +309,8 @@ static int suspend_notifier(struct notifier_block *nb, unsigned long event,
 static int mobicore_start(void)
 {
 	struct mc_version_info version_info;
+	enum mc_admin_start_stage start_stage = MC_ADMIN_START_NONE;
+	bool start_attempted = false;
 #ifdef CONFIG_TRUSTONIC_TEE_LPAE
 	bool dynamic_lpae = false;
 #endif
@@ -318,36 +320,43 @@ static int mobicore_start(void)
 	if (main_ctx.start_ret != TEE_START_NOT_TRIGGERED)
 		goto got_ret;
 
+	start_attempted = true;
+	start_stage = MC_ADMIN_START_LOGGING;
 	ret = mc_logging_start();
 	if (ret) {
 		mc_dev_err("Log start failed");
 		goto err_log;
 	}
 
+	start_stage = MC_ADMIN_START_NQ;
 	ret = nq_start();
 	if (ret) {
 		mc_dev_err("NQ start failed");
 		goto err_nq;
 	}
 
+	start_stage = MC_ADMIN_START_MCP;
 	ret = mcp_start();
 	if (ret) {
 		mc_dev_err("MCP start failed");
 		goto err_mcp;
 	}
 
+	start_stage = MC_ADMIN_START_IWP;
 	ret = iwp_start();
 	if (ret) {
 		mc_dev_err("IWP start failed");
 		goto err_iwp;
 	}
 
+	start_stage = MC_ADMIN_START_SCHEDULER;
 	ret = mc_scheduler_start();
 	if (ret) {
 		mc_dev_err("Scheduler start failed");
 		goto err_sched;
 	}
 
+	start_stage = MC_ADMIN_START_PM;
 	ret = mc_pm_start();
 	if (ret) {
 		mc_dev_err("Power Management start failed");
@@ -355,6 +364,7 @@ static int mobicore_start(void)
 	}
 
 	/* Must be called before creating the user device node to avoid race */
+	start_stage = MC_ADMIN_START_VERSION;
 	ret = mcp_get_version(&version_info);
 	if (ret)
 		goto err_mcp_cmd;
@@ -434,6 +444,7 @@ static int mobicore_start(void)
 		    g_ctx.f_lpae ? "" : "non-");
 
 #ifdef MC_PM_RUNTIME
+	start_stage = MC_ADMIN_START_NOTIFIER;
 	main_ctx.reboot_notifier.notifier_call = reboot_notifier;
 	ret = register_reboot_notifier(&main_ctx.reboot_notifier);
 	if (ret) {
@@ -450,10 +461,12 @@ static int mobicore_start(void)
 	}
 #endif
 
+	start_stage = MC_ADMIN_START_USER_DEVICE;
 	ret = device_user_init();
 	if (ret)
 		goto err_create_dev_user;
 
+	start_stage = MC_ADMIN_START_READY;
 	main_ctx.start_ret = 0;
 	goto got_ret;
 
@@ -479,6 +492,8 @@ err_nq:
 err_log:
 	main_ctx.start_ret = ret;
 got_ret:
+	if (start_attempted)
+		mc_admin_diag_set_start(start_stage, main_ctx.start_ret);
 	mutex_unlock(&main_ctx.start_mutex);
 	return main_ctx.start_ret;
 }
