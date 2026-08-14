@@ -24,6 +24,7 @@
 
 #define UFS_RPMB_SEC_PROTOCOL		0xEC	/* JEDEC UFS application */
 #define UFS_RPMB_SEC_PROTOCOL_ID	0x01	/* JEDEC UFS RPMB protocol ID, CDB byte3 */
+#define UFS_RPMB_CMD_RETRIES		5
 
 /* UFS RPMB device structure */
 struct ufs_rpmb_dev {
@@ -32,10 +33,30 @@ struct ufs_rpmb_dev {
 	struct rpmb_dev *rdev;
 	struct ufs_hba *hba;
 	struct list_head node;
+	atomic_t clear_ua_once;
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	atomic_t trace_route;
 #endif
 };
+
+static int ufs_rpmb_clear_unit_attention(struct ufs_hba *hba)
+{
+	struct scsi_device *sdev = hba->ufs_rpmb_wlun;
+	const struct scsi_exec_args exec_args = {
+		.req_flags = BLK_MQ_REQ_PM,
+	};
+	u8 cdb[6] = {
+		[0] = REQUEST_SENSE,
+		[4] = SCSI_SENSE_BUFFERSIZE,
+	};
+	u8 buffer[SCSI_SENSE_BUFFERSIZE] = { };
+	int ret;
+
+	ret = scsi_execute_cmd(sdev, cdb, REQ_OP_DRV_IN, buffer,
+			       sizeof(buffer), HZ, 3, &exec_args);
+
+	return ret <= 0 ? ret : -EIO;
+}
 
 static int ufs_sec_submit(struct ufs_hba *hba, u16 spsp, void *buffer, size_t len, bool send)
 {
@@ -53,7 +74,8 @@ static int ufs_sec_submit(struct ufs_hba *hba, u16 spsp, void *buffer, size_t le
 
 	ret = scsi_execute_cmd(sdev, cdb,
 			       send ? REQ_OP_DRV_OUT : REQ_OP_DRV_IN,
-			       buffer, len, /*timeout=*/30 * HZ, 0,
+			       buffer, len, /*timeout=*/30 * HZ,
+			       UFS_RPMB_CMD_RETRIES,
 			       &exec_args);
 
 	return ret <= 0 ? ret : -EIO;
@@ -125,6 +147,26 @@ static int ufs_rpmb_route_frames(struct device *dev, u8 *req, unsigned int req_l
 	if (ret) {
 		dev_err(dev, "Failed to resume RPMB WLUN: %d\n", ret);
 		return ret;
+	}
+
+	if (atomic_cmpxchg(&ufs_rpmb->clear_ua_once, 0, 1) == 0) {
+		int ua_ret;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		if (trace_first)
+			dev_info(dev,
+				 "E981D: UFS RPMB first UA clear begin\n");
+#endif
+		ua_ret = ufs_rpmb_clear_unit_attention(hba);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		if (trace_first)
+			dev_info(dev,
+				 "E981D: UFS RPMB first UA clear end ret=%d\n",
+				 ua_ret);
+#endif
+		if (ua_ret)
+			dev_warn(dev, "Failed to clear RPMB unit attention: %d\n",
+				 ua_ret);
 	}
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
@@ -235,6 +277,7 @@ int ufs_rpmb_probe(struct ufs_hba *hba)
 		}
 
 		ufs_rpmb->hba = hba;
+		atomic_set(&ufs_rpmb->clear_ua_once, 0);
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 		atomic_set(&ufs_rpmb->trace_route, 0);
 #endif
