@@ -112,13 +112,17 @@ static void exynos_srpmb_work(struct work_struct *work)
 	u32 request_len;
 	u16 result;
 	int ret;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	bool first_request;
+#endif
 
 	/* Pair with the secure firmware write which raised the interrupt. */
 	dma_rmb();
 	type = READ_ONCE(request->type);
 	data_len = READ_ONCE(request->data_len);
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	if (atomic_inc_return(&srpmb->request_count) == 1)
+	first_request = atomic_inc_return(&srpmb->request_count) == 1;
+	if (first_request)
 		dev_info(srpmb->dev,
 			 "E981D: secure RPMB first request type=%u len=%u\n",
 			 type, data_len);
@@ -183,6 +187,13 @@ static void exynos_srpmb_work(struct work_struct *work)
 
 	response = (struct rpmb_frame *)srpmb->response_buf;
 	memcpy(request->data, srpmb->response_buf, response_len);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (first_request)
+		dev_info(srpmb->dev,
+			 "E981D: secure RPMB first response result=%#x reply=%#x\n",
+			 be16_to_cpu(response->result),
+			 be16_to_cpu(response->req_resp));
+#endif
 
 	if (type == EXYNOS_SRPMB_WRITE_DATA) {
 		result = be16_to_cpu(response->result);
