@@ -7,67 +7,112 @@
 #include <linux/of.h>
 #include <linux/rcupdate.h>
 #include <linux/sched/signal.h>
-#include <linux/stacktrace.h>
 #include <linux/string.h>
 #include <linux/workqueue.h>
 
-#define EXYNOS9810_STALL_DUMP_DELAY	(12 * HZ)
-#define EXYNOS9810_STALL_DUMP_LIMIT	16
-#define EXYNOS9810_STALL_TRACE_LIMIT	8
+#define EXYNOS9810_SERVICE_DUMP_DELAY	(32 * HZ)
+#define EXYNOS9810_SERVICE_DUMP_LIMIT	32
 
-static struct delayed_work exynos9810_stall_dump_work;
+enum exynos9810_service_id {
+	EXYNOS9810_SERVICE_INIT,
+	EXYNOS9810_SERVICE_MANAGER,
+	EXYNOS9810_SERVICE_HW_MANAGER,
+	EXYNOS9810_SERVICE_VND_MANAGER,
+	EXYNOS9810_SERVICE_VOLD,
+	EXYNOS9810_SERVICE_APEXD,
+	EXYNOS9810_SERVICE_KEYSTORE,
+	EXYNOS9810_SERVICE_ZYGOTE,
+	EXYNOS9810_SERVICE_SURFACEFLINGER,
+	EXYNOS9810_SERVICE_SYSTEM_SERVER,
+	EXYNOS9810_SERVICE_ADBD,
+	EXYNOS9810_SERVICE_BOOTANIMATION,
+	EXYNOS9810_SERVICE_ODREFRESH,
+	EXYNOS9810_SERVICE_DEX2OAT,
+	EXYNOS9810_SERVICE_LOGD,
+	EXYNOS9810_SERVICE_COUNT,
+};
 
-static bool exynos9810_stall_dump_group(struct task_struct *group)
+static const char * const exynos9810_service_names[] = {
+	[EXYNOS9810_SERVICE_INIT] = "init",
+	[EXYNOS9810_SERVICE_MANAGER] = "servicemanager",
+	[EXYNOS9810_SERVICE_HW_MANAGER] = "hwservicemanage",
+	[EXYNOS9810_SERVICE_VND_MANAGER] = "vndservicemanag",
+	[EXYNOS9810_SERVICE_VOLD] = "vold",
+	[EXYNOS9810_SERVICE_APEXD] = "apexd",
+	[EXYNOS9810_SERVICE_KEYSTORE] = "keystore2",
+	[EXYNOS9810_SERVICE_ZYGOTE] = "zygote",
+	[EXYNOS9810_SERVICE_SURFACEFLINGER] = "surfaceflinger",
+	[EXYNOS9810_SERVICE_SYSTEM_SERVER] = "system_server",
+	[EXYNOS9810_SERVICE_ADBD] = "adbd",
+	[EXYNOS9810_SERVICE_BOOTANIMATION] = "bootanimation",
+	[EXYNOS9810_SERVICE_ODREFRESH] = "odrefresh",
+	[EXYNOS9810_SERVICE_DEX2OAT] = "dex2oat",
+	[EXYNOS9810_SERVICE_LOGD] = "logd",
+};
+
+static struct delayed_work exynos9810_service_dump_work;
+
+static int exynos9810_service_id(struct task_struct *task)
 {
-	char comm[TASK_COMM_LEN];
+	unsigned int i;
 
-	get_task_comm(comm, group);
+	for (i = 0; i < ARRAY_SIZE(exynos9810_service_names); i++) {
+		const char *name = exynos9810_service_names[i];
 
-	return !strcmp(comm, "init") || !strncmp(comm, "apexd", 5);
+		if (!strncmp(task->comm, name, strlen(name)))
+			return i;
+	}
+
+	return -1;
 }
 
-static void exynos9810_stall_dump_task(struct task_struct *task)
+static void exynos9810_service_dump(struct work_struct *work)
 {
-	unsigned long entries[EXYNOS9810_STALL_TRACE_LIMIT];
-	unsigned long switches, wchan;
+	struct task_struct *task;
+	unsigned long found = 0;
+	unsigned long wchan;
 	char comm[TASK_COMM_LEN];
-	unsigned int i, nr;
-
-	get_task_comm(comm, task);
-	wchan = get_wchan(task);
-	switches = READ_ONCE(task->nvcsw) + READ_ONCE(task->nivcsw);
-	nr = stack_trace_save_tsk(task, entries, ARRAY_SIZE(entries), 0);
-
-	pr_info("E981D: task %s/%d group=%d state=%c/%#x cpu=%d sw=%lu\n",
-		comm, task_pid_nr(task), task_tgid_nr(task),
-		task_state_to_char(task), READ_ONCE(task->__state),
-		task_cpu(task), switches);
-	pr_info("E981D: wait pid=%d oncpu=%u rq=%u io=%u wchan=%ps frames=%u\n",
-		task_pid_nr(task), READ_ONCE(task->on_cpu),
-		READ_ONCE(task->on_rq), task->in_iowait, (void *)wchan, nr);
-
-	for (i = 0; i < nr; i++)
-		pr_info("E981D: stack pid=%d frame=%u/%u %pS\n",
-			task_pid_nr(task), i + 1, nr, (void *)entries[i]);
-}
-
-static void exynos9810_stall_dump(struct work_struct *work)
-{
-	struct task_struct *group, *task;
 	unsigned int count = 0;
+	int id;
 
-	pr_info("E981D: userspace stall task dump begin\n");
+	pr_info("E981D: Android service task dump begin\n");
 	rcu_read_lock();
-	for_each_process_thread(group, task) {
-		if (!exynos9810_stall_dump_group(group))
+	for_each_process(task) {
+		id = exynos9810_service_id(task);
+		if (id < 0)
 			continue;
 
-		exynos9810_stall_dump_task(task);
-		if (++count == EXYNOS9810_STALL_DUMP_LIMIT)
+		get_task_comm(comm, task);
+		found |= BIT(id);
+		wchan = get_wchan(task);
+		pr_info("E981D: service %s/%d threads=%d state=%c cpu=%d\n",
+			comm, task_pid_nr(task), get_nr_threads(task),
+			task_state_to_char(task), task_cpu(task));
+		pr_info("E981D: service pid=%d io=%u wchan=%ps\n",
+			task_pid_nr(task), task->in_iowait, (void *)wchan);
+		if (++count == EXYNOS9810_SERVICE_DUMP_LIMIT)
 			break;
 	}
 	rcu_read_unlock();
-	pr_info("E981D: userspace stall task dump end count=%u\n", count);
+
+	pr_info("E981D: core init=%u sm=%u hw=%u vnd=%u vold=%u apex=%u key=%u\n",
+		!!(found & BIT(EXYNOS9810_SERVICE_INIT)),
+		!!(found & BIT(EXYNOS9810_SERVICE_MANAGER)),
+		!!(found & BIT(EXYNOS9810_SERVICE_HW_MANAGER)),
+		!!(found & BIT(EXYNOS9810_SERVICE_VND_MANAGER)),
+		!!(found & BIT(EXYNOS9810_SERVICE_VOLD)),
+		!!(found & BIT(EXYNOS9810_SERVICE_APEXD)),
+		!!(found & BIT(EXYNOS9810_SERVICE_KEYSTORE)));
+	pr_info("E981D: late zygote=%u sf=%u system=%u adb=%u boot=%u\n",
+		!!(found & BIT(EXYNOS9810_SERVICE_ZYGOTE)),
+		!!(found & BIT(EXYNOS9810_SERVICE_SURFACEFLINGER)),
+		!!(found & BIT(EXYNOS9810_SERVICE_SYSTEM_SERVER)),
+		!!(found & BIT(EXYNOS9810_SERVICE_ADBD)),
+		!!(found & BIT(EXYNOS9810_SERVICE_BOOTANIMATION)));
+	pr_info("E981D: jobs odrefresh=%u dex2oat=%u logd=%u count=%u\n",
+		!!(found & BIT(EXYNOS9810_SERVICE_ODREFRESH)),
+		!!(found & BIT(EXYNOS9810_SERVICE_DEX2OAT)),
+		!!(found & BIT(EXYNOS9810_SERVICE_LOGD)), count);
 }
 
 static int __init exynos9810_stall_diagnostics_init(void)
@@ -75,10 +120,10 @@ static int __init exynos9810_stall_diagnostics_init(void)
 	if (!of_machine_is_compatible("samsung,exynos9810"))
 		return 0;
 
-	INIT_DELAYED_WORK(&exynos9810_stall_dump_work,
-			  exynos9810_stall_dump);
-	schedule_delayed_work(&exynos9810_stall_dump_work,
-			      EXYNOS9810_STALL_DUMP_DELAY);
+	INIT_DELAYED_WORK(&exynos9810_service_dump_work,
+			  exynos9810_service_dump);
+	schedule_delayed_work(&exynos9810_service_dump_work,
+			      EXYNOS9810_SERVICE_DUMP_DELAY);
 
 	return 0;
 }
