@@ -36,15 +36,23 @@ struct ufs_rpmb_dev {
 static int ufs_sec_submit(struct ufs_hba *hba, u16 spsp, void *buffer, size_t len, bool send)
 {
 	struct scsi_device *sdev = hba->ufs_rpmb_wlun;
+	const struct scsi_exec_args exec_args = {
+		.req_flags = BLK_MQ_REQ_PM,
+	};
 	u8 cdb[12] = { };
+	int ret;
 
 	cdb[0] = send ? SECURITY_PROTOCOL_OUT : SECURITY_PROTOCOL_IN;
 	cdb[1] = UFS_RPMB_SEC_PROTOCOL;
 	put_unaligned_be16(spsp, &cdb[2]);
 	put_unaligned_be32(len, &cdb[6]);
 
-	return scsi_execute_cmd(sdev, cdb, send ? REQ_OP_DRV_OUT : REQ_OP_DRV_IN,
-				buffer, len, /*timeout=*/30 * HZ, 0, NULL);
+	ret = scsi_execute_cmd(sdev, cdb,
+			       send ? REQ_OP_DRV_OUT : REQ_OP_DRV_IN,
+			       buffer, len, /*timeout=*/30 * HZ, 0,
+			       &exec_args);
+
+	return ret <= 0 ? ret : -EIO;
 }
 
 /* UFS RPMB route frames implementation */
