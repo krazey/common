@@ -16,6 +16,7 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/regulator/consumer.h>
+#include <linux/workqueue.h>
 
 #define DWC3_EXYNOS_MAX_CLOCKS	4
 
@@ -28,6 +29,9 @@ struct dwc3_exynos_driverdata {
 
 struct dwc3_exynos {
 	struct device		*dev;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	struct delayed_work	diagnostics_work;
+#endif
 
 	const char		**clk_names;
 	struct clk		*clks[DWC3_EXYNOS_MAX_CLOCKS];
@@ -37,6 +41,36 @@ struct dwc3_exynos {
 	struct regulator	*vdd33;
 	struct regulator	*vdd10;
 };
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static int dwc3_exynos_diagnostics_child(struct device *child, void *data)
+{
+	struct device *parent = data;
+	const char *driver;
+	bool bound;
+
+	device_lock(child);
+	bound = device_is_bound(child);
+	driver = child->driver ? child->driver->name : "none";
+	dev_info(parent, "E981D: USB child=%s bound=%u driver=%s\n",
+		 dev_name(child), bound, driver);
+	device_unlock(child);
+
+	return 0;
+}
+
+static void dwc3_exynos_diagnostics_work(struct work_struct *work)
+{
+	struct dwc3_exynos *exynos =
+		container_of(to_delayed_work(work), struct dwc3_exynos,
+			     diagnostics_work);
+
+	dev_info(exynos->dev, "E981D: USB wrapper clocks=%lu/%lu\n",
+		 clk_get_rate(exynos->clks[0]), clk_get_rate(exynos->clks[1]));
+	device_for_each_child(exynos->dev, exynos->dev,
+			      dwc3_exynos_diagnostics_child);
+}
+#endif
 
 static int dwc3_exynos_get_regulator(struct dwc3_exynos *exynos,
 				     struct regulator **regulator,
@@ -80,6 +114,10 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	exynos = devm_kzalloc(dev, sizeof(*exynos), GFP_KERNEL);
 	if (!exynos)
 		return -ENOMEM;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	INIT_DELAYED_WORK(&exynos->diagnostics_work,
+			  dwc3_exynos_diagnostics_work);
+#endif
 
 	driver_data = of_device_get_match_data(dev);
 	exynos->dev = dev;
@@ -132,6 +170,11 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 		goto populate_err;
 	}
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (of_device_is_compatible(node, "samsung,exynos9810-dwusb3"))
+		schedule_delayed_work(&exynos->diagnostics_work, 10 * HZ);
+#endif
+
 	return 0;
 
 populate_err:
@@ -155,6 +198,9 @@ static void dwc3_exynos_remove(struct platform_device *pdev)
 	struct dwc3_exynos	*exynos = platform_get_drvdata(pdev);
 	int i;
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	cancel_delayed_work_sync(&exynos->diagnostics_work);
+#endif
 	of_platform_depopulate(&pdev->dev);
 
 	for (i = exynos->num_clks - 1; i >= 0; i--)
