@@ -193,6 +193,27 @@
 		cpu_suspend = <0xc4000001>;
 	};
 
+	ufs: ufs@11120000 {
+		compatible = "samsung,exynos9810-ufs";
+		reg = <0x0 0x11120000 0x200>,
+		      <0x0 0x11121100 0x200>,
+		      <0x0 0x11110000 0x8000>,
+		      <0x0 0x11130000 0x100>;
+		reg-names = "hci", "vs_hci", "unipro", "ufsp";
+		interrupts = <GIC_SPI 242 IRQ_TYPE_LEVEL_HIGH>;
+		clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_ACLK>,
+			 <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_UNIPRO>;
+		clock-names = "core_clk", "sclk_unipro_main";
+		freq-table-hz = <0 0>, <0 0>;
+		dma-coherent;
+		phys = <&ufs_phy>;
+		phy-names = "ufs-phy";
+		pinctrl-0 = <&ufs_rst_n &ufs_refclk_out>;
+		pinctrl-names = "default";
+		samsung,sysreg = <&sysreg_fsys0 0x700>;
+		status = "disabled";
+	};
+
 	soc: soc@0 {
 		compatible = "simple-bus";
 		ranges = <0x0 0x0 0x0 0x20000000>;
@@ -277,27 +298,6 @@
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x11050000 0x1000>;
 			interrupts = <GIC_SPI 243 IRQ_TYPE_LEVEL_HIGH>;
-		};
-
-		ufs: ufs@11120000 {
-			compatible = "samsung,exynos9810-ufs";
-			reg = <0x11120000 0x200>,
-			      <0x11121100 0x200>,
-			      <0x11110000 0x8000>,
-			      <0x11130000 0x100>;
-			reg-names = "hci", "vs_hci", "unipro", "ufsp";
-			interrupts = <GIC_SPI 242 IRQ_TYPE_LEVEL_HIGH>;
-			clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_ACLK>,
-				 <&cmu_fsys0 CLK_GOUT_FSYS0_UFS_EMBD_UNIPRO>;
-			clock-names = "core_clk", "sclk_unipro_main";
-			freq-table-hz = <0 0>, <0 0>;
-			dma-coherent;
-			phys = <&ufs_phy>;
-			phy-names = "ufs-phy";
-			pinctrl-0 = <&ufs_rst_n &ufs_refclk_out>;
-			pinctrl-names = "default";
-			samsung,sysreg = <&sysreg_fsys0 0x700>;
-			status = "disabled";
 		};
 
 		ufs_phy: ufs-phy@11124000 {
