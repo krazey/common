@@ -170,7 +170,7 @@ static int cbuf_map(struct vm_area_struct *vmarea, uintptr_t addr, u32 len,
 		return -EINVAL;
 	}
 
-	vmarea->vm_flags |= VM_IO;
+	vm_flags_set(vmarea, VM_IO);
 	ret = remap_pfn_range(vmarea, vmarea->vm_start,
 			      page_to_pfn(virt_to_page(addr)),
 			      vmarea->vm_end - vmarea->vm_start,
@@ -1210,7 +1210,7 @@ int client_cbuf_create(struct tee_client *client, u32 len, uintptr_t *addr,
 		return -EINVAL;
 
 	order = get_order(len);
-	if (order > MAX_ORDER) {
+	if (order > MAX_PAGE_ORDER) {
 		mc_dev_err("Buffer size too large");
 		return -ENOMEM;
 	}

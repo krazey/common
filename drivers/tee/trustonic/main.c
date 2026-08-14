@@ -14,6 +14,7 @@
 
 #include <linux/platform_device.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/cdev.h>
 #include <linux/debugfs.h>
 #include <linux/delay.h>
@@ -42,18 +43,7 @@
 #include "build_tag.h"
 #define MC_DEVICE_PROPNAME     "samsung,exynos-tee"
 
-/* Define a MobiCore device structure for use with dev_debug() etc */
-static struct device_driver driver = {
-	.name = "Trustonic"
-};
-
-static struct device device = {
-	.driver = &driver
-};
-
-struct mc_device_ctx g_ctx = {
-	.mcd = &device
-};
+struct mc_device_ctx g_ctx;
 
 static struct {
 	/* TEE start return code */
@@ -392,12 +382,14 @@ static int mobicore_start(void)
 
 	if (MC_VERSION_MAJOR(version_info.version_mci) > 1) {
 		mc_dev_err("MCI too recent for this driver");
+		ret = -EPROTONOSUPPORT;
 		goto err_version;
 	}
 
 	if ((MC_VERSION_MAJOR(version_info.version_mci) == 0) &&
 	    (MC_VERSION_MINOR(version_info.version_mci) < 6)) {
 		mc_dev_err("MCI too old for this driver");
+		ret = -EPROTONOSUPPORT;
 		goto err_version;
 	}
 
@@ -405,31 +397,31 @@ static int mobicore_start(void)
 	switch (version_info.version_mci) {
 	case MC_VERSION(1, 6):	/* 400 */
 		g_ctx.f_monotonic_time = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(1, 5):	/* 400 */
 		g_ctx.f_iwp = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(1, 4):	/* 310 */
 #ifdef CONFIG_TRUSTONIC_TEE_LPAE
 		dynamic_lpae = true;
 #endif
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(1, 3):
 		g_ctx.f_time = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(1, 2):
 		g_ctx.f_client_login = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(1, 1):
 		g_ctx.f_multimap = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(1, 0):	/* 302 */
 		g_ctx.f_mem_ext = true;
 		g_ctx.f_ta_auth = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(0, 7):
 		g_ctx.f_timeout = true;
-		/* Fall through */
+		fallthrough;
 	case MC_VERSION(0, 6):	/* 301 */
 		break;
 	}
@@ -561,7 +553,7 @@ static inline int device_admin_init(void)
 		return ret;
 	}
 
-	main_ctx.class = class_create(THIS_MODULE, "trustonic_tee");
+	main_ctx.class = class_create("trustonic_tee");
 	if (IS_ERR(main_ctx.class)) {
 		mc_dev_err("class_create failed");
 		ret = PTR_ERR(main_ctx.class);
@@ -625,8 +617,7 @@ static int mobicore_probe(struct platform_device *pdev)
 {
 	int err = 0;
 
-	if (pdev)
-		g_ctx.mcd->of_node = pdev->dev.of_node;
+	g_ctx.mcd = &pdev->dev;
 
 #ifdef MOBICORE_COMPONENT_BUILD_TAG
 	mc_dev_info("MobiCore %s", MOBICORE_COMPONENT_BUILD_TAG);
@@ -763,14 +754,13 @@ static struct platform_driver mc_plat_driver = {
 
 static int __init mobicore_init(void)
 {
-	dev_set_name(g_ctx.mcd, "TEE");
 	/*
 	 * Do not remove or change the following trace.
 	 * The string "MobiCore" is used to detect if the TEE is in of the image
 	 */
-	mc_dev_info("MobiCore mcDrvModuleApi version is %d.%d",
-		    MCDRVMODULEAPI_VERSION_MAJOR,
-		    MCDRVMODULEAPI_VERSION_MINOR);
+	pr_info("MobiCore mcDrvModuleApi version is %d.%d\n",
+		MCDRVMODULEAPI_VERSION_MAJOR,
+		MCDRVMODULEAPI_VERSION_MINOR);
 #ifdef MC_DEVICE_PROPNAME
 	return platform_driver_register(&mc_plat_driver);
 #else

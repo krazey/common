@@ -166,7 +166,6 @@ static int hash_path_and_data(struct task_struct *task, u8 *hash,
 		SHASH_DESC_ON_STACK(desc, tfm);
 
 		desc->tfm = tfm;
-		desc->flags = CRYPTO_TFM_REQ_MAY_SLEEP;
 
 		crypto_shash_init(desc);
 		crypto_shash_update(desc, (u8 *)path, path_len);

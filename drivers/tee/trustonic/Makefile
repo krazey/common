@@ -2,7 +2,7 @@
 # Makefile for the Kinibi core driver
 #
 
-GUD_ROOT_FOLDER := drivers/gud/gud-exynos9810
+GUD_ROOT_FOLDER := drivers/tee/trustonic
 
 # add our modules to kernel.
 obj-$(CONFIG_TRUSTONIC_TEE) += mcDrvModule.o
@@ -32,4 +32,4 @@ ccflags-y += -Wno-declaration-after-statement
 ccflags-$(CONFIG_TRUSTONIC_TEE_DEBUG) += -DDEBUG
 
 # MobiCore Driver includes
-ccflags-y += -I$(GUD_ROOT_FOLDER)/MobiCoreDriver
+ccflags-y += -I$(GUD_ROOT_FOLDER)
