@@ -12,6 +12,7 @@
 #include <linux/interrupt.h>
 #include <linux/irq.h>
 #include <linux/module.h>
+#include <linux/mutex.h>
 #include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm_wakeup.h>
@@ -68,6 +69,7 @@ struct exynos_srpmb {
 	u8 *request_buf;
 	struct workqueue_struct *workqueue;
 	struct work_struct work;
+	struct work_struct registration_work;
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	struct delayed_work diagnostics_work;
 #endif
@@ -77,7 +79,11 @@ struct exynos_srpmb {
 	atomic_t request_count;
 #endif
 	int irq;
+	irq_hw_number_t hwirq;
 };
+
+static DEFINE_MUTEX(exynos_srpmb_interface_lock);
+static struct exynos_srpmb *exynos_srpmb_interface_owner;
 
 static void exynos_srpmb_set_status(struct exynos_srpmb *srpmb, u32 status)
 {
@@ -228,14 +234,48 @@ static int exynos_srpmb_pm_notify(struct notifier_block *notifier,
 	return NOTIFY_OK;
 }
 
-static int exynos_srpmb_match_ufs(struct device *dev, const void *unused)
+static int exynos_srpmb_add_rdev(struct device *dev)
 {
-	return to_rpmb_dev(dev)->descr.type == RPMB_TYPE_UFS;
+	struct rpmb_dev *rdev = to_rpmb_dev(dev);
+	struct exynos_srpmb *srpmb;
+
+	if (rdev->descr.type != RPMB_TYPE_UFS)
+		return 0;
+
+	mutex_lock(&exynos_srpmb_interface_lock);
+	srpmb = exynos_srpmb_interface_owner;
+	if (!srpmb || srpmb->rdev)
+		goto out_unlock;
+
+	srpmb->rdev = rpmb_dev_get(rdev);
+	dev_info(srpmb->dev,
+		 "E981D: UFS RPMB endpoint id=%d capacity=%u write=%u\n",
+		 rdev->id, rdev->descr.capacity,
+		 rdev->descr.reliable_wr_count);
+	schedule_work(&srpmb->registration_work);
+
+out_unlock:
+	mutex_unlock(&exynos_srpmb_interface_lock);
+	return 0;
 }
 
-static void exynos_srpmb_put_rdev(void *data)
+static struct class_interface exynos_srpmb_interface = {
+	.add_dev = exynos_srpmb_add_rdev,
+};
+
+static void exynos_srpmb_unregister_interface(void *data)
 {
-	rpmb_dev_put(data);
+	struct exynos_srpmb *srpmb = data;
+
+	mutex_lock(&exynos_srpmb_interface_lock);
+	if (exynos_srpmb_interface_owner == srpmb)
+		exynos_srpmb_interface_owner = NULL;
+	mutex_unlock(&exynos_srpmb_interface_lock);
+
+	rpmb_interface_unregister(&exynos_srpmb_interface);
+	cancel_work_sync(&srpmb->registration_work);
+	rpmb_dev_put(srpmb->rdev);
+	srpmb->rdev = NULL;
 }
 
 static void exynos_srpmb_destroy_workqueue(void *data)
@@ -278,31 +318,44 @@ static void exynos_srpmb_unregister_pm(void *data)
 	unregister_pm_notifier(&srpmb->pm_notifier);
 }
 
+static void exynos_srpmb_registration_work(struct work_struct *work)
+{
+	struct exynos_srpmb *srpmb =
+		container_of(work, struct exynos_srpmb, registration_work);
+	struct arm_smccc_res res;
+	s32 smc_ret;
+
+	dma_wmb();
+	arm_smccc_smc(EXYNOS_SRPMB_SMC_WSM, srpmb->request_dma,
+		      srpmb->hwirq, 0, 0, 0, 0, 0, &res);
+	smc_ret = (s32)res.a0;
+	if (smc_ret) {
+		dev_err(srpmb->dev,
+			"E981D: secure RPMB registration failed: %#x\n",
+			smc_ret);
+		return;
+	}
+
+	dev_info(srpmb->dev,
+		 "E981D: secure RPMB buffer=%pad hwirq=%lu\n",
+		 &srpmb->request_dma, srpmb->hwirq);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	schedule_delayed_work(&srpmb->diagnostics_work, 10 * HZ);
+#endif
+}
+
 static int exynos_srpmb_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct arm_smccc_res res;
 	struct irq_data *irq_data;
 	struct exynos_srpmb *srpmb;
 	irq_hw_number_t hwirq;
 	size_t request_size;
-	s32 smc_ret;
 	int ret;
 
 	srpmb = devm_kzalloc(dev, sizeof(*srpmb), GFP_KERNEL);
 	if (!srpmb)
 		return -ENOMEM;
-
-	srpmb->rdev = rpmb_dev_find_device(NULL, NULL,
-					   exynos_srpmb_match_ufs);
-	if (!srpmb->rdev)
-		return dev_err_probe(dev, -EPROBE_DEFER,
-				     "waiting for UFS RPMB device\n");
-
-	ret = devm_add_action_or_reset(dev, exynos_srpmb_put_rdev,
-				       srpmb->rdev);
-	if (ret)
-		return ret;
 
 	ret = dma_set_mask_and_coherent(dev, DMA_BIT_MASK(32));
 	if (ret)
@@ -333,7 +386,10 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 	hwirq = irqd_to_hwirq(irq_data);
 
 	srpmb->dev = dev;
+	srpmb->hwirq = hwirq;
 	INIT_WORK(&srpmb->work, exynos_srpmb_work);
+	INIT_WORK(&srpmb->registration_work,
+		  exynos_srpmb_registration_work);
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	INIT_DELAYED_WORK(&srpmb->diagnostics_work,
 			  exynos_srpmb_diagnostics_work);
@@ -381,20 +437,31 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 #endif
 
 	platform_set_drvdata(pdev, srpmb);
-	dma_wmb();
-	arm_smccc_smc(EXYNOS_SRPMB_SMC_WSM, srpmb->request_dma, hwirq,
-		      0, 0, 0, 0, 0, &res);
-	smc_ret = (s32)res.a0;
-	if (smc_ret)
-		return dev_err_probe(dev, -EIO,
-				     "secure buffer registration failed: %#x\n",
-				     smc_ret);
 
-	dev_info(dev, "registered secure UFS RPMB buffer at %pad, hwirq %lu\n",
-		 &srpmb->request_dma, hwirq);
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	schedule_delayed_work(&srpmb->diagnostics_work, 10 * HZ);
-#endif
+	mutex_lock(&exynos_srpmb_interface_lock);
+	if (exynos_srpmb_interface_owner) {
+		mutex_unlock(&exynos_srpmb_interface_lock);
+		return dev_err_probe(dev, -EBUSY,
+				     "secure RPMB bridge already registered\n");
+	}
+	exynos_srpmb_interface_owner = srpmb;
+	mutex_unlock(&exynos_srpmb_interface_lock);
+
+	ret = rpmb_interface_register(&exynos_srpmb_interface);
+	if (ret) {
+		mutex_lock(&exynos_srpmb_interface_lock);
+		if (exynos_srpmb_interface_owner == srpmb)
+			exynos_srpmb_interface_owner = NULL;
+		mutex_unlock(&exynos_srpmb_interface_lock);
+		return dev_err_probe(dev, ret,
+				     "cannot watch for UFS RPMB device\n");
+	}
+
+	ret = devm_add_action_or_reset(dev,
+				       exynos_srpmb_unregister_interface,
+				       srpmb);
+	if (ret)
+		return ret;
 
 	return 0;
 }
