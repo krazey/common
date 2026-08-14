@@ -1703,6 +1703,8 @@ static noinline void __init kernel_init_freeable(void)
 
 	cad_pid = get_pid(task_pid(current));
 
+	if (IS_ENABLED(CONFIG_EXYNOS9810_SINGLE_CPU_BRINGUP))
+		setup_max_cpus = 0;
 	smp_prepare_cpus(setup_max_cpus);
 	exynos9810_boot_marker('4', '6');
 
