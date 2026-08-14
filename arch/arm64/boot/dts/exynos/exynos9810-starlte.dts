@@ -27,7 +27,7 @@
 		ranges;
 		bootargs = "earlycon console=ttySAC0,115200n8 \
 root=/dev/ram0 rootfstype=tmpfs clk_ignore_unused \
-maxcpus=1 androidboot.hardware=samsungexynos9810 \
+maxcpus=0 androidboot.hardware=samsungexynos9810 \
 androidboot.selinux=permissive androidboot.debug_level=0x4f4c \
 firmware_class.path=/vendor/firmware bootconfig";
 		stdout-path = "serial0:115200n8";
