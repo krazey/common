@@ -203,6 +203,10 @@
 #define LINKCTRL_FORCE_RXELECIDLE		BIT(18)
 #define LINKCTRL_FORCE_PHYSTATUS		BIT(17)
 #define LINKCTRL_FORCE_PIPE_EN			BIT(16)
+#define EXYNOS9810_LINKCTRL_DIS_QACT_LINKGATE	BIT(12)
+#define EXYNOS9810_LINKCTRL_DIS_QACT_ID0		BIT(11)
+#define EXYNOS9810_LINKCTRL_DIS_QACT_VBUS_VALID	BIT(10)
+#define EXYNOS9810_LINKCTRL_DIS_QACT_BVALID	BIT(9)
 #define LINKCTRL_FORCE_QACT			BIT(8)
 #define LINKCTRL_BUS_FILTER_BYPASS		GENMASK(7, 4)
 
@@ -477,6 +481,7 @@ struct exynos5_usbdrd_phy_config {
 
 struct exynos5_usbdrd_phy_drvdata {
 	const struct exynos5_usbdrd_phy_config *phy_cfg;
+	unsigned int num_phys;
 	const struct exynos5_usbdrd_phy_tuning **phy_tunes;
 	const struct phy_ops *phy_ops;
 	const char * const *clk_names;
@@ -1164,7 +1169,7 @@ static struct phy *exynos5_usbdrd_phy_xlate(struct device *dev,
 {
 	struct exynos5_usbdrd_phy *phy_drd = dev_get_drvdata(dev);
 
-	if (WARN_ON(args->args[0] >= EXYNOS5_DRDPHYS_NUM))
+	if (WARN_ON(args->args[0] >= phy_drd->drv_data->num_phys))
 		return ERR_PTR(-ENODEV);
 
 	return phy_drd->phys[args->args[0]].phy;
@@ -1689,6 +1694,170 @@ static const struct phy_ops exynos850_usbdrd_phy_ops = {
 	.owner		= THIS_MODULE,
 };
 
+static void
+exynos9810_usbdrd_utmi_init(struct exynos5_usbdrd_phy *phy_drd)
+{
+	void __iomem *regs_base = phy_drd->reg_phy;
+	u32 reg;
+
+	/* Keep the link clock active while VBUS is forced in device mode. */
+	reg = readl(regs_base + EXYNOS850_DRD_LINKCTRL);
+	reg |= EXYNOS9810_LINKCTRL_DIS_QACT_LINKGATE |
+	       EXYNOS9810_LINKCTRL_DIS_QACT_ID0 |
+	       EXYNOS9810_LINKCTRL_DIS_QACT_VBUS_VALID |
+	       EXYNOS9810_LINKCTRL_DIS_QACT_BVALID;
+	reg &= ~LINKCTRL_FORCE_QACT;
+	writel(reg, regs_base + EXYNOS850_DRD_LINKCTRL);
+	fsleep(500);
+
+	reg |= LINKCTRL_FORCE_QACT;
+	writel(reg, regs_base + EXYNOS850_DRD_LINKCTRL);
+	fsleep(500);
+
+	/* Reset the link before changing the PHY power state. */
+	reg = readl(regs_base + EXYNOS850_DRD_CLKRST);
+	reg |= CLKRST_LINK_SW_RST;
+	writel(reg, regs_base + EXYNOS850_DRD_CLKRST);
+	fsleep(10);
+	reg &= ~CLKRST_LINK_SW_RST;
+	writel(reg, regs_base + EXYNOS850_DRD_CLKRST);
+
+	/* Exynos9810 uses the v3.0 reset bits for its UTMI PHY. */
+	reg = readl(regs_base + EXYNOS850_DRD_CLKRST);
+	reg |= CLKRST_PHY_SW_RST | CLKRST_PHY_RESET_SEL;
+	writel(reg, regs_base + EXYNOS850_DRD_CLKRST);
+
+	reg = readl(regs_base + EXYNOS850_DRD_HSP_TEST);
+	reg &= ~HSP_TEST_SIDDQ;
+	writel(reg, regs_base + EXYNOS850_DRD_HSP_TEST);
+
+	reg = readl(regs_base + EXYNOS850_DRD_UTMI);
+	reg &= ~(UTMI_FORCE_SUSPEND | UTMI_FORCE_SLEEP | UTMI_DP_PULLDOWN |
+		 UTMI_DM_PULLDOWN);
+	writel(reg, regs_base + EXYNOS850_DRD_UTMI);
+
+	reg = readl(regs_base + EXYNOS850_DRD_HSP);
+	reg |= HSP_EN_UTMISUSPEND | HSP_COMMONONN;
+	writel(reg, regs_base + EXYNOS850_DRD_HSP);
+
+	if (phy_drd->drv_data->phy_tunes)
+		exynos5_usbdrd_apply_phy_tunes(phy_drd,
+					       PTS_UTMI_POSTINIT);
+
+	fsleep(100);
+	reg = readl(regs_base + EXYNOS850_DRD_CLKRST);
+	reg |= CLKRST_PHY_RESET_SEL;
+	reg &= ~(CLKRST_PHY_SW_RST | CLKRST_PORT_RST);
+	writel(reg, regs_base + EXYNOS850_DRD_CLKRST);
+
+	/* The board does not route the PHY's VBUS-valid input pad. */
+	reg = readl(regs_base + EXYNOS850_DRD_LINKCTRL);
+	reg |= FIELD_PREP(LINKCTRL_BUS_FILTER_BYPASS, 0xf);
+	writel(reg, regs_base + EXYNOS850_DRD_LINKCTRL);
+
+	reg = readl(regs_base + EXYNOS850_DRD_UTMI);
+	reg |= UTMI_FORCE_BVALID | UTMI_FORCE_VBUSVALID;
+	writel(reg, regs_base + EXYNOS850_DRD_UTMI);
+
+	reg = readl(regs_base + EXYNOS850_DRD_HSP);
+	reg |= HSP_VBUSVLDEXT | HSP_VBUSVLDEXTSEL;
+	writel(reg, regs_base + EXYNOS850_DRD_HSP);
+
+	/* Select the internal over-current indication used by the vendor tree. */
+	reg = readl(regs_base + EXYNOS850_DRD_LINKPORT);
+	reg |= LINKPORT_HOST_PORT_OVCR_U3_SEL |
+	       LINKPORT_HOST_PORT_OVCR_U2_SEL;
+	writel(reg, regs_base + EXYNOS850_DRD_LINKPORT);
+
+	/* Leave the unported SuperSpeed side in a safe electrical state. */
+	exynos5_usbdrd_usb_v3p1_pipe_override(phy_drd);
+}
+
+static void
+exynos9810_usbdrd_utmi_exit(struct exynos5_usbdrd_phy *phy_drd)
+{
+	void __iomem *regs_base = phy_drd->reg_phy;
+	u32 reg;
+
+	reg = readl(regs_base + EXYNOS850_DRD_UTMI);
+	reg |= UTMI_FORCE_SUSPEND | UTMI_FORCE_SLEEP;
+	writel(reg, regs_base + EXYNOS850_DRD_UTMI);
+
+	reg = readl(regs_base + EXYNOS850_DRD_HSP_TEST);
+	reg |= HSP_TEST_SIDDQ;
+	writel(reg, regs_base + EXYNOS850_DRD_HSP_TEST);
+
+	reg = readl(regs_base + EXYNOS850_DRD_LINKCTRL);
+	reg &= ~LINKCTRL_FORCE_QACT;
+	reg |= EXYNOS9810_LINKCTRL_DIS_QACT_LINKGATE |
+	       EXYNOS9810_LINKCTRL_DIS_QACT_ID0 |
+	       EXYNOS9810_LINKCTRL_DIS_QACT_VBUS_VALID |
+	       EXYNOS9810_LINKCTRL_DIS_QACT_BVALID;
+	writel(reg, regs_base + EXYNOS850_DRD_LINKCTRL);
+}
+
+static int exynos9810_usbdrd_phy_init(struct phy *phy)
+{
+	struct phy_usb_instance *inst = phy_get_drvdata(phy);
+	struct exynos5_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
+	int ret;
+
+	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_core_clks,
+				      phy_drd->core_clks);
+	if (ret)
+		return ret;
+
+	exynos5_usbdrd_phy_isol(inst, false);
+
+	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
+				      phy_drd->clks);
+	if (ret)
+		goto err_isolate;
+
+	scoped_guard(mutex, &phy_drd->phy_mutex)
+		inst->phy_cfg->phy_init(phy_drd);
+
+	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
+				   phy_drd->clks);
+
+	return 0;
+
+err_isolate:
+	exynos5_usbdrd_phy_isol(inst, true);
+	clk_bulk_disable_unprepare(phy_drd->drv_data->n_core_clks,
+				   phy_drd->core_clks);
+	return ret;
+}
+
+static int exynos9810_usbdrd_phy_exit(struct phy *phy)
+{
+	struct phy_usb_instance *inst = phy_get_drvdata(phy);
+	struct exynos5_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
+	int ret;
+
+	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
+				      phy_drd->clks);
+	if (ret)
+		return ret;
+
+	scoped_guard(mutex, &phy_drd->phy_mutex)
+		exynos9810_usbdrd_utmi_exit(phy_drd);
+
+	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
+				   phy_drd->clks);
+	exynos5_usbdrd_phy_isol(inst, true);
+	clk_bulk_disable_unprepare(phy_drd->drv_data->n_core_clks,
+				   phy_drd->core_clks);
+
+	return 0;
+}
+
+static const struct phy_ops exynos9810_usbdrd_phy_ops = {
+	.init		= exynos9810_usbdrd_phy_init,
+	.exit		= exynos9810_usbdrd_phy_exit,
+	.owner		= THIS_MODULE,
+};
+
 static void exynos5_usbdrd_gs101_pipe3_init(struct exynos5_usbdrd_phy *phy_drd)
 {
 	void __iomem *regs_pma = phy_drd->reg_pma;
@@ -1950,6 +2119,14 @@ static const struct exynos5_usbdrd_phy_config phy_cfg_exynos850[] = {
 	},
 };
 
+static const struct exynos5_usbdrd_phy_config phy_cfg_exynos9810[] = {
+	{
+		.id		= EXYNOS5_DRDPHY_UTMI,
+		.phy_isol	= exynos5_usbdrd_phy_isol,
+		.phy_init	= exynos9810_usbdrd_utmi_init,
+	},
+};
+
 static
 const struct exynos5_usbdrd_phy_tuning exynos7870_tunes_utmi_postinit[] = {
 	PHY_TUNING_ENTRY_PHY(EXYNOS5_DRD_PHYPARAM0,
@@ -1993,6 +2170,7 @@ static const char * const exynos5_regulator_names[] = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos2200_usb32drd_phy = {
 	.phy_cfg		= phy_cfg_exynos2200,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos2200),
 	.phy_ops		= &exynos2200_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS2200_PHY_CTRL_USB20,
 	.clk_names		= exynos5_clk_names,
@@ -2006,6 +2184,7 @@ static const struct exynos5_usbdrd_phy_drvdata exynos2200_usb32drd_phy = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos5420_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos5,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos5),
 	.phy_ops		= &exynos5_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS5_USBDRD_PHY_CONTROL,
 	.pmu_offset_usbdrd1_phy	= EXYNOS5420_USBDRD1_PHY_CONTROL,
@@ -2019,6 +2198,7 @@ static const struct exynos5_usbdrd_phy_drvdata exynos5420_usbdrd_phy = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos5250_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos5,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos5),
 	.phy_ops		= &exynos5_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS5_USBDRD_PHY_CONTROL,
 	.clk_names		= exynos5_clk_names,
@@ -2031,6 +2211,7 @@ static const struct exynos5_usbdrd_phy_drvdata exynos5250_usbdrd_phy = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos5433_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos5,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos5),
 	.phy_ops		= &exynos5_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS5_USBDRD_PHY_CONTROL,
 	.pmu_offset_usbdrd1_phy	= EXYNOS5433_USBHOST30_PHY_CONTROL,
@@ -2044,6 +2225,7 @@ static const struct exynos5_usbdrd_phy_drvdata exynos5433_usbdrd_phy = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos7_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos5,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos5),
 	.phy_ops		= &exynos5_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS5_USBDRD_PHY_CONTROL,
 	.clk_names		= exynos5_clk_names,
@@ -2056,6 +2238,7 @@ static const struct exynos5_usbdrd_phy_drvdata exynos7_usbdrd_phy = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos7870_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos7870,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos7870),
 	.phy_tunes		= exynos7870_tunes,
 	.phy_ops		= &exynos7870_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS5_USBDRD_PHY_CONTROL,
@@ -2069,6 +2252,7 @@ static const struct exynos5_usbdrd_phy_drvdata exynos7870_usbdrd_phy = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynos850_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos850,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos850),
 	.phy_ops		= &exynos850_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOS5_USBDRD_PHY_CONTROL,
 	.clk_names		= exynos5_clk_names,
@@ -2095,8 +2279,40 @@ static const struct exynos5_usbdrd_phy_tuning *exynos990_tunes[PTS_MAX] = {
 	[PTS_UTMI_POSTINIT] = exynos990_tunes_utmi_postinit,
 };
 
+static const struct exynos5_usbdrd_phy_tuning
+exynos9810_tunes_utmi_postinit[] = {
+	PHY_TUNING_ENTRY_PHY(EXYNOS850_DRD_HSPPARACON,
+			     (HSPPARACON_TXVREF | HSPPARACON_TXRISE |
+			      HSPPARACON_TXRES | HSPPARACON_TXPREEMPAMP |
+			      HSPPARACON_SQRX | HSPPARACON_COMPDIS),
+			     (FIELD_PREP_CONST(HSPPARACON_TXVREF, 13) |
+			      FIELD_PREP_CONST(HSPPARACON_TXRISE, 1) |
+			      FIELD_PREP_CONST(HSPPARACON_TXRES, 3) |
+			      FIELD_PREP_CONST(HSPPARACON_TXPREEMPAMP, 3) |
+			      FIELD_PREP_CONST(HSPPARACON_SQRX, 4) |
+			      FIELD_PREP_CONST(HSPPARACON_COMPDIS, 3))),
+	PHY_TUNING_ENTRY_LAST
+};
+
+static const struct exynos5_usbdrd_phy_tuning *exynos9810_tunes[PTS_MAX] = {
+	[PTS_UTMI_POSTINIT] = exynos9810_tunes_utmi_postinit,
+};
+
+static const struct exynos5_usbdrd_phy_drvdata exynos9810_usbdrd_phy = {
+	.phy_cfg		= phy_cfg_exynos9810,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos9810),
+	.phy_ops		= &exynos9810_usbdrd_phy_ops,
+	.phy_tunes		= exynos9810_tunes,
+	.pmu_offset_usbdrd0_phy	= EXYNOS9810_PHY_CTRL_USB20,
+	.clk_names		= exynos5_clk_names,
+	.n_clks			= ARRAY_SIZE(exynos5_clk_names),
+	.core_clk_names		= exynos5_core_clk_names,
+	.n_core_clks		= ARRAY_SIZE(exynos5_core_clk_names),
+};
+
 static const struct exynos5_usbdrd_phy_drvdata exynos990_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynos850,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynos850),
 	.phy_ops		= &exynos850_usbdrd_phy_ops,
 	.phy_tunes		= exynos990_tunes,
 	.pmu_offset_usbdrd0_phy	= EXYNOS990_PHY_CTRL_USB20,
@@ -2629,6 +2845,7 @@ static const struct phy_ops exynosautov920_usb31drd_combo_ssphy_ops = {
 static const
 struct exynos5_usbdrd_phy_drvdata exynosautov920_usb31drd_combo_ssphy = {
 	.phy_cfg		= usb31drd_phy_cfg_exynosautov920,
+	.num_phys		= ARRAY_SIZE(usb31drd_phy_cfg_exynosautov920),
 	.phy_ops		= &exynosautov920_usb31drd_combo_ssphy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOSAUTOV920_PHY_CTRL_USB31,
 	.clk_names		= exynos5_clk_names,
@@ -2659,6 +2876,7 @@ exynos5_usbdrd_phy_config usbdrd_hsphy_cfg_exynosautov920[] = {
 static const
 struct exynos5_usbdrd_phy_drvdata exynosautov920_usbdrd_combo_hsphy = {
 	.phy_cfg		= usbdrd_hsphy_cfg_exynosautov920,
+	.num_phys		= ARRAY_SIZE(usbdrd_hsphy_cfg_exynosautov920),
 	.phy_ops		= &exynosautov920_usbdrd_combo_hsphy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOSAUTOV920_PHY_CTRL_USB20,
 	.clk_names		= exynos5_clk_names,
@@ -2687,6 +2905,7 @@ static const struct exynos5_usbdrd_phy_config phy_cfg_exynosautov920[] = {
 
 static const struct exynos5_usbdrd_phy_drvdata exynosautov920_usbdrd_phy = {
 	.phy_cfg		= phy_cfg_exynosautov920,
+	.num_phys		= ARRAY_SIZE(phy_cfg_exynosautov920),
 	.phy_ops		= &exynosautov920_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy	= EXYNOSAUTOV920_PHY_CTRL_USB20,
 	.clk_names		= exynos5_clk_names,
@@ -2863,6 +3082,7 @@ static const char * const gs101_regulator_names[] = {
 
 static const struct exynos5_usbdrd_phy_drvdata gs101_usbd31rd_phy = {
 	.phy_cfg			= phy_cfg_gs101,
+	.num_phys			= ARRAY_SIZE(phy_cfg_gs101),
 	.phy_tunes			= gs101_tunes,
 	.phy_ops			= &gs101_usbdrd_phy_ops,
 	.pmu_offset_usbdrd0_phy		= GS101_PHY_CTRL_USB20,
@@ -2900,6 +3120,9 @@ static const struct of_device_id exynos5_usbdrd_phy_of_match[] = {
 	}, {
 		.compatible = "samsung,exynos850-usbdrd-phy",
 		.data = &exynos850_usbdrd_phy
+	}, {
+		.compatible = "samsung,exynos9810-usbdrd-phy",
+		.data = &exynos9810_usbdrd_phy,
 	}, {
 		.compatible = "samsung,exynos990-usbdrd-phy",
 		.data = &exynos990_usbdrd_phy
@@ -3020,7 +3243,7 @@ static int exynos5_usbdrd_phy_probe(struct platform_device *pdev)
 
 	dev_vdbg(dev, "Creating usbdrd_phy phy\n");
 
-	for (i = 0; i < EXYNOS5_DRDPHYS_NUM; i++) {
+	for (i = 0; i < drv_data->num_phys; i++) {
 		struct phy *phy = devm_phy_create(dev, NULL, drv_data->phy_ops);
 
 		if (IS_ERR(phy))
