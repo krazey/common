@@ -143,6 +143,14 @@ firmware_class.path=/vendor/firmware bootconfig";
 	status = "okay";
 };
 
+&usbdrd {
+	status = "okay";
+};
+
+&usbdrd_phy {
+	status = "okay";
+};
+
 &ufs {
 	vcc-supply = <&ufs_vcc>;
 	status = "okay";
