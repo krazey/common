@@ -62,7 +62,7 @@
 #define CPU_IDS {0x0000, 0x0001, 0x0002, 0x0003}
 #elif defined(CONFIG_SOC_EXYNOS7580) || defined(CONFIG_SOC_EXYNOS7870) || defined(CONFIG_SOC_EXYNOS7880)
 #define CPU_IDS {0x0000, 0x0001, 0x0002, 0x0003, 0x0100, 0x0101, 0x0102, 0x0103}
-#elif defined(CONFIG_SOC_EXYNOS9810)
+#elif defined(CONFIG_SOC_EXYNOS9810) || defined(CONFIG_ARCH_EXYNOS)
 /* On Cortex A55, bit 24 is used to differentiate
  * between different MPIDR format. So the whole MPIDR
  * must be transmited
@@ -80,7 +80,8 @@
 /* SWd LPAE */
 #if defined(CONFIG_SOC_EXYNOS5433) || defined(CONFIG_SOC_EXYNOS7420) || \
 	defined(CONFIG_SOC_EXYNOS7580) || defined(CONFIG_SOC_EXYNOS7870) || \
-	defined(CONFIG_SOC_EXYNOS8890) || defined(CONFIG_SOC_EXYNOS7880) || defined(CONFIG_SOC_EXYNOS8895)
+	defined(CONFIG_SOC_EXYNOS8890) || defined(CONFIG_SOC_EXYNOS7880) || \
+	defined(CONFIG_SOC_EXYNOS8895) || defined(CONFIG_ARCH_EXYNOS)
 #ifndef CONFIG_TRUSTONIC_TEE_LPAE
 #define CONFIG_TRUSTONIC_TEE_LPAE
 #endif

@@ -188,13 +188,13 @@ int nq_session_notify(struct nq_session *session, u32 id, u32 payload)
 
 void nq_update_time(void)
 {
-	struct timespec tm;
+	struct timespec64 tm;
 
-	getnstimeofday(&tm);
+	ktime_get_real_ts64(&tm);
 	l_ctx.time->wall_clock_seconds = tm.tv_sec;
 	l_ctx.time->wall_clock_nsec = tm.tv_nsec;
 	if (g_ctx.f_monotonic_time) {
-		getrawmonotonic(&tm);
+		ktime_get_raw_ts64(&tm);
 		l_ctx.time->monotonic_seconds = tm.tv_sec;
 		l_ctx.time->monotonic_nsec = tm.tv_nsec;
 	}
@@ -647,8 +647,15 @@ int nq_start(void)
 		mc_dev_err("irq_bh_worker thread creation failed");
 		return PTR_ERR(l_ctx.irq_bh_thread);
 	}
-	return request_irq(l_ctx.irq, irq_handler, IRQF_TRIGGER_RISING,
-			   "trustonic", NULL);
+	ret = request_irq(l_ctx.irq, irq_handler, IRQF_TRIGGER_RISING,
+			  "trustonic", NULL);
+	if (ret) {
+		l_ctx.irq_bh_active = false;
+		kthread_stop(l_ctx.irq_bh_thread);
+		l_ctx.irq_bh_thread = NULL;
+	}
+
+	return ret;
 }
 
 void nq_stop(void)

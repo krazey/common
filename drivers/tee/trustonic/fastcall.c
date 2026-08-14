@@ -26,6 +26,7 @@
 #include <linux/uaccess.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
+#include <linux/arm-smccc.h>
 
 #include "public/mc_user.h"
 #include "public/mc_linux_api.h"
@@ -128,7 +129,10 @@ union mc_fc_swich_core {
 
 #ifdef MC_FASTCALL_WORKER_THREAD
 static struct task_struct *fastcall_thread;
-static DEFINE_KTHREAD_WORKER(fastcall_worker);
+static struct kthread_worker fastcall_worker;
+#ifdef TBASE_CORE_SWITCHER
+static enum cpuhp_state fastcall_cpuhp_state = CPUHP_INVALID;
+#endif
 #endif
 
 /* Structure to log SMC calls */
@@ -162,26 +166,17 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 #else /* MC_SMC_FASTCALL */
 	{
 #ifdef CONFIG_ARM64
-		/* SMC expect values in x0-x3 */
-		register u64 reg0 __asm__("x0") = mc_fc_generic->as_in.cmd;
-		register u64 reg1 __asm__("x1") = mc_fc_generic->as_in.param[0];
-		register u64 reg2 __asm__("x2") = mc_fc_generic->as_in.param[1];
-		register u64 reg3 __asm__("x3") = mc_fc_generic->as_in.param[2];
+		struct arm_smccc_res res;
 
-		/*
-		 * According to AARCH64 SMC Calling Convention (ARM DEN 0028A),
-		 * section 3.1: registers x4-x17 are unpredictable/scratch
-		 * registers.  So we have to make sure that the compiler does
-		 * not allocate any of those registers by letting him know that
-		 * the asm code might clobber them.
-		 */
-		__asm__ volatile (
-			"smc #0\n"
-			: "+r"(reg0), "+r"(reg1), "+r"(reg2), "+r"(reg3)
-			:
-			: "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
-			  "x12", "x13", "x14", "x15", "x16", "x17"
-		);
+		arm_smccc_smc(mc_fc_generic->as_in.cmd,
+			      mc_fc_generic->as_in.param[0],
+			      mc_fc_generic->as_in.param[1],
+			      mc_fc_generic->as_in.param[2],
+			      0, 0, 0, 0, &res);
+		mc_fc_generic->as_out.resp = res.a0;
+		mc_fc_generic->as_out.ret = res.a1;
+		mc_fc_generic->as_out.param[0] = res.a2;
+		mc_fc_generic->as_out.param[1] = res.a3;
 #else /* CONFIG_ARM64 */
 		/* SMC expect values in r0-r3 */
 		register u32 reg0 __asm__("r0") = mc_fc_generic->as_in.cmd;
@@ -217,10 +212,12 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 #endif /* !CONFIG_ARM64 */
 
 		/* set response */
+#ifndef CONFIG_ARM64
 		mc_fc_generic->as_out.resp     = reg0;
 		mc_fc_generic->as_out.ret      = reg1;
 		mc_fc_generic->as_out.param[0] = reg2;
 		mc_fc_generic->as_out.param[1] = reg3;
+#endif
 	}
 	return 0;
 #endif /* !MC_SMC_FASTCALL */
@@ -228,8 +225,8 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 
 #ifdef TBASE_CORE_SWITCHER
 static int active_cpu;
-static int swap_ref;
 #ifdef CONFIG_SECURE_OS_BOOSTER_API
+static int swap_ref;
 /* ExySp: for sos performance */
 void mc_set_schedule_policy(int core)
 {
@@ -525,13 +522,14 @@ int mc_fastcall_init(void)
 		return ret;
 
 #ifdef MC_FASTCALL_WORKER_THREAD
+	kthread_init_worker(&fastcall_worker);
 	fastcall_thread = kthread_create(kthread_worker_fn, &fastcall_worker,
 					 "tee_fastcall");
 	if (IS_ERR(fastcall_thread)) {
 		ret = PTR_ERR(fastcall_thread);
 		fastcall_thread = NULL;
 		mc_dev_err("cannot create fastcall wq: %d", ret);
-		return ret;
+		goto err_clock;
 	}
 
 	/* ExySp */
@@ -551,8 +549,9 @@ int mc_fastcall_init(void)
 #endif
 	if (ret < 0) {
 		mc_dev_err("cpu online callback setup failed: %d", ret);
-		return ret;
+		goto err_thread;
 	}
+	fastcall_cpuhp_state = ret;
 
 	/* Create debugfs structs entry */
 	debugfs_create_file("active_cpu", 0600, g_ctx.debug_dir, NULL,
@@ -567,6 +566,15 @@ int mc_fastcall_init(void)
 #endif
 
 	return 0;
+
+#ifdef MC_FASTCALL_WORKER_THREAD
+err_thread:
+	kthread_stop(fastcall_thread);
+	fastcall_thread = NULL;
+err_clock:
+	mc_clock_exit();
+	return ret;
+#endif
 }
 
 void mc_fastcall_exit(void)
@@ -577,7 +585,10 @@ void mc_fastcall_exit(void)
 #if KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
 		unregister_cpu_notifier(&mobicore_cpu_notifer);
 #else
-		cpuhp_remove_state_nocalls(CPUHP_AP_ONLINE_DYN);
+		if (fastcall_cpuhp_state != CPUHP_INVALID) {
+			cpuhp_remove_state_nocalls(fastcall_cpuhp_state);
+			fastcall_cpuhp_state = CPUHP_INVALID;
+		}
 #endif
 #endif
 		kthread_stop(fastcall_thread);

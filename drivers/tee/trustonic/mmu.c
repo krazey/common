@@ -76,14 +76,6 @@
  */
 #define L1_ENTRIES_MAX	512
 
-#if KERNEL_VERSION(4, 6, 0) > LINUX_VERSION_CODE
-static inline long gup_local(struct mm_struct *mm, uintptr_t start,
-			     unsigned long nr_pages, int write,
-			     struct page **pages)
-{
-	return get_user_pages(NULL, mm, start, nr_pages, write, 0, pages, NULL);
-}
-#elif KERNEL_VERSION(4, 9, 0) > LINUX_VERSION_CODE
 static inline long gup_local(struct mm_struct *mm, uintptr_t start,
 			     unsigned long nr_pages, int write,
 			     struct page **pages)
@@ -93,45 +85,8 @@ static inline long gup_local(struct mm_struct *mm, uintptr_t start,
 	if (write)
 		flags |= FOLL_WRITE;
 
-	/* ExySp */
-	flags |= FOLL_CMA;
-
-	return get_user_pages_remote(NULL, mm, start, nr_pages, write, 0, pages,
-				     NULL);
+	return get_user_pages_remote(mm, start, nr_pages, flags, pages, NULL);
 }
-#elif KERNEL_VERSION(4, 10, 0) > LINUX_VERSION_CODE
-static inline long gup_local(struct mm_struct *mm, uintptr_t start,
-			     unsigned long nr_pages, int write,
-			     struct page **pages)
-{
-	unsigned int flags = 0;
-
-	if (write)
-		flags |= FOLL_WRITE;
-
-	/* ExySp */
-	flags |= FOLL_CMA;
-
-	return get_user_pages_remote(NULL, mm, start, nr_pages, flags, pages,
-				     NULL);
-}
-#else
-static inline long gup_local(struct mm_struct *mm, uintptr_t start,
-			     unsigned long nr_pages, int write,
-			     struct page **pages)
-{
-	unsigned int flags = 0;
-
-	if (write)
-		flags |= FOLL_WRITE;
-
-	/* ExySp */
-	flags |= FOLL_CMA;
-
-	return get_user_pages_remote(NULL, mm, start, nr_pages, flags, pages,
-				     NULL, NULL);
-}
-#endif
 
 static inline long gup_local_repeat(struct mm_struct *mm, uintptr_t start,
 				    unsigned long nr_pages, int write,
@@ -532,7 +487,7 @@ struct tee_mmu *tee_mmu_create(struct mm_struct *mm,
 			long gup_ret;
 
 			/* Buffer was allocated in user space */
-			down_read(&mm->mmap_sem);
+			mmap_read_lock(mm);
 			gup_ret = gup_local_repeat(mm, (uintptr_t)reader,
 						   pages_nr, 1, pages);
 			if ((gup_ret == -EFAULT) && !write) {
@@ -540,7 +495,7 @@ struct tee_mmu *tee_mmu_create(struct mm_struct *mm,
 							   (uintptr_t)reader,
 							   pages_nr, 0, pages);
 			}
-			up_read(&mm->mmap_sem);
+			mmap_read_unlock(mm);
 			if (gup_ret < 0) {
 				ret = gup_ret;
 				mc_dev_err("failed to get user pages @%p: %d",
@@ -552,7 +507,7 @@ struct tee_mmu *tee_mmu_create(struct mm_struct *mm,
 			if (gup_ret != pages_nr) {
 				mc_dev_err("failed to get user pages: %ld",
 					   gup_ret);
-				release_pages(pages, gup_ret, 0);
+				release_pages(pages, gup_ret);
 				ret = -EINVAL;
 				goto end;
 			}

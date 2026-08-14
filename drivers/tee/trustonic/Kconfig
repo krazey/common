@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: GPL-2.0-only
+
+config TRUSTONIC_TEE
+	bool "Trustonic MobiCore TEE support"
+	depends on ARM64 && ARCH_EXYNOS
+	select DMA_SHARED_BUFFER
+	help
+	  Enable the Trustonic MobiCore interface used by the secure-world
+	  firmware on Samsung Exynos9810 devices.
+
+config TRUSTONIC_TEE_LPAE
+	bool
+	depends on TRUSTONIC_TEE
+	default y
