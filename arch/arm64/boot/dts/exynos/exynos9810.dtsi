@@ -161,6 +161,13 @@
 		clock-output-names = "dout_clkcmu_fsys0_ufs_embd";
 	};
 
+	fsys0_usb_bootclk: fsys0-usb-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <266500000>;
+		clock-output-names = "dout_clkcmu_fsys0_usb30drd";
+	};
+
 	pmu-a55 {
 		compatible = "arm,cortex-a55-pmu";
 		interrupts = <GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>,
@@ -288,15 +295,40 @@
 			interrupts = <GIC_SPI 421 IRQ_TYPE_LEVEL_HIGH>;
 		};
 
+		usbdrd: usb@10c00000 {
+			compatible = "samsung,exynos9810-dwusb3";
+			reg = <0x10c00000 0x10000>;
+			clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_LINK>,
+				 <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_REF>;
+			clock-names = "aclk", "sclk";
+			#address-cells = <1>;
+			#size-cells = <1>;
+			ranges = <0x0 0x10c00000 0x10000>;
+			status = "disabled";
+
+			usbdrd_dwc3: dwc3@0 {
+				compatible = "snps,dwc3";
+				reg = <0x0 0x10000>;
+				interrupts = <GIC_SPI 244 IRQ_TYPE_LEVEL_HIGH>;
+				dr_mode = "peripheral";
+				maximum-speed = "high-speed";
+				phys = <&usbdrd_phy 0>;
+				phy-names = "usb2-phy";
+				snps,dis-u2-freeclk-exists-quirk;
+				snps,quirk-frame-length-adjustment = <0x20>;
+			};
+		};
+
 		cmu_fsys0: clock-controller@11000000 {
 			compatible = "samsung,exynos9810-cmu-fsys0";
 			reg = <0x11000000 0x8000>;
 			#clock-cells = <1>;
 
 			clocks = <&oscclk>, <&fsys0_bus_bootclk>,
-				 <&fsys0_ufs_bootclk>;
+				 <&fsys0_ufs_bootclk>, <&fsys0_usb_bootclk>;
 			clock-names = "oscclk", "dout_clkcmu_fsys0_bus",
-				      "dout_clkcmu_fsys0_ufs_embd";
+				      "dout_clkcmu_fsys0_ufs_embd",
+				      "dout_clkcmu_fsys0_usb30drd";
 		};
 
 		sysreg_fsys0: system-controller@11010000 {
@@ -308,6 +340,17 @@
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x11050000 0x1000>;
 			interrupts = <GIC_SPI 243 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		usbdrd_phy: phy@11100000 {
+			compatible = "samsung,exynos9810-usbdrd-phy";
+			reg = <0x11100000 0x200>;
+			clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_LINK>,
+				 <&oscclk>;
+			clock-names = "phy", "ref";
+			samsung,pmu-syscon = <&pmu_system_controller>;
+			#phy-cells = <1>;
+			status = "disabled";
 		};
 
 		ufs_phy: ufs-phy@11124000 {
