@@ -205,6 +205,10 @@
 		interrupts = <GIC_SPI 233 IRQ_TYPE_EDGE_RISING>;
 	};
 
+	trng: rng {
+		compatible = "samsung,exynos9810-trng";
+	};
+
 	ufs-srpmb {
 		compatible = "samsung,ufs-srpmb";
 		interrupts = <GIC_SPI 460 IRQ_TYPE_EDGE_RISING>;
