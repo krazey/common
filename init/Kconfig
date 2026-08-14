@@ -1338,6 +1338,14 @@ config CGROUP_CPUACCT
 	  Provides a simple controller for monitoring the
 	  total CPU consumed by the tasks in a cgroup.
 
+config CGROUP_SCHEDTUNE
+	bool "Legacy Android schedtune controller"
+	help
+	  Provide the legacy cgroup v1 schedtune interface used by Android
+	  task profiles.  The controller retains task grouping and the
+	  historical tuning files while CPU performance policy is handled by
+	  the mainline CPU controller and utilization clamping.
+
 config CGROUP_PERF
 	bool "Perf controller"
 	depends on PERF_EVENTS
