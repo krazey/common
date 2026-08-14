@@ -49,9 +49,17 @@
 #include <asm/processor.h>
 #include <asm/smp_plat.h>
 #include <asm/sections.h>
+#include <asm/setup.h>
 #include <asm/tlbflush.h>
 #include <asm/ptrace.h>
 #include <asm/virt.h>
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define exynos9810_cpu_up_marker(stage) \
+	exynos9810_boot_marker('A', (stage))
+#else
+#define exynos9810_cpu_up_marker(stage) ((void)(stage))
+#endif
 
 #include <trace/events/ipi.h>
 #undef CREATE_TRACE_POINTS
@@ -119,15 +127,19 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	int ret;
 	long status;
 
+	exynos9810_cpu_up_marker('0');
 	/*
 	 * We need to tell the secondary core where to find its stack and the
 	 * page tables.
 	 */
 	secondary_data.task = idle;
 	update_cpu_boot_status(CPU_MMU_OFF);
+	exynos9810_cpu_up_marker('1');
 
 	/* Now bring the CPU into our world */
+	exynos9810_cpu_up_marker('2');
 	ret = boot_secondary(cpu, idle);
+	exynos9810_cpu_up_marker('3');
 	if (ret) {
 		if (ret != -EPERM)
 			pr_err("CPU%u: failed to boot: %d\n", cpu, ret);
@@ -138,11 +150,14 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	 * CPU was successfully started, wait for it to come online or
 	 * time out.
 	 */
+	exynos9810_cpu_up_marker('4');
 	wait_for_completion_timeout(&cpu_running,
 				    msecs_to_jiffies(5000));
+	exynos9810_cpu_up_marker('5');
 	if (cpu_online(cpu))
 		return 0;
 
+	exynos9810_cpu_up_marker('F');
 	pr_crit("CPU%u: failed to come online\n", cpu);
 	secondary_data.task = NULL;
 	status = READ_ONCE(secondary_data.status);

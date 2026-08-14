@@ -38,6 +38,15 @@
 #include <linux/cc_platform.h>
 #include <linux/parser.h>
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#define exynos9810_cpuhp_marker(first, second) \
+	exynos9810_boot_marker((first), (second))
+#else
+#define exynos9810_cpuhp_marker(first, second) \
+	do { (void)(first); (void)(second); } while (0)
+#endif
+
 #include <trace/events/power.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/cpuhp.h>
@@ -866,8 +875,10 @@ static int bringup_cpu(unsigned int cpu)
 	struct task_struct *idle = idle_thread_get(cpu);
 	int ret;
 
+	exynos9810_cpuhp_marker('M', '0');
 	if (!cpuhp_can_boot_ap(cpu))
 		return -EAGAIN;
+	exynos9810_cpuhp_marker('M', '1');
 
 	/*
 	 * Some architectures have to walk the irq descriptors to
@@ -878,29 +889,40 @@ static int bringup_cpu(unsigned int cpu)
 	 * startup in cpuhp_online_idle() which allows to avoid
 	 * intermediate synchronization points in the architecture code.
 	 */
+	exynos9810_cpuhp_marker('M', '2');
 	irq_lock_sparse();
+	exynos9810_cpuhp_marker('M', '3');
 
+	exynos9810_cpuhp_marker('M', '4');
 	ret = __cpu_up(cpu, idle);
+	exynos9810_cpuhp_marker('M', '5');
 	if (ret)
 		goto out_unlock;
 
 	ret = cpuhp_bp_sync_alive(cpu);
+	exynos9810_cpuhp_marker('M', '6');
 	if (ret)
 		goto out_unlock;
 
 	ret = bringup_wait_for_ap_online(cpu);
+	exynos9810_cpuhp_marker('M', '7');
 	if (ret)
 		goto out_unlock;
 
 	irq_unlock_sparse();
+	exynos9810_cpuhp_marker('M', '8');
 
 	if (st->target <= CPUHP_AP_ONLINE_IDLE)
 		return 0;
 
-	return cpuhp_kick_ap(cpu, st, st->target);
+	exynos9810_cpuhp_marker('M', '9');
+	ret = cpuhp_kick_ap(cpu, st, st->target);
+	exynos9810_cpuhp_marker('M', 'A');
+	return ret;
 
 out_unlock:
 	irq_unlock_sparse();
+	exynos9810_cpuhp_marker('M', 'F');
 	return ret;
 }
 #endif
@@ -1619,7 +1641,9 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
 	struct task_struct *idle;
 	int ret = 0;
 
+	exynos9810_cpuhp_marker('L', '0');
 	cpus_write_lock();
+	exynos9810_cpuhp_marker('L', '1');
 
 	if (!cpu_present(cpu)) {
 		ret = -EINVAL;
@@ -1647,10 +1671,12 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
 		scs_task_reset(idle);
 		kasan_unpoison_task_stack(idle);
 	}
+	exynos9810_cpuhp_marker('L', '2');
 
 	cpuhp_tasks_frozen = tasks_frozen;
 
 	cpuhp_set_state(cpu, st, target);
+	exynos9810_cpuhp_marker('L', '3');
 	/*
 	 * If the current CPU state is in the range of the AP hotplug thread,
 	 * then we need to kick the thread once more.
@@ -1671,9 +1697,13 @@ static int _cpu_up(unsigned int cpu, int tasks_frozen, enum cpuhp_state target)
 	 * responsible for bringing it up to the target state.
 	 */
 	target = min((int)target, CPUHP_BRINGUP_CPU);
+	exynos9810_cpuhp_marker('L', '4');
 	ret = cpuhp_up_callbacks(cpu, st, target);
+	exynos9810_cpuhp_marker('L', '5');
 out:
+	exynos9810_cpuhp_marker('L', '6');
 	cpus_write_unlock();
+	exynos9810_cpuhp_marker('L', '7');
 	arch_smt_update();
 	return ret;
 }
@@ -1768,8 +1798,12 @@ static void __init cpuhp_bringup_mask(const struct cpumask *mask, unsigned int n
 
 	for_each_cpu(cpu, mask) {
 		struct cpuhp_cpu_state *st = per_cpu_ptr(&cpuhp_state, cpu);
+		int ret;
 
-		if (cpu_up(cpu, target) && can_rollback_cpu(st)) {
+		exynos9810_cpuhp_marker('N', '0' + cpu);
+		ret = cpu_up(cpu, target);
+		exynos9810_cpuhp_marker('O', '0' + cpu);
+		if (ret && can_rollback_cpu(st)) {
 			/*
 			 * If this failed then cpu_up() might have only
 			 * rolled back to CPUHP_BP_KICK_AP for the final
