@@ -18,6 +18,7 @@
 #include <uapi/linux/psci.h>
 
 #include <asm/cpu_ops.h>
+#include <asm/cputype.h>
 #include <asm/errno.h>
 #include <asm/setup.h>
 #include <asm/smp_plat.h>
@@ -37,6 +38,10 @@ static int __init cpu_psci_cpu_init(unsigned int cpu)
 
 static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 {
+	if (IS_ENABLED(CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS) &&
+	    MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1)
+		return -EOPNOTSUPP;
+
 	if (!psci_ops.cpu_on) {
 		pr_err("no cpu_on method, not booting CPU%d\n", cpu);
 		return -ENODEV;
