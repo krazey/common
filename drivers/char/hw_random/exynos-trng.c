@@ -48,6 +48,7 @@
 
 /* Driver feature flags */
 #define EXYNOS_SMC			BIT(0)
+#define EXYNOS_NO_CLOCKS		BIT(1)
 
 #define EXYNOS_SMC_CALL_VAL(func_num)			\
 	ARM_SMCCC_CALL_VAL(ARM_SMCCC_FAST_CALL,		\
@@ -221,18 +222,20 @@ static int exynos_trng_probe(struct platform_device *pdev)
 		goto err_pm_get;
 	}
 
-	trng->clk = devm_clk_get_enabled(&pdev->dev, "secss");
-	if (IS_ERR(trng->clk)) {
-		ret = dev_err_probe(&pdev->dev, PTR_ERR(trng->clk),
-				    "Could not get clock\n");
-		goto err_clock;
-	}
+	if (!(trng->flags & EXYNOS_NO_CLOCKS)) {
+		trng->clk = devm_clk_get_enabled(&pdev->dev, "secss");
+		if (IS_ERR(trng->clk)) {
+			ret = dev_err_probe(&pdev->dev, PTR_ERR(trng->clk),
+					    "Could not get clock\n");
+			goto err_clock;
+		}
 
-	trng->pclk = devm_clk_get_optional_enabled(&pdev->dev, "pclk");
-	if (IS_ERR(trng->pclk)) {
-		ret = dev_err_probe(&pdev->dev, PTR_ERR(trng->pclk),
-				    "Could not get pclk\n");
-		goto err_clock;
+		trng->pclk = devm_clk_get_optional_enabled(&pdev->dev, "pclk");
+		if (IS_ERR(trng->pclk)) {
+			ret = dev_err_probe(&pdev->dev, PTR_ERR(trng->pclk),
+					    "Could not get pclk\n");
+			goto err_clock;
+		}
 	}
 
 	ret = devm_hwrng_register(&pdev->dev, &trng->rng);
@@ -320,6 +323,9 @@ static DEFINE_SIMPLE_DEV_PM_OPS(exynos_trng_pm_ops, exynos_trng_suspend,
 static const struct of_device_id exynos_trng_dt_match[] = {
 	{
 		.compatible = "samsung,exynos5250-trng",
+	}, {
+		.compatible = "samsung,exynos9810-trng",
+		.data = (void *)(EXYNOS_SMC | EXYNOS_NO_CLOCKS),
 	}, {
 		.compatible = "samsung,exynos850-trng",
 		.data = (void *)EXYNOS_SMC,
