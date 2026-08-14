@@ -18,6 +18,7 @@
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
+#include <linux/of.h>
 
 #include <linux/usb/ch9.h>
 #include <linux/usb/gadget.h>
@@ -29,6 +30,51 @@
 
 #define DWC3_ALIGN_FRAME(d, n)	(((d)->frame_number + ((d)->interval * (n))) \
 					& ~((d)->interval - 1))
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
+{
+	struct dwc3 *dwc =
+		container_of(to_delayed_work(work), struct dwc3,
+			     exynos9810_diagnostics_work);
+	unsigned long flags;
+	bool driver_bound;
+	bool connected;
+	bool pullups;
+	bool softconnect;
+	u32 dctl, dsts, gctl;
+	u8 speed;
+
+	spin_lock_irqsave(&dwc->lock, flags);
+	driver_bound = !!dwc->gadget_driver;
+	connected = dwc->connected;
+	pullups = dwc->pullups_connected;
+	softconnect = dwc->softconnect;
+	speed = dwc->speed;
+	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	gctl = dwc3_readl(dwc, DWC3_GCTL);
+	dctl = dwc3_readl(dwc, DWC3_DCTL);
+	dsts = dwc3_readl(dwc, DWC3_DSTS);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 sample=%u rev=%#x irq=%u driver=%u conn=%u soft=%u pullup=%u speed=%u\n",
+		 dwc->exynos9810_diagnostics_count + 1, dwc->revision,
+		 dwc->irq_gadget, driver_bound, connected, softconnect, pullups,
+		 speed);
+	dev_info(dwc->dev, "E981D: DWC3 gctl=%#x dctl=%#x dsts=%#x\n",
+		 gctl, dctl, dsts);
+	if (++dwc->exynos9810_diagnostics_count < 2)
+		schedule_delayed_work(&dwc->exynos9810_diagnostics_work,
+				      10 * HZ);
+}
+
+static bool dwc3_is_exynos9810(struct dwc3 *dwc)
+{
+	return dwc->dev->parent && dwc->dev->parent->of_node &&
+		of_device_is_compatible(dwc->dev->parent->of_node,
+					"samsung,exynos9810-dwusb3");
+}
+#endif
 
 /**
  * dwc3_gadget_set_test_mode - enables usb2 test modes
@@ -4790,6 +4836,18 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	else
 		dwc3_gadget_set_speed(dwc->gadget, dwc->maximum_speed);
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (dwc3_is_exynos9810(dwc)) {
+		if (!dwc->exynos9810_diagnostics_initialized) {
+			INIT_DELAYED_WORK(&dwc->exynos9810_diagnostics_work,
+					  dwc3_exynos9810_diagnostics_work);
+			dwc->exynos9810_diagnostics_initialized = true;
+		}
+		mod_delayed_work(system_wq, &dwc->exynos9810_diagnostics_work,
+				 10 * HZ);
+	}
+#endif
+
 	/* No system wakeup if no gadget driver bound */
 	if (dwc->sys_wakeup)
 		device_wakeup_disable(dwc->sysdev);
@@ -4821,6 +4879,11 @@ EXPORT_SYMBOL_GPL(dwc3_gadget_init);
 
 void dwc3_gadget_exit(struct dwc3 *dwc)
 {
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (dwc->exynos9810_diagnostics_initialized)
+		cancel_delayed_work_sync(&dwc->exynos9810_diagnostics_work);
+#endif
+
 	if (!dwc->gadget)
 		return;
 

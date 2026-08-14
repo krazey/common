@@ -1022,6 +1022,9 @@ struct dwc3_glue_ops {
  * @eps: endpoint array
  * @gadget: device side representation of the peripheral controller
  * @gadget_driver: pointer to the gadget driver
+ * @exynos9810_diagnostics_work: delayed Exynos9810 bring-up snapshot
+ * @exynos9810_diagnostics_initialized: whether the snapshot work is ready
+ * @exynos9810_diagnostics_count: number of completed snapshots
  * @glue_ops: Vendor callbacks for flattened device implementations.
  * @bus_clk: clock for accessing the registers
  * @ref_clk: reference clock
@@ -1213,6 +1216,12 @@ struct dwc3 {
 
 	struct usb_gadget	*gadget;
 	struct usb_gadget_driver *gadget_driver;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	struct delayed_work	exynos9810_diagnostics_work;
+	bool			exynos9810_diagnostics_initialized;
+	u8			exynos9810_diagnostics_count;
+#endif
 
 	const struct dwc3_glue_ops	*glue_ops;
 
