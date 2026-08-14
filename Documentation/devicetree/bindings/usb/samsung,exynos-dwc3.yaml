@@ -20,6 +20,7 @@ properties:
           - samsung,exynos7-dwusb3
           - samsung,exynos7870-dwusb3
           - samsung,exynos850-dwusb3
+          - samsung,exynos9810-dwusb3
           - samsung,exynosautov920-dwusb3
       - items:
           - const: samsung,exynos8890-dwusb3
@@ -42,6 +43,9 @@ properties:
   power-domains:
     maxItems: 1
 
+  reg:
+    maxItems: 1
+
   ranges: true
 
   '#size-cells':
@@ -54,7 +58,7 @@ properties:
     description: 3.0V/3.3V power supply
 
 patternProperties:
-  "^usb@[0-9a-f]+$":
+  "^(dwc3|usb)@[0-9a-f]+$":
     $ref: snps,dwc3.yaml#
     description: Required child node
 
@@ -65,9 +69,18 @@ required:
   - clock-names
   - ranges
   - '#size-cells'
-  - vdd33-supply
 
 allOf:
+  - if:
+      properties:
+        compatible:
+          not:
+            contains:
+              const: samsung,exynos9810-dwusb3
+    then:
+      required:
+        - vdd33-supply
+
   - if:
       properties:
         compatible:
@@ -185,6 +198,23 @@ allOf:
             - const: ref
       required:
         - vdd10-supply
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-dwusb3
+    then:
+      properties:
+        clocks:
+          minItems: 2
+          maxItems: 2
+        clock-names:
+          items:
+            - const: aclk
+            - const: sclk
+      required:
+        - reg
 
   - if:
       properties:
