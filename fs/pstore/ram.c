@@ -21,27 +21,12 @@
 #include <linux/of.h>
 #include <linux/of_address.h>
 #include <linux/mm.h>
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-#include <linux/panic.h>
-#include <linux/workqueue.h>
-#endif
 
 #include "internal.h"
 #include "ram_internal.h"
 
 #define RAMOOPS_KERNMSG_HDR "===="
 #define MIN_MEM_SIZE 4096UL
-
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-static void exynos9810_ramoops_panic(struct work_struct *work)
-{
-	panic_timeout = 0;
-	panic("Exynos9810 late boot log capture");
-}
-
-static DECLARE_DELAYED_WORK(exynos9810_ramoops_panic_work,
-			    exynos9810_ramoops_panic);
-#endif
 
 static ulong record_size = MIN_MEM_SIZE;
 module_param(record_size, ulong, 0400);
@@ -925,12 +910,6 @@ static int ramoops_probe(struct platform_device *pdev)
 	pr_info("using 0x%lx@0x%llx, ecc: %d\n",
 		cxt->size, (unsigned long long)cxt->phys_addr,
 		cxt->ecc_info.ecc_size);
-
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	schedule_delayed_work(&exynos9810_ramoops_panic_work,
-			      msecs_to_jiffies(45000));
-#endif
-
 	return 0;
 
 fail_buf:
