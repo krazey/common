@@ -708,10 +708,10 @@ static int mobicore_probe(struct platform_device *pdev)
 		goto err_start;
 
 	/*
-	 * ExySp: for sos performance
-	 * migrate secure OS to a non-booting little core
+	 * Keep the secure OS and fastcall worker on the boot CPU.  The initial
+	 * migration is an optional performance optimization which depends on
+	 * the vendor CPU topology and hotplug implementation.
 	 */
-	mc_switch_core(NONBOOT_LITTLE_CORE);
 
 	return 0;
 
