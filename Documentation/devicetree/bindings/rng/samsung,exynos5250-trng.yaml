@@ -16,6 +16,7 @@ properties:
       - enum:
           - samsung,exynos5250-trng
           - samsung,exynos850-trng
+          - samsung,exynos9810-trng
       - items:
           - const: google,gs101-trng
           - const: samsung,exynos850-trng
@@ -36,11 +37,26 @@ properties:
 
 required:
   - compatible
-  - clocks
-  - clock-names
-  - reg
 
 allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-trng
+
+    then:
+      properties:
+        clocks: false
+        clock-names: false
+        reg: false
+
+    else:
+      required:
+        - clocks
+        - clock-names
+        - reg
+
   - if:
       properties:
         compatible:
