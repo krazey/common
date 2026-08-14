@@ -157,6 +157,15 @@ config EXYNOS9810_EARLY_BOOT_MARKERS
 	  marker path does not depend on normal virtual mappings, device tree
 	  parsing, the console, or platform drivers.
 
+config EXYNOS9810_SINGLE_CPU_BRINGUP
+	bool "Keep Exynos9810 secondary CPUs offline during bring-up"
+	depends on ARCH_EXYNOS
+	help
+	  Clear the generic SMP activation limit before arm64 prepares its CPU
+	  present mask. This keeps secondary CPUs offline while their PSCI boot
+	  path is being ported. It lets platform userspace run on the boot CPU
+	  independently of firmware command-line changes.
+
 config EXYNOS9810_UNALIGNED_IMAGE
 	bool "Support unaligned Exynos9810 kernel placement"
 	depends on ARCH_EXYNOS
