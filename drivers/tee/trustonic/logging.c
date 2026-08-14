@@ -249,8 +249,8 @@ int mc_logging_init(void)
 	 * We are going to map this buffer into virtual address space in SWd.
 	 * To reduce complexity there, we use a contiguous buffer.
 	 */
-	log_ctx.trace_page = __get_free_pages(GFP_KERNEL | __GFP_ZERO,
-					      LOG_BUF_ORDER);
+	log_ctx.trace_page = __get_free_pages(GFP_KERNEL | GFP_DMA32 |
+					      __GFP_ZERO, LOG_BUF_ORDER);
 	if (!log_ctx.trace_page)
 		return -ENOMEM;
 

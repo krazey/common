@@ -687,7 +687,8 @@ int nq_init(void)
 
 	l_ctx.order = get_order(buf_len);
 
-	mci = __get_free_pages(GFP_USER | __GFP_ZERO, l_ctx.order);
+	mci = __get_free_pages(GFP_USER | GFP_DMA32 | __GFP_ZERO,
+			       l_ctx.order);
 	if (!mci)
 		return -ENOMEM;
 
