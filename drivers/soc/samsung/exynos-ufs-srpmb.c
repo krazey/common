@@ -75,6 +75,8 @@ struct exynos_srpmb {
 #endif
 	struct wakeup_source *wakeup_source;
 	struct notifier_block pm_notifier;
+	s32 smc_ret;
+	bool smc_attempted;
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	atomic_t request_count;
 #endif
@@ -292,7 +294,10 @@ static void exynos_srpmb_diagnostics_work(struct work_struct *work)
 
 	dma_rmb();
 	dev_info(srpmb->dev,
-		 "E981D: secure RPMB registered requests=%d status=%#x type=%u\n",
+		 "E981D: srpmb dma=%pad ep=%u smc=%u/%#x req=%d st=%#x ty=%u\n",
+		 &srpmb->request_dma, !!READ_ONCE(srpmb->rdev),
+		 READ_ONCE(srpmb->smc_attempted),
+		 READ_ONCE(srpmb->smc_ret),
 		 atomic_read(&srpmb->request_count),
 		 READ_ONCE(srpmb->request->status),
 		 READ_ONCE(srpmb->request->type));
@@ -326,9 +331,11 @@ static void exynos_srpmb_registration_work(struct work_struct *work)
 	s32 smc_ret;
 
 	dma_wmb();
+	WRITE_ONCE(srpmb->smc_attempted, true);
 	arm_smccc_smc(EXYNOS_SRPMB_SMC_WSM, srpmb->request_dma,
 		      srpmb->hwirq, 0, 0, 0, 0, 0, &res);
 	smc_ret = (s32)res.a0;
+	WRITE_ONCE(srpmb->smc_ret, smc_ret);
 	if (smc_ret) {
 		dev_err(srpmb->dev,
 			"E981D: secure RPMB registration failed: %#x\n",
@@ -339,9 +346,6 @@ static void exynos_srpmb_registration_work(struct work_struct *work)
 	dev_info(srpmb->dev,
 		 "E981D: secure RPMB buffer=%pad hwirq=%lu\n",
 		 &srpmb->request_dma, srpmb->hwirq);
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	schedule_delayed_work(&srpmb->diagnostics_work, 10 * HZ);
-#endif
 }
 
 static int exynos_srpmb_probe(struct platform_device *pdev)
@@ -429,12 +433,6 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 				       srpmb);
 	if (ret)
 		return ret;
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	ret = devm_add_action_or_reset(dev, exynos_srpmb_cancel_diagnostics,
-				       srpmb);
-	if (ret)
-		return ret;
-#endif
 
 	platform_set_drvdata(pdev, srpmb);
 
@@ -462,6 +460,14 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 				       srpmb);
 	if (ret)
 		return ret;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	ret = devm_add_action_or_reset(dev, exynos_srpmb_cancel_diagnostics,
+				       srpmb);
+	if (ret)
+		return ret;
+	schedule_delayed_work(&srpmb->diagnostics_work, 10 * HZ);
+#endif
 
 	return 0;
 }
