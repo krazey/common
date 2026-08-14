@@ -198,6 +198,11 @@
 		interrupts = <GIC_SPI 233 IRQ_TYPE_EDGE_RISING>;
 	};
 
+	ufs-srpmb {
+		compatible = "samsung,ufs-srpmb";
+		interrupts = <GIC_SPI 460 IRQ_TYPE_EDGE_RISING>;
+	};
+
 	ufs: ufs@11120000 {
 		compatible = "samsung,exynos9810-ufs";
 		reg = <0x0 0x11120000 0x200>,
