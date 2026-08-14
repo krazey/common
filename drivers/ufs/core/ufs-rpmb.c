@@ -61,8 +61,10 @@ static int ufs_rpmb_clear_unit_attention(struct ufs_hba *hba)
 static int ufs_sec_submit(struct ufs_hba *hba, u16 spsp, void *buffer, size_t len, bool send)
 {
 	struct scsi_device *sdev = hba->ufs_rpmb_wlun;
+	struct scsi_sense_hdr sshdr = { };
 	const struct scsi_exec_args exec_args = {
 		.req_flags = BLK_MQ_REQ_PM,
+		.sshdr = &sshdr,
 	};
 	u8 cdb[12] = { };
 	int ret;
@@ -77,6 +79,19 @@ static int ufs_sec_submit(struct ufs_hba *hba, u16 spsp, void *buffer, size_t le
 			       buffer, len, /*timeout=*/30 * HZ,
 			       UFS_RPMB_CMD_RETRIES,
 			       &exec_args);
+	if (ret > 0) {
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		dev_info(&sdev->sdev_gendev,
+			 "E981D: UFS RPMB %s result=%#x host=%#x status=%#x sense=%u/%#x/%#x/%#x\n",
+			 send ? "OUT" : "IN", ret, host_byte(ret),
+			 status_byte(ret), scsi_sense_valid(&sshdr),
+			 sshdr.sense_key, sshdr.asc, sshdr.ascq);
+#endif
+		dev_err(&sdev->sdev_gendev,
+			"Security protocol %s failed: result=%#x sense=%#x/%#x/%#x\n",
+			send ? "OUT" : "IN", ret, sshdr.sense_key,
+			sshdr.asc, sshdr.ascq);
+	}
 
 	return ret <= 0 ? ret : -EIO;
 }
