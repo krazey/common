@@ -32,6 +32,8 @@
 					& ~((d)->interval - 1))
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define EXYNOS9810_DWC3_DIAGNOSTIC_SAMPLES	5
+
 static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 {
 	struct dwc3 *dwc =
@@ -63,7 +65,8 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 		 speed);
 	dev_info(dwc->dev, "E981D: DWC3 gctl=%#x dctl=%#x dsts=%#x\n",
 		 gctl, dctl, dsts);
-	if (++dwc->exynos9810_diagnostics_count < 2)
+	if (++dwc->exynos9810_diagnostics_count <
+	    EXYNOS9810_DWC3_DIAGNOSTIC_SAMPLES)
 		schedule_delayed_work(&dwc->exynos9810_diagnostics_work,
 				      10 * HZ);
 }
