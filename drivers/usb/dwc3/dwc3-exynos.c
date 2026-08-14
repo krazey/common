@@ -23,6 +23,7 @@ struct dwc3_exynos_driverdata {
 	const char		*clk_names[DWC3_EXYNOS_MAX_CLOCKS];
 	int			num_clks;
 	int			suspend_clk_idx;
+	bool			regulators_optional;
 };
 
 struct dwc3_exynos {
@@ -36,6 +37,37 @@ struct dwc3_exynos {
 	struct regulator	*vdd33;
 	struct regulator	*vdd10;
 };
+
+static int dwc3_exynos_get_regulator(struct dwc3_exynos *exynos,
+				     struct regulator **regulator,
+				     const char *supply, bool optional)
+{
+	struct device *dev = exynos->dev;
+	int ret;
+
+	if (optional)
+		*regulator = devm_regulator_get_optional(dev, supply);
+	else
+		*regulator = devm_regulator_get(dev, supply);
+
+	if (IS_ERR(*regulator)) {
+		ret = PTR_ERR(*regulator);
+		if (optional && ret == -ENODEV) {
+			*regulator = NULL;
+			return 0;
+		}
+
+		return dev_err_probe(dev, ret, "failed to get %s supply\n",
+				     supply);
+	}
+
+	ret = regulator_enable(*regulator);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to enable %s supply\n",
+				     supply);
+
+	return 0;
+}
 
 static int dwc3_exynos_probe(struct platform_device *pdev)
 {
@@ -78,27 +110,15 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	if (exynos->suspend_clk_idx >= 0)
 		clk_prepare_enable(exynos->clks[exynos->suspend_clk_idx]);
 
-	exynos->vdd33 = devm_regulator_get(dev, "vdd33");
-	if (IS_ERR(exynos->vdd33)) {
-		ret = PTR_ERR(exynos->vdd33);
+	ret = dwc3_exynos_get_regulator(exynos, &exynos->vdd33, "vdd33",
+					driver_data->regulators_optional);
+	if (ret)
 		goto vdd33_err;
-	}
-	ret = regulator_enable(exynos->vdd33);
-	if (ret) {
-		dev_err(dev, "Failed to enable VDD33 supply\n");
-		goto vdd33_err;
-	}
 
-	exynos->vdd10 = devm_regulator_get(dev, "vdd10");
-	if (IS_ERR(exynos->vdd10)) {
-		ret = PTR_ERR(exynos->vdd10);
+	ret = dwc3_exynos_get_regulator(exynos, &exynos->vdd10, "vdd10",
+					driver_data->regulators_optional);
+	if (ret)
 		goto vdd10_err;
-	}
-	ret = regulator_enable(exynos->vdd10);
-	if (ret) {
-		dev_err(dev, "Failed to enable VDD10 supply\n");
-		goto vdd10_err;
-	}
 
 	if (node) {
 		ret = of_platform_populate(node, NULL, NULL, dev);
@@ -115,9 +135,11 @@ static int dwc3_exynos_probe(struct platform_device *pdev)
 	return 0;
 
 populate_err:
-	regulator_disable(exynos->vdd10);
+	if (exynos->vdd10)
+		regulator_disable(exynos->vdd10);
 vdd10_err:
-	regulator_disable(exynos->vdd33);
+	if (exynos->vdd33)
+		regulator_disable(exynos->vdd33);
 vdd33_err:
 	for (i = exynos->num_clks - 1; i >= 0; i--)
 		clk_disable_unprepare(exynos->clks[i]);
@@ -141,8 +163,10 @@ static void dwc3_exynos_remove(struct platform_device *pdev)
 	if (exynos->suspend_clk_idx >= 0)
 		clk_disable_unprepare(exynos->clks[exynos->suspend_clk_idx]);
 
-	regulator_disable(exynos->vdd33);
-	regulator_disable(exynos->vdd10);
+	if (exynos->vdd33)
+		regulator_disable(exynos->vdd33);
+	if (exynos->vdd10)
+		regulator_disable(exynos->vdd10);
 }
 
 static const struct dwc3_exynos_driverdata exynos2200_drvdata = {
@@ -181,6 +205,13 @@ static const struct dwc3_exynos_driverdata exynos850_drvdata = {
 	.suspend_clk_idx = -1,
 };
 
+static const struct dwc3_exynos_driverdata exynos9810_drvdata = {
+	.clk_names = { "aclk", "sclk" },
+	.num_clks = 2,
+	.suspend_clk_idx = -1,
+	.regulators_optional = true,
+};
+
 static const struct dwc3_exynos_driverdata gs101_drvdata = {
 	.clk_names = { "bus_early", "susp_clk", "link_aclk", "link_pclk" },
 	.num_clks = 4,
@@ -213,6 +244,9 @@ static const struct of_device_id exynos_dwc3_match[] = {
 		.compatible = "samsung,exynos850-dwusb3",
 		.data = &exynos850_drvdata,
 	}, {
+		.compatible = "samsung,exynos9810-dwusb3",
+		.data = &exynos9810_drvdata,
+	}, {
 		.compatible = "samsung,exynosautov920-dwusb3",
 		.data = &exynosautov920_drvdata,
 	}, {
@@ -231,8 +265,10 @@ static int dwc3_exynos_suspend(struct device *dev)
 	for (i = exynos->num_clks - 1; i >= 0; i--)
 		clk_disable_unprepare(exynos->clks[i]);
 
-	regulator_disable(exynos->vdd33);
-	regulator_disable(exynos->vdd10);
+	if (exynos->vdd33)
+		regulator_disable(exynos->vdd33);
+	if (exynos->vdd10)
+		regulator_disable(exynos->vdd10);
 
 	return 0;
 }
@@ -242,15 +278,21 @@ static int dwc3_exynos_resume(struct device *dev)
 	struct dwc3_exynos *exynos = dev_get_drvdata(dev);
 	int i, ret;
 
-	ret = regulator_enable(exynos->vdd33);
-	if (ret) {
-		dev_err(dev, "Failed to enable VDD33 supply\n");
-		return ret;
+	if (exynos->vdd33) {
+		ret = regulator_enable(exynos->vdd33);
+		if (ret) {
+			dev_err(dev, "Failed to enable VDD33 supply\n");
+			return ret;
+		}
 	}
-	ret = regulator_enable(exynos->vdd10);
-	if (ret) {
-		dev_err(dev, "Failed to enable VDD10 supply\n");
-		return ret;
+	if (exynos->vdd10) {
+		ret = regulator_enable(exynos->vdd10);
+		if (ret) {
+			dev_err(dev, "Failed to enable VDD10 supply\n");
+			if (exynos->vdd33)
+				regulator_disable(exynos->vdd33);
+			return ret;
+		}
 	}
 
 	for (i = 0; i < exynos->num_clks; i++) {
