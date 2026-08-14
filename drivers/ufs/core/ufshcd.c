@@ -5397,7 +5397,7 @@ static void ufshcd_lu_init(struct ufs_hba *hba, struct scsi_device *sdev)
 		hba->dev_info.is_lu_power_on_wp = true;
 
 	/* In case of RPMB LU, check if advanced RPMB mode is enabled, and get region size */
-	if (desc_buf[UNIT_DESC_PARAM_UNIT_INDEX] == UFS_UPIU_RPMB_WLUN) {
+	if (lun == UFS_UPIU_RPMB_WLUN) {
 		if (desc_buf[RPMB_UNIT_DESC_PARAM_REGION_EN] & BIT(4))
 			hba->dev_info.b_advanced_rpmb_en = true;
 		hba->dev_info.rpmb_region_size[0] = desc_buf[RPMB_UNIT_DESC_PARAM_REGION0_SIZE];
@@ -5423,6 +5423,20 @@ static void ufshcd_lu_init(struct ufs_hba *hba, struct scsi_device *sdev)
 				<< desc_buf[RPMB_UNIT_DESC_PARAM_LOGICAL_BLK_SIZE])
 				/ SZ_128K;
 		}
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		dev_info(hba->dev,
+			 "E981D: UFS RPMB spec=%#x index=%#x block=%u count=%llu regions=%u/%u/%u/%u\n",
+			 hba->dev_info.wspecversion,
+			 desc_buf[RPMB_UNIT_DESC_PARAM_UNIT_INDEX],
+			 desc_buf[RPMB_UNIT_DESC_PARAM_LOGICAL_BLK_SIZE],
+			 get_unaligned_be64(desc_buf +
+				RPMB_UNIT_DESC_PARAM_LOGICAL_BLK_COUNT),
+			 hba->dev_info.rpmb_region_size[0],
+			 hba->dev_info.rpmb_region_size[1],
+			 hba->dev_info.rpmb_region_size[2],
+			 hba->dev_info.rpmb_region_size[3]);
+#endif
 	}
 
 
