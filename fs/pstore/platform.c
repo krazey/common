@@ -402,11 +402,11 @@ static void pstore_console_write(struct console *con, const char *s, unsigned c)
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	/*
 	 * The recovery kernel only exposes a 16 KiB view of this console
-	 * record.  Preserve the early bring-up window once userspace starts
-	 * producing enough output to wrap it, while still retaining selected
-	 * diagnostics and complete oops output.
+	 * record.  Preserve the post-APEX service startup window once
+	 * userspace starts producing enough output to wrap it, while still
+	 * retaining selected diagnostics and complete oops output.
 	 */
-	if (ktime_get_boottime_seconds() >= 8 && !oops_in_progress &&
+	if (ktime_get_boottime_seconds() >= 30 && !oops_in_progress &&
 	    !strnstr(s, "E981D:", c))
 		return;
 #endif
