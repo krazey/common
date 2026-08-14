@@ -67,6 +67,7 @@ struct exynos_srpmb {
 	struct exynos_srpmb_request *request;
 	dma_addr_t request_dma;
 	u8 *request_buf;
+	u8 *response_buf;
 	struct workqueue_struct *workqueue;
 	struct work_struct work;
 	struct work_struct registration_work;
@@ -106,7 +107,7 @@ static void exynos_srpmb_work(struct work_struct *work)
 	struct exynos_srpmb *srpmb =
 		container_of(work, struct exynos_srpmb, work);
 	struct exynos_srpmb_request *request = srpmb->request;
-	struct rpmb_frame *response = (struct rpmb_frame *)request->data;
+	struct rpmb_frame *response;
 	u32 data_len, error_status, response_len, type;
 	u32 request_len;
 	u16 result;
@@ -166,18 +167,22 @@ static void exynos_srpmb_work(struct work_struct *work)
 	 */
 	memcpy(srpmb->request_buf, request->data, request_len);
 	memset(request->data, 0, data_len);
+	memset(srpmb->response_buf, 0, response_len);
 	WRITE_ONCE(request->command, EXYNOS_SRPMB_SECURITY_PROTOCOL_IN);
 	WRITE_ONCE(request->in_len, response_len);
 	WRITE_ONCE(request->out_len, EXYNOS_SRPMB_FRAME_SIZE);
 
 	ret = rpmb_route_frames(srpmb->rdev, srpmb->request_buf,
-				request_len, request->data, response_len);
+				request_len, srpmb->response_buf, response_len);
 	if (ret) {
 		dev_err(srpmb->dev,
 			"secure RPMB request %u failed: %d\n", type, ret);
 		exynos_srpmb_set_status(srpmb, error_status);
 		goto out_relax;
 	}
+
+	response = (struct rpmb_frame *)srpmb->response_buf;
+	memcpy(request->data, srpmb->response_buf, response_len);
 
 	if (type == EXYNOS_SRPMB_WRITE_DATA) {
 		result = be16_to_cpu(response->result);
@@ -377,6 +382,10 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 	srpmb->request_buf = devm_kmalloc(dev, EXYNOS_SRPMB_DATA_SIZE,
 					  GFP_KERNEL);
 	if (!srpmb->request_buf)
+		return -ENOMEM;
+	srpmb->response_buf = devm_kmalloc(dev, EXYNOS_SRPMB_DATA_SIZE,
+					   GFP_KERNEL);
+	if (!srpmb->response_buf)
 		return -ENOMEM;
 
 	srpmb->irq = platform_get_irq(pdev, 0);
