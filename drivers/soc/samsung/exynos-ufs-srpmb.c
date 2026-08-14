@@ -7,6 +7,7 @@
  */
 
 #include <linux/arm-smccc.h>
+#include <linux/atomic.h>
 #include <linux/dma-mapping.h>
 #include <linux/interrupt.h>
 #include <linux/irq.h>
@@ -67,8 +68,14 @@ struct exynos_srpmb {
 	u8 *request_buf;
 	struct workqueue_struct *workqueue;
 	struct work_struct work;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	struct delayed_work diagnostics_work;
+#endif
 	struct wakeup_source *wakeup_source;
 	struct notifier_block pm_notifier;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	atomic_t request_count;
+#endif
 	int irq;
 };
 
@@ -101,6 +108,12 @@ static void exynos_srpmb_work(struct work_struct *work)
 	dma_rmb();
 	type = READ_ONCE(request->type);
 	data_len = READ_ONCE(request->data_len);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (atomic_inc_return(&srpmb->request_count) == 1)
+		dev_info(srpmb->dev,
+			 "E981D: secure RPMB first request type=%u len=%u\n",
+			 type, data_len);
+#endif
 
 	switch (type) {
 	case EXYNOS_SRPMB_GET_WRITE_COUNTER:
@@ -230,6 +243,29 @@ static void exynos_srpmb_destroy_workqueue(void *data)
 	destroy_workqueue(data);
 }
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static void exynos_srpmb_diagnostics_work(struct work_struct *work)
+{
+	struct exynos_srpmb *srpmb =
+		container_of(to_delayed_work(work), struct exynos_srpmb,
+			     diagnostics_work);
+
+	dma_rmb();
+	dev_info(srpmb->dev,
+		 "E981D: secure RPMB registered requests=%d status=%#x type=%u\n",
+		 atomic_read(&srpmb->request_count),
+		 READ_ONCE(srpmb->request->status),
+		 READ_ONCE(srpmb->request->type));
+}
+
+static void exynos_srpmb_cancel_diagnostics(void *data)
+{
+	struct exynos_srpmb *srpmb = data;
+
+	cancel_delayed_work_sync(&srpmb->diagnostics_work);
+}
+#endif
+
 static void exynos_srpmb_unregister_wakeup(void *data)
 {
 	wakeup_source_unregister(data);
@@ -298,6 +334,10 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 
 	srpmb->dev = dev;
 	INIT_WORK(&srpmb->work, exynos_srpmb_work);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	INIT_DELAYED_WORK(&srpmb->diagnostics_work,
+			  exynos_srpmb_diagnostics_work);
+#endif
 	srpmb->workqueue = alloc_ordered_workqueue("exynos-srpmb",
 						   WQ_MEM_RECLAIM | WQ_HIGHPRI);
 	if (!srpmb->workqueue)
@@ -333,6 +373,12 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 				       srpmb);
 	if (ret)
 		return ret;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	ret = devm_add_action_or_reset(dev, exynos_srpmb_cancel_diagnostics,
+				       srpmb);
+	if (ret)
+		return ret;
+#endif
 
 	platform_set_drvdata(pdev, srpmb);
 	dma_wmb();
@@ -346,6 +392,9 @@ static int exynos_srpmb_probe(struct platform_device *pdev)
 
 	dev_info(dev, "registered secure UFS RPMB buffer at %pad, hwirq %lu\n",
 		 &srpmb->request_dma, hwirq);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	schedule_delayed_work(&srpmb->diagnostics_work, 10 * HZ);
+#endif
 
 	return 0;
 }
