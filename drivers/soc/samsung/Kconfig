@@ -75,4 +75,13 @@ config SAMSUNG_PM_CHECK_CHUNKSIZE
 config EXYNOS_REGULATOR_COUPLER
 	bool "Exynos SoC Regulator Coupler" if COMPILE_TEST
 	depends on ARCH_EXYNOS || COMPILE_TEST
+
+config EXYNOS_UFS_SRPMB
+	bool "Samsung Exynos secure UFS RPMB bridge"
+	depends on ARM64 && RPMB
+	depends on ARCH_EXYNOS || COMPILE_TEST
+	help
+	  Provide the shared-memory bridge used by Samsung secure firmware to
+	  access the replay-protected UFS partition on Exynos SoCs. The bridge
+	  uses the kernel RPMB core for the underlying authenticated transfers.
 endif
