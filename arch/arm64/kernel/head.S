@@ -875,43 +875,17 @@ SYM_FUNC_END(set_cpu_boot_mode_flag)
  */
 	.section ".idmap.text","a"
 SYM_FUNC_START(__enable_mmu)
-	/* 08: execution entered the MMU enable routine. */
-	exynos9810_idmap_boot_marker 0x3830
 	mrs	x3, ID_AA64MMFR0_EL1
 	ubfx	x3, x3, #ID_AA64MMFR0_EL1_TGRAN_SHIFT, 4
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MIN
 	b.lt    __no_granule_support
 	cmp     x3, #ID_AA64MMFR0_EL1_TGRAN_SUPPORTED_MAX
 	b.gt    __no_granule_support
-	/* 09: the CPU supports the configured translation granule. */
-	exynos9810_idmap_boot_marker 0x3930
 	phys_to_ttbr x2, x2
 	msr	ttbr0_el1, x2			// load TTBR0
-	/* 0A: the initial identity map was installed in TTBR0. */
-	exynos9810_idmap_boot_marker 0x4130
 	load_ttbr1 x1, x1, x3
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	adr_l	x3, exynos9810_mmu_vectors
-	msr	vbar_el1, x3
-	isb
-	adr	x1, 1f
-	mov	x3, x30			// preserve LR without a pre-MMU stack
-	bl	exynos9810_store_boot_snapshot
-	mov	x30, x3
-#endif
-	/* 0B: the reserved kernel map was installed in TTBR1. */
-	exynos9810_update_boot_marker 0x4230, 0
 
-	msr	sctlr_el1, x0
-	isb
-1:
-	/*
-	 * The secondary identity map only covers .idmap.text. Keep this path
-	 * free of accesses to physical marker storage after enabling the MMU.
-	 */
-	ic	iallu
-	dsb	nsh
-	isb
+	set_sctlr_el1	x0
 
 	ret
 SYM_FUNC_END(__enable_mmu)
