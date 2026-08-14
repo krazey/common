@@ -905,13 +905,13 @@ SYM_FUNC_START(__enable_mmu)
 	msr	sctlr_el1, x0
 	isb
 1:
-	/* M1: translation was enabled and the context synchronized. */
-	exynos9810_update_boot_marker 0x314d, 1
+	/*
+	 * The secondary identity map only covers .idmap.text. Keep this path
+	 * free of accesses to physical marker storage after enabling the MMU.
+	 */
 	ic	iallu
 	dsb	nsh
 	isb
-	/* 0C: address translation was enabled successfully. */
-	exynos9810_update_boot_marker 0x4330, 1
 
 	ret
 SYM_FUNC_END(__enable_mmu)
