@@ -25,6 +25,7 @@
 #include <linux/soc/samsung/exynos-regs-pmu.h>
 #include <linux/usb/typec.h>
 #include <linux/usb/typec_mux.h>
+#include <linux/workqueue.h>
 
 /* Exynos USB PHY registers */
 #define EXYNOS5_FSEL_9MHZ6		0x0
@@ -513,6 +514,9 @@ struct exynos5_usbdrd_phy_drvdata {
  * @regulators: regulators for phy
  * @sw: TypeC orientation switch handle
  * @orientation: TypeC connector orientation - normal or flipped
+ * @diagnostics_work: delayed Exynos9810 bring-up snapshot
+ * @init_count: number of completed Exynos9810 PHY initializations
+ * @exit_count: number of completed Exynos9810 PHY shutdowns
  */
 struct exynos5_usbdrd_phy {
 	struct device *dev;
@@ -536,6 +540,11 @@ struct exynos5_usbdrd_phy {
 
 	struct typec_switch_dev *sw;
 	enum typec_orientation orientation;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	struct delayed_work diagnostics_work;
+	unsigned int init_count;
+	unsigned int exit_count;
+#endif
 };
 
 static inline
@@ -544,6 +553,52 @@ struct exynos5_usbdrd_phy *to_usbdrd_phy(struct phy_usb_instance *inst)
 	return container_of((inst), struct exynos5_usbdrd_phy,
 			    phys[(inst)->index]);
 }
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
+{
+	struct exynos5_usbdrd_phy *phy_drd =
+		container_of(to_delayed_work(work), struct exynos5_usbdrd_phy,
+			     diagnostics_work);
+	void __iomem *base = phy_drd->reg_phy;
+	u32 clkrst, hsp, link, port, test, tune, utmi;
+	int ret;
+
+	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
+				      phy_drd->clks);
+	if (ret) {
+		dev_info(phy_drd->dev,
+			 "E981D: USB PHY register clock failed: %d\n", ret);
+		return;
+	}
+
+	mutex_lock(&phy_drd->phy_mutex);
+	link = readl(base + EXYNOS850_DRD_LINKCTRL);
+	port = readl(base + EXYNOS850_DRD_LINKPORT);
+	clkrst = readl(base + EXYNOS850_DRD_CLKRST);
+	utmi = readl(base + EXYNOS850_DRD_UTMI);
+	hsp = readl(base + EXYNOS850_DRD_HSP);
+	tune = readl(base + EXYNOS850_DRD_HSPPARACON);
+	test = readl(base + EXYNOS850_DRD_HSP_TEST);
+	mutex_unlock(&phy_drd->phy_mutex);
+
+	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
+				   phy_drd->clks);
+	dev_info(phy_drd->dev,
+		 "E981D: USB PHY init=%u exit=%u link=%#x port=%#x clkrst=%#x\n",
+		 phy_drd->init_count, phy_drd->exit_count, link, port, clkrst);
+	dev_info(phy_drd->dev,
+		 "E981D: USB PHY utmi=%#x hsp=%#x tune=%#x test=%#x\n",
+		 utmi, hsp, tune, test);
+}
+
+static void exynos9810_cancel_diagnostics(void *data)
+{
+	struct exynos5_usbdrd_phy *phy_drd = data;
+
+	cancel_delayed_work_sync(&phy_drd->diagnostics_work);
+}
+#endif
 
 /*
  * exynos5_rate_to_clk() converts the supplied clock rate to the value that
@@ -1816,6 +1871,9 @@ static int exynos9810_usbdrd_phy_init(struct phy *phy)
 
 	scoped_guard(mutex, &phy_drd->phy_mutex)
 		inst->phy_cfg->phy_init(phy_drd);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	phy_drd->init_count++;
+#endif
 
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
 				   phy_drd->clks);
@@ -1848,6 +1906,9 @@ static int exynos9810_usbdrd_phy_exit(struct phy *phy)
 	exynos5_usbdrd_phy_isol(inst, true);
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_core_clks,
 				   phy_drd->core_clks);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	phy_drd->exit_count++;
+#endif
 
 	return 0;
 }
@@ -3275,6 +3336,19 @@ static int exynos5_usbdrd_phy_probe(struct platform_device *pdev)
 	if (IS_ERR(phy_provider))
 		return dev_err_probe(phy_drd->dev, PTR_ERR(phy_provider),
 				     "Failed to register phy provider\n");
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (of_device_is_compatible(node,
+				    "samsung,exynos9810-usbdrd-phy")) {
+		INIT_DELAYED_WORK(&phy_drd->diagnostics_work,
+				  exynos9810_usbdrd_diagnostics_work);
+		ret = devm_add_action_or_reset(dev,
+					       exynos9810_cancel_diagnostics, phy_drd);
+		if (ret)
+			return ret;
+		schedule_delayed_work(&phy_drd->diagnostics_work, 10 * HZ);
+	}
+#endif
 
 	return 0;
 }
