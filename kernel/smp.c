@@ -27,6 +27,14 @@
 #include <linux/jump_label.h>
 #include <linux/string_choices.h>
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#include <asm/setup.h>
+#define exynos9810_smp_marker(stage) \
+	exynos9810_boot_marker('S', (stage))
+#else
+#define exynos9810_smp_marker(stage) ((void)(stage))
+#endif
+
 #include <trace/events/ipi.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/csd.h>
@@ -1006,12 +1014,17 @@ void __init smp_init(void)
 {
 	int num_nodes, num_cpus;
 
+	exynos9810_smp_marker('0');
 	idle_threads_init();
+	exynos9810_smp_marker('1');
 	cpuhp_threads_init();
+	exynos9810_smp_marker('2');
 
 	pr_info("Bringing up secondary CPUs ...\n");
 
+	exynos9810_smp_marker('3');
 	bringup_nonboot_cpus(setup_max_cpus);
+	exynos9810_smp_marker('4');
 
 	num_nodes = num_online_nodes();
 	num_cpus  = num_online_cpus();
@@ -1020,6 +1033,7 @@ void __init smp_init(void)
 
 	/* Any cleanup work */
 	smp_cpus_done(setup_max_cpus);
+	exynos9810_smp_marker('5');
 }
 
 /**

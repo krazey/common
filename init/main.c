@@ -1715,8 +1715,18 @@ static noinline void __init kernel_init_freeable(void)
 	lockup_detector_init();
 	exynos9810_boot_marker('4', '9');
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (!setup_max_cpus)
+		exynos9810_boot_marker('U', '0');
+	else if (setup_max_cpus == 1)
+		exynos9810_boot_marker('U', '1');
+	else
+		exynos9810_boot_marker('U', 'X');
+#endif
 	smp_init();
+	exynos9810_boot_marker('S', '6');
 	sched_init_smp();
+	exynos9810_boot_marker('S', '7');
 	exynos9810_boot_marker('4', 'A');
 
 	workqueue_init_topology();
