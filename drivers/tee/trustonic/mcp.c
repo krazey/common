@@ -501,6 +501,9 @@ int mcp_open_session(struct mcp_session *session,
 		     const struct mcp_buffer_map *tci_map)
 {
 	static DEFINE_MUTEX(local_mutex);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	static bool downgrade_reported;
+#endif
 	const union mclf_header *header;
 	union mcp_message cmd;
 	int ret;
@@ -536,6 +539,20 @@ int mcp_open_session(struct mcp_session *session,
 
 	/* Send MCP open command */
 	ret = mcp_cmd(&cmd, 0, &cmd.rsp_open.session_id, &cmd.cmd_open.uuid);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	if (!downgrade_reported &&
+	    cmd.rsp_header.result == MC_MCP_RET_ERR_DOWNGRADE_NOT_AUTHORIZED) {
+		downgrade_reported = true;
+		mc_dev_err("E981D: trustlet %*phN rejected as downgrade",
+			   (int)sizeof(header->mclf_header_v2.uuid.value),
+			   header->mclf_header_v2.uuid.value);
+		mc_dev_err("E981D: MCLF version=%u service=%u type=%u header=%u map=%u",
+			   header->mclf_header_v2.intro.version,
+			   header->mclf_header_v2.service_version,
+			   header->mclf_header_v2.service_type,
+			   obj->header_length, map->length);
+	}
+#endif
 	/* Make sure we have a valid session ID */
 	if (!ret && !cmd.rsp_open.session_id)
 		ret = -EBADE;
