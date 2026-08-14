@@ -13,6 +13,7 @@
  */
 
 #include <linux/slab.h>
+#include <linux/atomic.h>
 #include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/cdev.h>
@@ -26,6 +27,7 @@
 #include <linux/random.h>
 #include <linux/delay.h>
 #include <linux/freezer.h>
+#include <linux/workqueue.h>
 
 #include "public/mc_user.h"
 #include "public/mc_admin.h"
@@ -74,6 +76,148 @@ static struct mc_admin_driver_request {
 	size_t size;			/* Size of the reception buffer */
 	bool lock_channel_during_freeze;/* Is freezing ongoing ? */
 } g_request;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define ADMIN_DIAG_FIRST_DELAY		(30 * HZ)
+#define ADMIN_DIAG_INTERVAL		(10 * HZ)
+#define ADMIN_DIAG_SAMPLES		3
+#define ADMIN_DIAG_IOCTL_TYPES		5
+
+static struct {
+	atomic_t open_count;
+	atomic_t open_success_count;
+	atomic_t release_count;
+	atomic_t ioctl_count;
+	atomic_t ioctl_done_count;
+	atomic_t ioctl_types[ADMIN_DIAG_IOCTL_TYPES];
+	atomic_t ioctl_other_count;
+	struct delayed_work work;
+	unsigned int sample;
+	pid_t last_tgid;
+	int last_open_ret;
+	unsigned int last_ioctl_cmd;
+	int last_ioctl_nr;
+	long last_ioctl_ret;
+} admin_diag;
+
+static void admin_diag_work(struct work_struct *work)
+{
+	unsigned int request_id;
+	unsigned int sample;
+	pid_t active_tgid;
+	int client_state;
+	int server_state;
+	int start_ret;
+
+	mutex_lock(&admin_ctx.admin_tgid_mutex);
+	active_tgid = admin_ctx.admin_tgid;
+	mutex_unlock(&admin_ctx.admin_tgid_mutex);
+
+	mutex_lock(&g_request.states_mutex);
+	client_state = g_request.client_state;
+	server_state = g_request.server_state;
+	request_id = g_request.request_id;
+	mutex_unlock(&g_request.states_mutex);
+
+	start_ret = READ_ONCE(admin_ctx.last_start_ret);
+	sample = ++admin_diag.sample;
+	pr_info("E981D: Trustonic admin sample=%u start=%d active=%d\n",
+		sample, start_ret, active_tgid);
+	pr_info("E981D: Trustonic open=%d ok=%d close=%d pid=%d ret=%d\n",
+		atomic_read(&admin_diag.open_count),
+		atomic_read(&admin_diag.open_success_count),
+		atomic_read(&admin_diag.release_count),
+		READ_ONCE(admin_diag.last_tgid),
+		READ_ONCE(admin_diag.last_open_ret));
+	pr_info("E981D: Trustonic ioctl in=%d done=%d req=%d info=%d\n",
+		atomic_read(&admin_diag.ioctl_count),
+		atomic_read(&admin_diag.ioctl_done_count),
+		atomic_read(&admin_diag.ioctl_types[0]),
+		atomic_read(&admin_diag.ioctl_types[1]));
+	pr_info("E981D: Trustonic load driver=%d token=%d check=%d other=%d\n",
+		atomic_read(&admin_diag.ioctl_types[2]),
+		atomic_read(&admin_diag.ioctl_types[3]),
+		atomic_read(&admin_diag.ioctl_types[4]),
+		atomic_read(&admin_diag.ioctl_other_count));
+	pr_info("E981D: Trustonic last cmd=%#x nr=%d ret=%ld\n",
+		READ_ONCE(admin_diag.last_ioctl_cmd),
+		READ_ONCE(admin_diag.last_ioctl_nr),
+		READ_ONCE(admin_diag.last_ioctl_ret));
+	pr_info("E981D: Trustonic state client=%d server=%d request=%u\n",
+		client_state, server_state, request_id);
+
+	if (sample < ADMIN_DIAG_SAMPLES)
+		schedule_delayed_work(&admin_diag.work, ADMIN_DIAG_INTERVAL);
+}
+
+static void admin_diag_trace_open(int ret)
+{
+	atomic_inc(&admin_diag.open_count);
+	if (!ret)
+		atomic_inc(&admin_diag.open_success_count);
+	WRITE_ONCE(admin_diag.last_tgid, current->tgid);
+	WRITE_ONCE(admin_diag.last_open_ret, ret);
+}
+
+static void admin_diag_trace_release(void)
+{
+	atomic_inc(&admin_diag.release_count);
+}
+
+static void admin_diag_trace_ioctl_enter(unsigned int cmd)
+{
+	unsigned int nr = _IOC_NR(cmd);
+
+	atomic_inc(&admin_diag.ioctl_count);
+	if (nr < ARRAY_SIZE(admin_diag.ioctl_types))
+		atomic_inc(&admin_diag.ioctl_types[nr]);
+	else
+		atomic_inc(&admin_diag.ioctl_other_count);
+	WRITE_ONCE(admin_diag.last_ioctl_cmd, cmd);
+	WRITE_ONCE(admin_diag.last_ioctl_nr, nr);
+	WRITE_ONCE(admin_diag.last_ioctl_ret, -EINPROGRESS);
+}
+
+static void admin_diag_trace_ioctl_exit(long ret)
+{
+	WRITE_ONCE(admin_diag.last_ioctl_ret, ret);
+	atomic_inc(&admin_diag.ioctl_done_count);
+}
+
+static void admin_diag_init(void)
+{
+	unsigned int i;
+
+	atomic_set(&admin_diag.open_count, 0);
+	atomic_set(&admin_diag.open_success_count, 0);
+	atomic_set(&admin_diag.release_count, 0);
+	atomic_set(&admin_diag.ioctl_count, 0);
+	atomic_set(&admin_diag.ioctl_done_count, 0);
+	for (i = 0; i < ARRAY_SIZE(admin_diag.ioctl_types); i++)
+		atomic_set(&admin_diag.ioctl_types[i], 0);
+	atomic_set(&admin_diag.ioctl_other_count, 0);
+	admin_diag.sample = 0;
+	admin_diag.last_tgid = 0;
+	admin_diag.last_open_ret = 0;
+	admin_diag.last_ioctl_cmd = 0;
+	admin_diag.last_ioctl_nr = -1;
+	admin_diag.last_ioctl_ret = 0;
+	INIT_DELAYED_WORK(&admin_diag.work, admin_diag_work);
+	schedule_delayed_work(&admin_diag.work, ADMIN_DIAG_FIRST_DELAY);
+}
+
+static void admin_diag_exit(void)
+{
+	cancel_delayed_work_sync(&admin_diag.work);
+}
+#else
+static inline void admin_diag_trace_open(int ret) { }
+static inline void admin_diag_trace_release(void) { }
+static inline void admin_diag_trace_ioctl_enter(unsigned int cmd) { }
+static inline void admin_diag_trace_ioctl_exit(long ret) { }
+static inline void admin_diag_init(void) { }
+static inline void admin_diag_exit(void) { }
+#endif
 
 #if KERNEL_VERSION(3, 13, 0) <= LINUX_VERSION_CODE
 static inline void reinit_completion_local(struct completion *x)
@@ -890,6 +1034,7 @@ static long admin_ioctl(struct file *file, unsigned int cmd,
 	void __user *uarg = (void __user *)arg;
 	int ret = -EINVAL;
 
+	admin_diag_trace_ioctl_enter(cmd);
 	mc_dev_devel("%u from %s", _IOC_NR(cmd), current->comm);
 
 	switch (cmd) {
@@ -994,6 +1139,7 @@ static long admin_ioctl(struct file *file, unsigned int cmd,
 		ret = -ENOIOCTLCMD;
 	}
 
+	admin_diag_trace_ioctl_exit(ret);
 	return ret;
 }
 
@@ -1026,6 +1172,7 @@ static int admin_release(struct inode *inode, struct file *file)
 	mc_dev_info("daemon connection closed, TGID %d",
 		    admin_ctx.admin_tgid);
 	admin_ctx.admin_tgid = 0;
+	admin_diag_trace_release();
 
 	/*
 	 * ret is quite irrelevant here as most apps don't care about the
@@ -1049,7 +1196,7 @@ static int admin_open(struct inode *inode, struct file *file)
 	}
 	mutex_unlock(&admin_ctx.admin_tgid_mutex);
 	if (ret)
-		return ret;
+		goto out;
 
 	/* Setup the usual variables */
 	mc_dev_devel("accept %s as daemon", current->comm);
@@ -1066,14 +1213,17 @@ static int admin_open(struct inode *inode, struct file *file)
 		mutex_lock(&admin_ctx.admin_tgid_mutex);
 		admin_ctx.admin_tgid = 0;
 		mutex_unlock(&admin_ctx.admin_tgid_mutex);
-		return admin_ctx.last_start_ret;
+		ret = admin_ctx.last_start_ret;
+		goto out;
 	}
 
 	reinit_completion_local(&g_request.client_complete);
 	reinit_completion_local(&g_request.server_complete);
 	/* Requests from driver to daemon */
 	mc_dev_info("daemon connection open, TGID %d", admin_ctx.admin_tgid);
-	return 0;
+out:
+	admin_diag_trace_open(ret);
+	return ret;
 }
 
 /* function table structure of this device driver. */
@@ -1105,11 +1255,13 @@ int mc_admin_init(struct cdev *cdev, int (*tee_start_cb)(void),
 	admin_ctx.tee_start_cb = tee_start_cb;
 	admin_ctx.tee_stop_cb = tee_stop_cb;
 	admin_ctx.last_start_ret = TEE_START_NOT_TRIGGERED;
+	admin_diag_init();
 	return 0;
 }
 
 void mc_admin_exit(void)
 {
+	admin_diag_exit();
 	if (!admin_ctx.last_start_ret)
 		admin_ctx.tee_stop_cb();
 }
