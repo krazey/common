@@ -303,8 +303,9 @@
 			compatible = "samsung,exynos9810-dwusb3";
 			reg = <0x10c00000 0x10000>;
 			clocks = <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_LINK>,
-				 <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_REF>;
-			clock-names = "aclk", "sclk";
+				 <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_REF>,
+				 <&cmu_fsys0 CLK_GOUT_FSYS0_USB30DRD_CTRL>;
+			clock-names = "aclk", "sclk", "ctrl";
 			#address-cells = <1>;
 			#size-cells = <1>;
 			ranges = <0x0 0x10c00000 0x10000>;

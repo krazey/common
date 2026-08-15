@@ -13,6 +13,7 @@
 #include <linux/slab.h>
 #include <linux/platform_device.h>
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/regulator/consumer.h>
@@ -65,8 +66,13 @@ static void dwc3_exynos_diagnostics_work(struct work_struct *work)
 		container_of(to_delayed_work(work), struct dwc3_exynos,
 			     diagnostics_work);
 
-	dev_info(exynos->dev, "E981D: USB wrapper clocks=%lu/%lu\n",
-		 clk_get_rate(exynos->clks[0]), clk_get_rate(exynos->clks[1]));
+	dev_info(exynos->dev, "E981D: USB wrapper clocks=%lu/%lu/%lu\n",
+		 clk_get_rate(exynos->clks[0]), clk_get_rate(exynos->clks[1]),
+		 clk_get_rate(exynos->clks[2]));
+	dev_info(exynos->dev, "E981D: USB wrapper enabled=%d/%d/%d\n",
+		 __clk_is_enabled(exynos->clks[0]),
+		 __clk_is_enabled(exynos->clks[1]),
+		 __clk_is_enabled(exynos->clks[2]));
 	device_for_each_child(exynos->dev, exynos->dev,
 			      dwc3_exynos_diagnostics_child);
 }
@@ -252,8 +258,8 @@ static const struct dwc3_exynos_driverdata exynos850_drvdata = {
 };
 
 static const struct dwc3_exynos_driverdata exynos9810_drvdata = {
-	.clk_names = { "aclk", "sclk" },
-	.num_clks = 2,
+	.clk_names = { "aclk", "sclk", "ctrl" },
+	.num_clks = 3,
 	.suspend_clk_idx = -1,
 	.regulators_optional = true,
 };
