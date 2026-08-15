@@ -61,6 +61,24 @@
 #define HSI2C_USI_CON		0xc4
 #define HSI2C_USI_OPTION	0xc8
 
+#define EXYNOS9810_CMGP_BASE			0x14200000
+#define EXYNOS9810_CMGP_SIZE			0x4000
+#define CMGP_CONTROLLER_OPTION			0x0800
+#define CMGP_MUX_BUS_USER			0x0100
+#define CMGP_MUX_BUS				0x1004
+#define CMGP_MUX_USI3				0x1018
+#define CMGP_DIV_USI3				0x1814
+#define CMGP_GATE_USI3				0x2014
+#define CMGP_GATE_AXI2APB0			0x2020
+#define CMGP_GATE_AXI2APB1			0x2024
+#define CMGP_GATE_LHM_APM2CMGP			0x204c
+#define CMGP_GATE_BUS_RST			0x2050
+#define CMGP_GATE_USI3_RST			0x2074
+#define CMGP_GATE_USI3_IPCLK			0x20a8
+#define CMGP_GATE_USI3_PCLK			0x20ac
+#define CMGP_GATE_XIU_P				0x20b0
+#define CMGP_QCH_USI3				0x3050
+
 /* I2C_CTL Register bits */
 #define HSI2C_FUNC_MODE_I2C			(1u << 0)
 #define HSI2C_MASTER				(1u << 3)
@@ -182,6 +200,7 @@ struct exynos5_i2c {
 	unsigned int		irq;
 
 	void __iomem		*regs;
+	void __iomem		*cmu_regs;
 	struct clk		*clk;		/* operating clock */
 	struct clk		*pclk;		/* bus clock */
 	struct device		*dev;
@@ -214,6 +233,7 @@ struct exynos5_i2c {
  * @fifo_depth: the fifo depth supported by the HSI2C module
  * @hw: the hardware variant of Exynos I2C controller
  * @has_usi_v2: whether the controller uses the Exynos9810 USI v2 wrapper
+ * @cmu_base: CMU register base used by the first-time timeout dump
  *
  * Specifies platform specific configuration of HSI2C module.
  * Note: A structure for driver specific platform data is used for future
@@ -223,6 +243,7 @@ struct exynos_hsi2c_variant {
 	unsigned int		fifo_depth;
 	enum i2c_type_exynos	hw;
 	bool			has_usi_v2;
+	phys_addr_t		cmu_base;
 };
 
 static const struct exynos_hsi2c_variant exynos5250_hsi2c_data = {
@@ -254,6 +275,7 @@ static const struct exynos_hsi2c_variant exynos9810_hsi2c_data = {
 	.fifo_depth	= 64,
 	.hw		= I2C_TYPE_EXYNOS8895,
 	.has_usi_v2	= true,
+	.cmu_base	= EXYNOS9810_CMGP_BASE,
 };
 
 static const struct of_device_id exynos5_i2c_match[] = {
@@ -862,6 +884,30 @@ static void exynos5_i2c_dump_timeout(struct exynos5_i2c *i2c)
 	dev_warn(i2c->dev, "E981D: usi_con=%08x usi_option=%08x\n",
 		 readl(i2c->regs + HSI2C_USI_CON),
 		 readl(i2c->regs + HSI2C_USI_OPTION));
+	if (!i2c->cmu_regs)
+		return;
+
+	dev_warn(i2c->dev,
+		 "E981D: cmgp mux opt=%08x user=%08x bus=%08x usi=%08x div=%08x\n",
+		 readl(i2c->cmu_regs + CMGP_CONTROLLER_OPTION),
+		 readl(i2c->cmu_regs + CMGP_MUX_BUS_USER),
+		 readl(i2c->cmu_regs + CMGP_MUX_BUS),
+		 readl(i2c->cmu_regs + CMGP_MUX_USI3),
+		 readl(i2c->cmu_regs + CMGP_DIV_USI3));
+	dev_warn(i2c->dev,
+		 "E981D: cmgp bus axi0=%08x axi1=%08x lhm=%08x rst=%08x xiu=%08x\n",
+		 readl(i2c->cmu_regs + CMGP_GATE_AXI2APB0),
+		 readl(i2c->cmu_regs + CMGP_GATE_AXI2APB1),
+		 readl(i2c->cmu_regs + CMGP_GATE_LHM_APM2CMGP),
+		 readl(i2c->cmu_regs + CMGP_GATE_BUS_RST),
+		 readl(i2c->cmu_regs + CMGP_GATE_XIU_P));
+	dev_warn(i2c->dev,
+		 "E981D: cmgp usi src=%08x rst=%08x ip=%08x p=%08x qch=%08x\n",
+		 readl(i2c->cmu_regs + CMGP_GATE_USI3),
+		 readl(i2c->cmu_regs + CMGP_GATE_USI3_RST),
+		 readl(i2c->cmu_regs + CMGP_GATE_USI3_IPCLK),
+		 readl(i2c->cmu_regs + CMGP_GATE_USI3_PCLK),
+		 readl(i2c->cmu_regs + CMGP_QCH_USI3));
 }
 
 static int exynos5_i2c_xfer_msg(struct exynos5_i2c *i2c,
@@ -1026,6 +1072,13 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 	i2c->adap.algo_data = i2c;
 	i2c->adap.dev.parent = &pdev->dev;
 	i2c->variant = of_device_get_match_data(&pdev->dev);
+	if (i2c->variant->cmu_base) {
+		i2c->cmu_regs = devm_ioremap(&pdev->dev,
+					     i2c->variant->cmu_base,
+					     EXYNOS9810_CMGP_SIZE);
+		if (!i2c->cmu_regs)
+			dev_warn(&pdev->dev, "cannot map CMGP registers\n");
+	}
 
 	exynos5_i2c_release_usi_reset(i2c);
 
