@@ -1022,6 +1022,9 @@ struct dwc3_glue_ops {
  * @eps: endpoint array
  * @gadget: device side representation of the peripheral controller
  * @gadget_driver: pointer to the gadget driver
+ * @exynos9810_reconnect_work: delayed Exynos9810 boot reconnect
+ * @exynos9810_reconnect_initialized: whether reconnect work is ready
+ * @exynos9810_reconnect_attempted: whether boot reconnect was attempted
  * @exynos9810_diagnostics_work: delayed Exynos9810 bring-up snapshot
  * @exynos9810_diagnostics_initialized: whether the snapshot work is ready
  * @exynos9810_diagnostics_count: number of completed snapshots
@@ -1216,6 +1219,10 @@ struct dwc3 {
 
 	struct usb_gadget	*gadget;
 	struct usb_gadget_driver *gadget_driver;
+
+	struct delayed_work	exynos9810_reconnect_work;
+	bool			exynos9810_reconnect_initialized;
+	bool			exynos9810_reconnect_attempted;
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	struct delayed_work	exynos9810_diagnostics_work;
