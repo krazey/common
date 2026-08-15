@@ -1221,6 +1221,20 @@ struct dwc3 {
 	struct delayed_work	exynos9810_diagnostics_work;
 	bool			exynos9810_diagnostics_initialized;
 	u8			exynos9810_diagnostics_count;
+	u32			exynos9810_reset_count;
+	u32			exynos9810_connect_count;
+	u32			exynos9810_disconnect_count;
+	u32			exynos9810_setup_count;
+	u32			exynos9810_set_address_count;
+	u32			exynos9810_set_config_count;
+	u32			exynos9810_ep_event_count;
+	u32			exynos9810_ep_complete_count;
+	s32			exynos9810_last_setup_ret;
+	u16			exynos9810_last_setup_value;
+	u8			exynos9810_last_request_type;
+	u8			exynos9810_last_request;
+	u8			exynos9810_last_ep;
+	u8			exynos9810_last_ep_event;
 #endif
 
 	const struct dwc3_glue_ops	*glue_ops;

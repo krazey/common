@@ -50,28 +50,72 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	bool driver_bound;
 	bool connected;
 	bool pullups;
+	bool setup_pending;
 	bool softconnect;
-	u32 dctl, dsts, gctl;
-	u8 speed;
+	s32 last_setup_ret;
+	u32 connect_count, dcfg, dctl, devten, disconnect_count;
+	u32 dsts, ep_complete_count, ep_event_count, evcount, gctl;
+	u32 guctl, last_setup_value, reset_count, set_address_count;
+	u32 set_config_count, setup_count, dalepena;
+	u8 ep0state, gadget_speed, last_ep, last_ep_event;
+	u8 last_request, last_request_type, speed, state;
 
 	spin_lock_irqsave(&dwc->lock, flags);
 	driver_bound = !!dwc->gadget_driver;
 	connected = dwc->connected;
 	pullups = dwc->pullups_connected;
 	softconnect = dwc->softconnect;
+	setup_pending = dwc->setup_packet_pending;
 	speed = dwc->speed;
+	state = dwc->gadget->state;
+	gadget_speed = dwc->gadget->speed;
+	ep0state = dwc->ep0state;
+	reset_count = dwc->exynos9810_reset_count;
+	connect_count = dwc->exynos9810_connect_count;
+	disconnect_count = dwc->exynos9810_disconnect_count;
+	setup_count = dwc->exynos9810_setup_count;
+	set_address_count = dwc->exynos9810_set_address_count;
+	set_config_count = dwc->exynos9810_set_config_count;
+	ep_event_count = dwc->exynos9810_ep_event_count;
+	ep_complete_count = dwc->exynos9810_ep_complete_count;
+	last_setup_ret = dwc->exynos9810_last_setup_ret;
+	last_setup_value = dwc->exynos9810_last_setup_value;
+	last_request_type = dwc->exynos9810_last_request_type;
+	last_request = dwc->exynos9810_last_request;
+	last_ep = dwc->exynos9810_last_ep;
+	last_ep_event = dwc->exynos9810_last_ep_event;
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	gctl = dwc3_readl(dwc, DWC3_GCTL);
+	guctl = dwc3_readl(dwc, DWC3_GUCTL);
 	dctl = dwc3_readl(dwc, DWC3_DCTL);
 	dsts = dwc3_readl(dwc, DWC3_DSTS);
+	dcfg = dwc3_readl(dwc, DWC3_DCFG);
+	dalepena = dwc3_readl(dwc, DWC3_DALEPENA);
+	devten = dwc3_readl(dwc, DWC3_DEVTEN);
+	evcount = dwc3_readl(dwc, DWC3_GEVNTCOUNT(0));
 	dev_info(dwc->dev,
-		 "E981D: DWC3 sample=%u rev=%#x irq=%u driver=%u conn=%u soft=%u pullup=%u speed=%u\n",
+		 "E981D: DWC3 sample=%u rev=%#x irq=%u driver=%u state=%u speed=%u/%u\n",
 		 dwc->exynos9810_diagnostics_count + 1, dwc->revision,
-		 dwc->irq_gadget, driver_bound, connected, softconnect, pullups,
-		 speed);
-	dev_info(dwc->dev, "E981D: DWC3 gctl=%#x dctl=%#x dsts=%#x\n",
-		 gctl, dctl, dsts);
+		 dwc->irq_gadget, driver_bound, state, speed, gadget_speed);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 flags conn=%u soft=%u pullup=%u ep0=%u pending=%u\n",
+		 connected, softconnect, pullups, ep0state, setup_pending);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 setup=%u addr=%u config=%u last=%#x/%#x value=%#x ret=%d\n",
+		 setup_count, set_address_count, set_config_count,
+		 last_request_type, last_request, last_setup_value,
+		 last_setup_ret);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 events reset=%u done=%u disc=%u ep=%u complete=%u last=%u/%u\n",
+		 reset_count, connect_count, disconnect_count, ep_event_count,
+		 ep_complete_count, last_ep, last_ep_event);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 gctl=%#x guctl=%#x dctl=%#x dsts=%#x\n",
+		 gctl, guctl, dctl, dsts);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 dcfg=%#x dalep=%#x devten=%#x evcount=%#x\n",
+		 dcfg, dalepena, devten, evcount);
 	if (++dwc->exynos9810_diagnostics_count <
 	    EXYNOS9810_DWC3_DIAGNOSTIC_SAMPLES)
 		schedule_delayed_work(&dwc->exynos9810_diagnostics_work,
@@ -3939,6 +3983,14 @@ static void dwc3_endpoint_interrupt(struct dwc3 *dwc,
 	struct dwc3_ep		*dep;
 	u8			epnum = event->endpoint_number;
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	dwc->exynos9810_ep_event_count++;
+	if (event->endpoint_event == DWC3_DEPEVT_XFERCOMPLETE)
+		dwc->exynos9810_ep_complete_count++;
+	dwc->exynos9810_last_ep = epnum;
+	dwc->exynos9810_last_ep_event = event->endpoint_event;
+#endif
+
 	dep = dwc->eps[epnum];
 	if (!dep) {
 		dev_warn(dwc->dev, "spurious event, endpoint %u is not allocated\n", epnum);
@@ -4118,6 +4170,10 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 {
 	int			reg;
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	dwc->exynos9810_disconnect_count++;
+#endif
+
 	dwc->suspended = false;
 
 	dwc3_gadget_set_link_state(dwc, DWC3_LINK_STATE_RX_DET);
@@ -4150,6 +4206,10 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 {
 	u32			reg;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	dwc->exynos9810_reset_count++;
+#endif
 
 	dwc->suspended = false;
 
@@ -4235,6 +4295,10 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	if (!dwc->softconnect)
 		return;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	dwc->exynos9810_connect_count++;
+#endif
 
 	reg = dwc3_readl(dwc, DWC3_DSTS);
 	speed = reg & DWC3_DSTS_CONNECTSPD;

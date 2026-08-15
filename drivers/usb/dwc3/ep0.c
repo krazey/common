@@ -835,6 +835,13 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 
 	trace_dwc3_ctrl_req(dwc, ctrl);
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	dwc->exynos9810_setup_count++;
+	dwc->exynos9810_last_request_type = ctrl->bRequestType;
+	dwc->exynos9810_last_request = ctrl->bRequest;
+	dwc->exynos9810_last_setup_value = le16_to_cpu(ctrl->wValue);
+#endif
+
 	len = le16_to_cpu(ctrl->wLength);
 	if (!len) {
 		dwc->three_stage_setup = false;
@@ -853,6 +860,16 @@ static void dwc3_ep0_inspect_setup(struct dwc3 *dwc,
 
 	if (ret == USB_GADGET_DELAYED_STATUS)
 		dwc->delayed_status = true;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	dwc->exynos9810_last_setup_ret = ret;
+	if ((ctrl->bRequestType & USB_TYPE_MASK) == USB_TYPE_STANDARD) {
+		if (ctrl->bRequest == USB_REQ_SET_ADDRESS)
+			dwc->exynos9810_set_address_count++;
+		else if (ctrl->bRequest == USB_REQ_SET_CONFIGURATION)
+			dwc->exynos9810_set_config_count++;
+	}
+#endif
 
 out:
 	if (ret < 0)
