@@ -134,6 +134,7 @@ union mc_fc_swich_core {
 #ifdef MC_FASTCALL_WORKER_THREAD
 static struct task_struct *fastcall_thread;
 static struct kthread_worker fastcall_worker;
+static int fastcall_bind_ret;
 #ifdef TBASE_CORE_SWITCHER
 static enum cpuhp_state fastcall_cpuhp_state = CPUHP_INVALID;
 #endif
@@ -152,6 +153,7 @@ static int smc_log_index;
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 static struct {
 	int affinity_ret;
+	int switch_affinity_ret;
 	unsigned int count;
 	unsigned int cpu;
 	u64 mpidr;
@@ -163,6 +165,7 @@ static struct {
 	} out;
 } fastcall_diag = {
 	.affinity_ret = -EINPROGRESS,
+	.switch_affinity_ret = -EINPROGRESS,
 };
 #endif
 
@@ -390,6 +393,26 @@ static int nq_cpu_down_prep(unsigned int cpu)
 	mc_dev_info("CPU #%d is going to die", cpu);
 	return mc_cpu_offline(cpu);
 }
+
+static int nq_cpu_online(unsigned int cpu)
+{
+#ifdef CONFIG_SECURE_OS_BOOSTER_API
+	mc_cpu_online(cpu);
+	return 0;
+#else
+	int ret;
+
+	if (cpu != NONBOOT_LITTLE_CORE)
+		return 0;
+
+	ret = mc_switch_core(cpu);
+	if (!ret)
+		return 0;
+
+	mc_dev_err("cannot move secure OS to CPU%d: %d", cpu, ret);
+	return ret < 0 ? ret : -EIO;
+#endif
+}
 #endif
 #endif /* MC_FASTCALL_WORKER_THREAD */
 
@@ -496,8 +519,16 @@ static void fastcall_work_func(struct work_struct *work)
 	if (mc_fc_generic->as_in.cmd == MC_FC_SWAP_CPU) {
 #ifdef MC_FASTCALL_WORKER_THREAD
 		cpumask_t new_msk = mc_exec_core_switch(mc_fc_generic);
+		int ret;
 
-		nq_set_cpus_allowed(fastcall_thread, new_msk);
+		ret = nq_set_cpus_allowed(fastcall_thread, new_msk);
+		WRITE_ONCE(fastcall_bind_ret, ret);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		fastcall_diag.switch_affinity_ret = ret;
+#endif
+		if (ret)
+			mc_dev_err("cannot bind fastcall thread after core switch: %d",
+				   ret);
 #else
 		mc_exec_core_switch(mc_fc_generic);
 #endif
@@ -584,6 +615,7 @@ int mc_fastcall_init(void)
 
 	/* this thread MUST run on CPU 0 at startup */
 	ret = nq_set_cpus_allowed(fastcall_thread, CPU_MASK_CPU0);
+	WRITE_ONCE(fastcall_bind_ret, ret);
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	fastcall_diag.affinity_ret = ret;
 #endif
@@ -597,7 +629,7 @@ int mc_fastcall_init(void)
 #else
 	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
 					"tee/trustonic:online",
-					NULL, nq_cpu_down_prep);
+					nq_cpu_online, nq_cpu_down_prep);
 #endif
 	if (ret < 0) {
 		mc_dev_err("cpu online callback setup failed: %d", ret);
@@ -815,9 +847,18 @@ int mc_fastcall_debug_smclog(struct kasnprintf_buf *buf)
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 void mc_fastcall_diag_dump(void)
 {
+	int worker_cpu = -1;
+
+#ifdef MC_FASTCALL_WORKER_THREAD
+	if (!IS_ERR_OR_NULL(fastcall_thread))
+		worker_cpu = task_cpu(fastcall_thread);
+#endif
 	pr_info("E981D: Trustonic fastcall bind=%d count=%u cpu=%u mpidr=%#llx\n",
 		fastcall_diag.affinity_ret, fastcall_diag.count,
 		fastcall_diag.cpu, fastcall_diag.mpidr);
+	pr_info("E981D: Trustonic runtime active=%d worker=%d switch_bind=%d lpae=%u\n",
+		READ_ONCE(active_cpu), worker_cpu,
+		fastcall_diag.switch_affinity_ret, g_ctx.f_lpae);
 	pr_info("E981D: Trustonic fastcall in=%#x/%#x/%#x/%#x\n",
 		fastcall_diag.in.cmd, fastcall_diag.in.param[0],
 		fastcall_diag.in.param[1], fastcall_diag.in.param[2]);
@@ -863,6 +904,8 @@ int mc_switch_core(int cpu)
 		     cpu, active_cpu);
 	mc_fastcall(&fc_switch_core.as_generic);
 	ret = convert_fc_ret(fc_switch_core.as_out.ret);
+	if (!ret)
+		ret = READ_ONCE(fastcall_bind_ret);
 	mc_dev_devel("exit with %d/0x%08X", ret, ret);
 	return ret;
 }
