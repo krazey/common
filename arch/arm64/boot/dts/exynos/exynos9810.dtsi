@@ -8,6 +8,7 @@
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/clock/samsung,exynos9810.h>
+#include <dt-bindings/soc/samsung,exynos-usi.h>
 
 / {
 	compatible = "samsung,exynos9810";
@@ -431,6 +432,11 @@
 			clock-names = "oscclk", "dout_clkcmu_cmgp_bus";
 		};
 
+		sysreg_cmgp: system-controller@14210000 {
+			compatible = "samsung,exynos9810-cmgp-sysreg", "syscon";
+			reg = <0x14210000 0x10000>;
+		};
+
 		pinctrl_cmgp: pinctrl@14220000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x14220000 0x1000>;
@@ -442,19 +448,34 @@
 			};
 		};
 
-		hsi2c_40: i2c@14360000 {
-			compatible = "samsung,exynos9810-hsi2c";
-			reg = <0x14360000 0x1000>;
-			interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
+		usi_cmgp3: usi@143600c0 {
+			compatible = "samsung,exynos9810-usi",
+				     "samsung,exynos850-usi";
+			reg = <0x143600c0 0x20>;
+			samsung,sysreg = <&sysreg_cmgp 0x2030>;
+			samsung,mode = <USI_MODE_I2C>;
 			#address-cells = <1>;
-			#size-cells = <0>;
-			clock-frequency = <400000>;
-			clocks = <&cmu_cmgp CLK_GOUT_CMGP_USI3_IPCLK>,
-				 <&cmu_cmgp CLK_GOUT_CMGP_USI3_PCLK>;
-			clock-names = "hsi2c", "hsi2c_pclk";
-			pinctrl-0 = <&hsi2c40_bus>;
-			pinctrl-names = "default";
+			#size-cells = <1>;
+			ranges;
+			clocks = <&cmu_cmgp CLK_GOUT_CMGP_USI3_PCLK>,
+				 <&cmu_cmgp CLK_GOUT_CMGP_USI3_IPCLK>;
+			clock-names = "pclk", "ipclk";
 			status = "disabled";
+
+			hsi2c_40: i2c@14360000 {
+				compatible = "samsung,exynos9810-hsi2c";
+				reg = <0x14360000 0xc0>;
+				interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
+				#address-cells = <1>;
+				#size-cells = <0>;
+				clock-frequency = <400000>;
+				clocks = <&cmu_cmgp CLK_GOUT_CMGP_USI3_IPCLK>,
+					 <&cmu_cmgp CLK_GOUT_CMGP_USI3_PCLK>;
+				clock-names = "hsi2c", "hsi2c_pclk";
+				pinctrl-0 = <&hsi2c40_bus>;
+				pinctrl-names = "default";
+				status = "disabled";
+			};
 		};
 
 		pinctrl_aud: pinctrl@17c60000 {
