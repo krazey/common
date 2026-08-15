@@ -31,6 +31,9 @@
 #define DWC3_ALIGN_FRAME(d, n)	(((d)->frame_number + ((d)->interval * (n))) \
 					& ~((d)->interval - 1))
 
+#define EXYNOS9810_DWC3_RECONNECT_DELAY_MS	3000
+#define EXYNOS9810_DWC3_DISCONNECT_TIME_MS	250
+
 static bool dwc3_is_exynos9810(struct dwc3 *dwc)
 {
 	return dwc->dev->parent && dwc->dev->parent->of_node &&
@@ -2985,6 +2988,18 @@ static int dwc3_gadget_soft_connect(struct dwc3 *dwc)
 	return dwc3_gadget_run_stop(dwc, true);
 }
 
+static void dwc3_exynos9810_schedule_reconnect(struct dwc3 *dwc)
+{
+	if (!dwc3_is_exynos9810(dwc) ||
+	    !dwc->exynos9810_reconnect_initialized ||
+	    dwc->exynos9810_reconnect_attempted || !dwc->softconnect ||
+	    !dwc->pullups_connected)
+		return;
+
+	mod_delayed_work(system_wq, &dwc->exynos9810_reconnect_work,
+			 msecs_to_jiffies(EXYNOS9810_DWC3_RECONNECT_DELAY_MS));
+}
+
 static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
@@ -3015,11 +3030,15 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 		pm_runtime_put(dwc->dev);
 		if (ret < 0)
 			pm_runtime_set_suspended(dwc->dev);
+		else if (is_on)
+			dwc3_exynos9810_schedule_reconnect(dwc);
 		return ret;
 	}
 
 	if (dwc->pullups_connected == is_on) {
 		pm_runtime_put(dwc->dev);
+		if (is_on)
+			dwc3_exynos9810_schedule_reconnect(dwc);
 		return 0;
 	}
 
@@ -3032,7 +3051,48 @@ static int dwc3_gadget_pullup(struct usb_gadget *g, int is_on)
 
 	pm_runtime_put(dwc->dev);
 
+	if (!ret && is_on)
+		dwc3_exynos9810_schedule_reconnect(dwc);
+
 	return ret;
+}
+
+static void dwc3_exynos9810_reconnect_work(struct work_struct *work)
+{
+	struct dwc3 *dwc =
+		container_of(to_delayed_work(work), struct dwc3,
+			     exynos9810_reconnect_work);
+	struct usb_gadget *gadget = dwc->gadget;
+	enum usb_device_state state;
+	int connect_ret;
+	int disconnect_ret;
+	int vbus_ret;
+
+	if (!dwc->exynos9810_reconnect_initialized ||
+	    dwc->exynos9810_reconnect_attempted || !gadget ||
+	    !dwc->gadget_driver || !dwc->softconnect ||
+	    !dwc->pullups_connected)
+		return;
+
+	state = gadget->state;
+	dwc->exynos9810_reconnect_attempted = true;
+	if (state == USB_STATE_ADDRESS || state == USB_STATE_CONFIGURED ||
+	    state == USB_STATE_SUSPENDED)
+		return;
+
+	dev_info(dwc->dev, "E981D: DWC3 boot reconnect state=%u\n", state);
+
+	disconnect_ret = usb_gadget_disconnect(gadget);
+	vbus_ret = dwc3_exynos9810_update_dp_pullup(dwc, false);
+	msleep(EXYNOS9810_DWC3_DISCONNECT_TIME_MS);
+
+	if (!dwc->exynos9810_reconnect_initialized || !dwc->gadget_driver)
+		return;
+
+	connect_ret = usb_gadget_connect(gadget);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 boot reconnect down=%d vbus=%d up=%d\n",
+		 disconnect_ret, vbus_ret, connect_ret);
 }
 
 static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
@@ -5003,6 +5063,13 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	if (ret)
 		goto err4;
 
+	if (dwc3_is_exynos9810(dwc)) {
+		INIT_DELAYED_WORK(&dwc->exynos9810_reconnect_work,
+				  dwc3_exynos9810_reconnect_work);
+		dwc->exynos9810_reconnect_attempted = false;
+		dwc->exynos9810_reconnect_initialized = true;
+	}
+
 	ret = usb_add_gadget(dwc->gadget);
 	if (ret) {
 		dev_err(dwc->dev, "failed to add gadget\n");
@@ -5033,6 +5100,10 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	return 0;
 
 err5:
+	if (dwc->exynos9810_reconnect_initialized) {
+		dwc->exynos9810_reconnect_initialized = false;
+		cancel_delayed_work_sync(&dwc->exynos9810_reconnect_work);
+	}
 	dwc3_gadget_free_endpoints(dwc);
 err4:
 	usb_put_gadget(dwc->gadget);
@@ -5057,6 +5128,11 @@ EXPORT_SYMBOL_GPL(dwc3_gadget_init);
 
 void dwc3_gadget_exit(struct dwc3 *dwc)
 {
+	if (dwc->exynos9810_reconnect_initialized) {
+		dwc->exynos9810_reconnect_initialized = false;
+		cancel_delayed_work_sync(&dwc->exynos9810_reconnect_work);
+	}
+
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	if (dwc->exynos9810_diagnostics_initialized)
 		cancel_delayed_work_sync(&dwc->exynos9810_diagnostics_work);
