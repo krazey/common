@@ -42,6 +42,9 @@ static int dwc3_exynos9810_update_dp_pullup(struct dwc3 *dwc, bool enable)
 {
 	int ret;
 
+	if (!dwc->usb2_generic_phy[0])
+		return 0;
+
 	ret = phy_set_mode_ext(dwc->usb2_generic_phy[0],
 			       PHY_MODE_USB_DEVICE, enable);
 	dev_info(dwc->dev, "E981D: DWC3 PHY pull-up=%u ret=%d\n",
@@ -50,36 +53,8 @@ static int dwc3_exynos9810_update_dp_pullup(struct dwc3 *dwc, bool enable)
 	return ret;
 }
 
-static void dwc3_exynos9810_phy_work(struct work_struct *work)
-{
-	struct dwc3 *dwc = container_of(work, struct dwc3,
-					exynos9810_phy_work);
-	bool enable = READ_ONCE(dwc->exynos9810_dp_pullup);
-
-	dwc3_exynos9810_update_dp_pullup(dwc, enable);
-}
-
-static void dwc3_exynos9810_set_dp_pullup(struct dwc3 *dwc, bool enable)
-{
-	if (!READ_ONCE(dwc->exynos9810_phy_work_initialized) ||
-	    !dwc->usb2_generic_phy[0])
-		return;
-	if (READ_ONCE(dwc->exynos9810_dp_pullup) == enable)
-		return;
-
-	WRITE_ONCE(dwc->exynos9810_dp_pullup, enable);
-	schedule_work(&dwc->exynos9810_phy_work);
-}
-
 static int dwc3_exynos9810_prepare_pullup(struct dwc3 *dwc)
 {
-	if (!READ_ONCE(dwc->exynos9810_phy_work_initialized) ||
-	    !dwc->usb2_generic_phy[0])
-		return 0;
-
-	cancel_work_sync(&dwc->exynos9810_phy_work);
-	WRITE_ONCE(dwc->exynos9810_dp_pullup, false);
-
 	return dwc3_exynos9810_update_dp_pullup(dwc, false);
 }
 
@@ -2990,6 +2965,12 @@ static int dwc3_gadget_soft_connect(struct dwc3 *dwc)
 	if (ret)
 		return ret;
 
+	if (dwc3_is_exynos9810(dwc)) {
+		ret = dwc3_exynos9810_update_dp_pullup(dwc, true);
+		if (ret)
+			return ret;
+	}
+
 	if (dwc->dis_u2_freeclk_exists_quirk ||
 	    dwc->gfladj_refclk_lpm_sel) {
 		for (i = 0; i < dwc->num_usb2_ports; i++) {
@@ -4405,9 +4386,6 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	reg = dwc3_readl(dwc, DWC3_DCFG);
 	reg &= ~(DWC3_DCFG_DEVADDR_MASK);
 	dwc3_writel(dwc, DWC3_DCFG, reg);
-
-	if (dwc3_is_exynos9810(dwc))
-		dwc3_exynos9810_set_dp_pullup(dwc, true);
 }
 
 static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
@@ -5025,13 +5003,6 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	if (ret)
 		goto err4;
 
-	if (dwc3_is_exynos9810(dwc)) {
-		INIT_WORK(&dwc->exynos9810_phy_work,
-			  dwc3_exynos9810_phy_work);
-		WRITE_ONCE(dwc->exynos9810_dp_pullup, false);
-		WRITE_ONCE(dwc->exynos9810_phy_work_initialized, true);
-	}
-
 	ret = usb_add_gadget(dwc->gadget);
 	if (ret) {
 		dev_err(dwc->dev, "failed to add gadget\n");
@@ -5062,10 +5033,6 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	return 0;
 
 err5:
-	if (dwc->exynos9810_phy_work_initialized) {
-		WRITE_ONCE(dwc->exynos9810_phy_work_initialized, false);
-		cancel_work_sync(&dwc->exynos9810_phy_work);
-	}
 	dwc3_gadget_free_endpoints(dwc);
 err4:
 	usb_put_gadget(dwc->gadget);
@@ -5090,10 +5057,6 @@ EXPORT_SYMBOL_GPL(dwc3_gadget_init);
 
 void dwc3_gadget_exit(struct dwc3 *dwc)
 {
-	if (dwc->exynos9810_phy_work_initialized) {
-		WRITE_ONCE(dwc->exynos9810_phy_work_initialized, false);
-		cancel_work_sync(&dwc->exynos9810_phy_work);
-	}
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	if (dwc->exynos9810_diagnostics_initialized)
 		cancel_delayed_work_sync(&dwc->exynos9810_diagnostics_work);
