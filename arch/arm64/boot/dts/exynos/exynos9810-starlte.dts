@@ -162,6 +162,10 @@ firmware_class.path=/vendor/firmware bootconfig";
 	status = "okay";
 };
 
+&usi_cmgp3 {
+	status = "okay";
+};
+
 &hsi2c_40 {
 	status = "okay";
 
