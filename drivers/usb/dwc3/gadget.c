@@ -56,6 +56,8 @@ static void dwc3_exynos9810_set_dp_pullup(struct dwc3 *dwc, bool enable)
 	if (!READ_ONCE(dwc->exynos9810_phy_work_initialized) ||
 	    !dwc->usb2_generic_phy[0])
 		return;
+	if (READ_ONCE(dwc->exynos9810_dp_pullup) == enable)
+		return;
 
 	WRITE_ONCE(dwc->exynos9810_dp_pullup, enable);
 	schedule_work(&dwc->exynos9810_phy_work);
@@ -4466,8 +4468,6 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 	 *
 	 * In both cases reset values should be sufficient.
 	 */
-	if (dwc3_is_exynos9810(dwc))
-		dwc3_exynos9810_set_dp_pullup(dwc, false);
 }
 
 static void dwc3_gadget_wakeup_interrupt(struct dwc3 *dwc, unsigned int evtinfo)
@@ -4931,6 +4931,7 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	if (dwc3_is_exynos9810(dwc)) {
 		INIT_WORK(&dwc->exynos9810_phy_work,
 			  dwc3_exynos9810_phy_work);
+		WRITE_ONCE(dwc->exynos9810_dp_pullup, false);
 		WRITE_ONCE(dwc->exynos9810_phy_work_initialized, true);
 	}
 
