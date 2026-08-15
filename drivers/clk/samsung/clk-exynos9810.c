@@ -15,7 +15,7 @@
 #include "clk.h"
 #include "clk-exynos-arm64.h"
 
-#define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_REF + 1)
+#define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
 #define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_UART_DBG_IPCLK + 1)
 
 /* ---- CMU_FSYS0 --------------------------------------------------------- */
@@ -26,6 +26,7 @@
 #define CLK_CON_GAT_GOUT_FSYS0_UFS_EMBD_UNIPRO		0x205c
 #define CLK_CON_GAT_GOUT_FSYS0_USB30DRD_REF		0x206c
 #define QCH_CON_UFS_EMBD					0x3044
+#define QCH_CON_USB30DRD_CTRL				0x304c
 #define QCH_CON_USB30DRD_LINK				0x3050
 
 static const unsigned long fsys0_clk_regs[] __initconst = {
@@ -35,6 +36,7 @@ static const unsigned long fsys0_clk_regs[] __initconst = {
 	CLK_CON_GAT_GOUT_FSYS0_UFS_EMBD_UNIPRO,
 	CLK_CON_GAT_GOUT_FSYS0_USB30DRD_REF,
 	QCH_CON_UFS_EMBD,
+	QCH_CON_USB30DRD_CTRL,
 	QCH_CON_USB30DRD_LINK,
 };
 
@@ -70,10 +72,13 @@ static const struct samsung_gate_clock fsys0_gate_clks[] __initconst = {
 	GATE(CLK_GOUT_FSYS0_UFS_EMBD_UNIPRO,
 	     "gout_fsys0_ufs_embd_unipro", "mout_fsys0_ufs_embd_user",
 	     CLK_CON_GAT_GOUT_FSYS0_UFS_EMBD_UNIPRO, 21, 0, 0),
-	/* Keep the USB link request asserted while the DWC3 block is active. */
+	/* Keep the USB Q-channel requests asserted while DWC3 is active. */
 	GATE(CLK_GOUT_FSYS0_USB30DRD_LINK,
 	     "gout_fsys0_usb30drd_link", "mout_fsys0_usb30drd_user",
 	     QCH_CON_USB30DRD_LINK, 1, 0, 0),
+	GATE(CLK_GOUT_FSYS0_USB30DRD_CTRL,
+	     "gout_fsys0_usb30drd_ctrl", "mout_fsys0_usb30drd_user",
+	     QCH_CON_USB30DRD_CTRL, 1, 0, 0),
 	GATE(CLK_GOUT_FSYS0_USB30DRD_REF,
 	     "gout_fsys0_usb30drd_ref", "mout_fsys0_usb30drd_user",
 	     CLK_CON_GAT_GOUT_FSYS0_USB30DRD_REF, 21, 0, 0),
