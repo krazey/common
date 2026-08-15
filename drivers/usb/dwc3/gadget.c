@@ -101,7 +101,8 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	u32 connect_count, dcfg, dctl, depcmd0, depcmd1, devten;
 	u32 disconnect_count, dsts, ep0_flags, ep0_trb_ctrl;
 	u32 ep0_trb_size, ep_complete_count, ep_event_count, evcount;
-	u32 gsbuscfg0, gsbuscfg1, gctl, guctl, gusb2phycfg;
+	u32 gbuserraddr0, gbuserraddr1, gdbgfifospace, gdbgltssm;
+	u32 gsbuscfg0, gsbuscfg1, gctl, gsts, guctl, gusb2phycfg;
 	u32 last_setup_value, reset_count, set_address_count;
 	u32 set_config_count, setup_count, dalepena;
 	u8 ep0_dequeue, ep0_enqueue, ep0_resource, ep0state;
@@ -149,7 +150,12 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	spin_unlock_irqrestore(&dwc->lock, flags);
 
 	gctl = dwc3_readl(dwc, DWC3_GCTL);
+	gsts = dwc3_readl(dwc, DWC3_GSTS);
 	guctl = dwc3_readl(dwc, DWC3_GUCTL);
+	gbuserraddr0 = dwc3_readl(dwc, DWC3_GBUSERRADDR0);
+	gbuserraddr1 = dwc3_readl(dwc, DWC3_GBUSERRADDR1);
+	gdbgfifospace = dwc3_readl(dwc, DWC3_GDBGFIFOSPACE);
+	gdbgltssm = dwc3_readl(dwc, DWC3_GDBGLTSSM);
 	dctl = dwc3_readl(dwc, DWC3_DCTL);
 	dsts = dwc3_readl(dwc, DWC3_DSTS);
 	dcfg = dwc3_readl(dwc, DWC3_DCFG);
@@ -180,6 +186,10 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	dev_info(dwc->dev,
 		 "E981D: DWC3 gctl=%#x guctl=%#x dctl=%#x dsts=%#x\n",
 		 gctl, guctl, dctl, dsts);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 gsts=%#x buserr=%#x/%#x debug=%#x/%#x\n",
+		 gsts, gbuserraddr0, gbuserraddr1, gdbgfifospace,
+		 gdbgltssm);
 	dev_info(dwc->dev,
 		 "E981D: DWC3 dcfg=%#x dalep=%#x devten=%#x evcount=%#x\n",
 		 dcfg, dalepena, devten, evcount);
