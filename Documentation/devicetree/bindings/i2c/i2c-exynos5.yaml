@@ -26,6 +26,7 @@ properties:
           - samsung,exynos5260-hsi2c    # Exynos5260
           - samsung,exynos7-hsi2c       # Exynos7
           - samsung,exynos8895-hsi2c
+          - samsung,exynos9810-hsi2c
           - samsung,exynosautov9-hsi2c
       - items:
           - enum:
@@ -89,6 +90,7 @@ allOf:
           contains:
             enum:
               - samsung,exynosautov9-hsi2c
+              - samsung,exynos9810-hsi2c
 
     then:
       properties:
