@@ -23,16 +23,17 @@ description: |
 properties:
   compatible:
     enum:
+      - samsung,exynos9810-cmu-cmgp
       - samsung,exynos9810-cmu-fsys0
       - samsung,exynos9810-cmu-peric0
 
   clocks:
-    minItems: 3
-    maxItems: 3
+    minItems: 2
+    maxItems: 4
 
   clock-names:
-    minItems: 3
-    maxItems: 3
+    minItems: 2
+    maxItems: 4
 
   "#clock-cells":
     const: 1
@@ -50,16 +51,22 @@ allOf:
     then:
       properties:
         clocks:
+          minItems: 4
+          maxItems: 4
           items:
             - description: External reference clock
             - description: CMU_FSYS0 bus clock from CMU_TOP
             - description: Embedded UFS clock from CMU_TOP
+            - description: USB DRD clock from CMU_TOP
 
         clock-names:
+          minItems: 4
+          maxItems: 4
           items:
             - const: oscclk
             - const: dout_clkcmu_fsys0_bus
             - const: dout_clkcmu_fsys0_ufs_embd
+            - const: dout_clkcmu_fsys0_usb30drd
 
   - if:
       properties:
@@ -70,16 +77,42 @@ allOf:
     then:
       properties:
         clocks:
+          minItems: 3
+          maxItems: 3
           items:
             - description: External reference clock
             - description: CMU_PERIC0 bus clock from CMU_TOP
             - description: CMU_PERIC0 IP clock from CMU_TOP
 
         clock-names:
+          minItems: 3
+          maxItems: 3
           items:
             - const: oscclk
             - const: dout_clkcmu_peric0_bus
             - const: dout_clkcmu_peric0_ip
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-cmu-cmgp
+
+    then:
+      properties:
+        clocks:
+          minItems: 2
+          maxItems: 2
+          items:
+            - description: External reference clock
+            - description: CMU_CMGP bus clock from CMU_TOP
+
+        clock-names:
+          minItems: 2
+          maxItems: 2
+          items:
+            - const: oscclk
+            - const: dout_clkcmu_cmgp_bus
 
 required:
   - compatible
