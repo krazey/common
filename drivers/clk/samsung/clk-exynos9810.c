@@ -220,9 +220,15 @@ static const struct samsung_div_clock cmgp_div_clks[] __initconst = {
 };
 
 static const struct samsung_gate_clock cmgp_gate_clks[] __initconst = {
-	/* Keep the USI Q-channel request active while either clock is used. */
+	/*
+	 * Disable Q-channel HWACG so CCF can hold the software clock request
+	 * while either USI clock is used.
+	 */
+	GATE(0, "gout_cmgp_usi3_qch_mode", "mout_cmgp_bus_user",
+	     QCH_CON_USI_CMGP03, 0, CLK_IS_CRITICAL,
+	     CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_CMGP_USI3_QCH, "gout_cmgp_usi3_qch",
-	     "mout_cmgp_bus_user", QCH_CON_USI_CMGP03, 1, 0, 0),
+	     "gout_cmgp_usi3_qch_mode", QCH_CON_USI_CMGP03, 1, 0, 0),
 	GATE(CLK_GOUT_CMGP_USI3, "gout_cmgp_usi3", "mout_cmgp_usi3",
 	     CLK_CON_GAT_GATE_CLK_USI_CMGP03, 21, 0, 0),
 	GATE(CLK_GOUT_CMGP_USI3_RST, "gout_cmgp_usi3_rst",
