@@ -22,12 +22,14 @@ static int __init exynos9810_online_secondary_cpus(void)
 			continue;
 
 		ret = add_cpu(cpu);
-		if (ret)
+		if (ret) {
 			pr_err("Exynos9810: failed to bring CPU%u online: %d\n",
 			       cpu, ret);
-		else
-			pr_info("Exynos9810: brought CPU%u online after device init\n",
-				cpu);
+			break;
+		}
+
+		pr_info("Exynos9810: brought CPU%u online after device init\n",
+			cpu);
 	}
 
 	return 0;
