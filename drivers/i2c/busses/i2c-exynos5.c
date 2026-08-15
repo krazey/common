@@ -58,9 +58,6 @@
 #define HSI2C_TIMING_FS3	0x68
 #define HSI2C_TIMING_SLA	0x6C
 #define HSI2C_ADDR		0x70
-#define HSI2C_USI_CON		0xc4
-#define HSI2C_USI_OPTION	0xc8
-
 #define EXYNOS9810_CMGP_BASE			0x14200000
 #define EXYNOS9810_CMGP_SIZE			0x4000
 #define CMGP_CONTROLLER_OPTION			0x0800
@@ -308,12 +305,6 @@ static void exynos5_i2c_clr_pend_irq(struct exynos5_i2c *i2c)
 {
 	writel(readl(i2c->regs + HSI2C_INT_STATUS),
 				i2c->regs + HSI2C_INT_STATUS);
-}
-
-static void exynos5_i2c_release_usi_reset(struct exynos5_i2c *i2c)
-{
-	if (i2c->variant->has_usi_v2)
-		writel(0, i2c->regs + HSI2C_USI_CON);
 }
 
 /*
@@ -881,9 +872,6 @@ static void exynos5_i2c_dump_timeout(struct exynos5_i2c *i2c)
 		 readl(i2c->regs + HSI2C_TIMING_FS3),
 		 readl(i2c->regs + HSI2C_TIMING_SLA),
 		 readl(i2c->regs + HSI2C_ADDR));
-	dev_warn(i2c->dev, "E981D: usi_con=%08x usi_option=%08x\n",
-		 readl(i2c->regs + HSI2C_USI_CON),
-		 readl(i2c->regs + HSI2C_USI_OPTION));
 	if (!i2c->cmu_regs)
 		return;
 
@@ -1080,8 +1068,6 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 			dev_warn(&pdev->dev, "cannot map CMGP registers\n");
 	}
 
-	exynos5_i2c_release_usi_reset(i2c);
-
 	/* Clear pending interrupts from u-boot or misc causes */
 	exynos5_i2c_clr_pend_irq(i2c);
 
@@ -1157,8 +1143,6 @@ static int exynos5_i2c_resume_noirq(struct device *dev)
 	ret = clk_prepare_enable(i2c->clk);
 	if (ret)
 		goto err_pclk;
-
-	exynos5_i2c_release_usi_reset(i2c);
 
 	ret = exynos5_hsi2c_clock_setup(i2c);
 	if (ret)
