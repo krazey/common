@@ -15,9 +15,33 @@
 #include "clk.h"
 #include "clk-exynos-arm64.h"
 
+#define CLKS_NR_TOP		(CLK_GOUT_TOP_CMGP_BUS + 1)
 #define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
 #define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_UART_DBG_IPCLK + 1)
 #define CLKS_NR_CMGP		(CLK_GOUT_CMGP_USI3_PCLK + 1)
+
+/* ---- CMU_TOP ---------------------------------------------------------- */
+
+#define CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS		0x2028
+
+static const unsigned long top_clk_regs[] __initconst = {
+	CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS,
+};
+
+static const struct samsung_gate_clock top_gate_clks[] __initconst = {
+	GATE(CLK_GOUT_TOP_CMGP_BUS, "dout_clkcmu_cmgp_bus",
+	     "cmgp_bus_bootclk", CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS,
+	     21, CLK_IS_CRITICAL, 0),
+};
+
+static const struct samsung_cmu_info top_cmu_info __initconst = {
+	.gate_clks		= top_gate_clks,
+	.nr_gate_clks		= ARRAY_SIZE(top_gate_clks),
+	.nr_clk_ids		= CLKS_NR_TOP,
+	.clk_regs		= top_clk_regs,
+	.nr_clk_regs		= ARRAY_SIZE(top_clk_regs),
+	.clk_name		= "cmgp_bus_bootclk",
+};
 
 /* ---- CMU_FSYS0 --------------------------------------------------------- */
 
@@ -268,6 +292,9 @@ static int __init exynos9810_cmu_probe(struct platform_device *pdev)
 
 static const struct of_device_id exynos9810_cmu_of_match[] = {
 	{
+		.compatible = "samsung,exynos9810-cmu-top",
+		.data = &top_cmu_info,
+	}, {
 		.compatible = "samsung,exynos9810-cmu-fsys0",
 		.data = &fsys0_cmu_info,
 	}, {
