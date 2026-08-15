@@ -346,6 +346,13 @@
 
 		interrupts = <GIC_SPI 28 IRQ_TYPE_LEVEL_HIGH>;
 	};
+
+	hsi2c40_bus: hsi2c40-bus-pins {
+		samsung,pins = "gpm14-0", "gpm15-0";
+		samsung,pin-function = <2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
 };
 
 &pinctrl_fsys0 {
