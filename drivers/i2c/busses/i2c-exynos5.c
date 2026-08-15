@@ -75,6 +75,7 @@
 
 /* I2C_TRAILING_CTL Register bits */
 #define HSI2C_TRAILING_COUNT			(0xf)
+#define HSI2C_TRAILING_COUNT_USI_V2		(0xffffff)
 
 /* I2C_INT_EN Register bits */
 #define HSI2C_INT_TX_ALMOSTEMPTY_EN		(1u << 0)
@@ -212,7 +213,7 @@ struct exynos5_i2c {
  * struct exynos_hsi2c_variant - platform specific HSI2C driver data
  * @fifo_depth: the fifo depth supported by the HSI2C module
  * @hw: the hardware variant of Exynos I2C controller
- * @has_usi_reset: whether the controller is wrapped by a local USI reset
+ * @has_usi_v2: whether the controller uses the Exynos9810 USI v2 wrapper
  *
  * Specifies platform specific configuration of HSI2C module.
  * Note: A structure for driver specific platform data is used for future
@@ -221,7 +222,7 @@ struct exynos5_i2c {
 struct exynos_hsi2c_variant {
 	unsigned int		fifo_depth;
 	enum i2c_type_exynos	hw;
-	bool			has_usi_reset;
+	bool			has_usi_v2;
 };
 
 static const struct exynos_hsi2c_variant exynos5250_hsi2c_data = {
@@ -252,7 +253,7 @@ static const struct exynos_hsi2c_variant exynos8895_hsi2c_data = {
 static const struct exynos_hsi2c_variant exynos9810_hsi2c_data = {
 	.fifo_depth	= 64,
 	.hw		= I2C_TYPE_EXYNOS8895,
-	.has_usi_reset	= true,
+	.has_usi_v2	= true,
 };
 
 static const struct of_device_id exynos5_i2c_match[] = {
@@ -289,7 +290,7 @@ static void exynos5_i2c_clr_pend_irq(struct exynos5_i2c *i2c)
 
 static void exynos5_i2c_release_usi_reset(struct exynos5_i2c *i2c)
 {
-	if (i2c->variant->has_usi_reset)
+	if (i2c->variant->has_usi_v2)
 		writel(0, i2c->regs + HSI2C_USI_CON);
 }
 
@@ -472,14 +473,20 @@ static void exynos5_i2c_init(struct exynos5_i2c *i2c)
 {
 	u32 i2c_conf = readl(i2c->regs + HSI2C_CONF);
 	u32 i2c_timeout = readl(i2c->regs + HSI2C_TIMEOUT);
+	u32 i2c_ctl = HSI2C_MASTER;
+	u32 trailing_count = HSI2C_TRAILING_COUNT;
 
 	/* Clear to disable Timeout */
 	i2c_timeout &= ~HSI2C_TIMEOUT_EN;
 	writel(i2c_timeout, i2c->regs + HSI2C_TIMEOUT);
 
-	writel((HSI2C_FUNC_MODE_I2C | HSI2C_MASTER),
-					i2c->regs + HSI2C_CTL);
-	writel(HSI2C_TRAILING_COUNT, i2c->regs + HSI2C_TRAILIG_CTL);
+	if (!i2c->variant->has_usi_v2)
+		i2c_ctl |= HSI2C_FUNC_MODE_I2C;
+	else
+		trailing_count = HSI2C_TRAILING_COUNT_USI_V2;
+
+	writel(i2c_ctl, i2c->regs + HSI2C_CTL);
+	writel(trailing_count, i2c->regs + HSI2C_TRAILIG_CTL);
 
 	if (i2c->op_clock >= I2C_MAX_FAST_MODE_PLUS_FREQ) {
 		writel(HSI2C_MASTER_ID(MASTER_ID(i2c->adap.nr)),
