@@ -266,6 +266,8 @@
 #define EXYNOS850_DRD_HSP_TEST			0x5c
 #define HSP_TEST_SIDDQ				BIT(24)
 
+#define EXYNOS9810_DRD_HSPPLLTUNE		0x60
+
 #define EXYNOSAUTOV920_DRD_HSP_CLKRST		0x100
 #define HSPCLKRST_PHY20_SW_PORTRESET		BIT(3)
 #define HSPCLKRST_PHY20_SW_POR			BIT(1)
@@ -569,7 +571,7 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 			     diagnostics_work);
 	void __iomem *base = phy_drd->reg_phy;
 	u32 clkrst, debug_h, debug_l, history, hsp;
-	u32 link, port, test, tune, utmi;
+	u32 link, pll, port, test, tune, utmi;
 	int ret;
 
 	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
@@ -591,6 +593,7 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 	hsp = readl(base + EXYNOS850_DRD_HSP);
 	tune = readl(base + EXYNOS850_DRD_HSPPARACON);
 	test = readl(base + EXYNOS850_DRD_HSP_TEST);
+	pll = readl(base + EXYNOS9810_DRD_HSPPLLTUNE);
 	mutex_unlock(&phy_drd->phy_mutex);
 
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
@@ -600,8 +603,10 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 		 phy_drd->diagnostics_count + 1, phy_drd->init_count,
 		 phy_drd->exit_count, link, port, clkrst);
 	dev_info(phy_drd->dev,
-		 "E981D: USB PHY utmi=%#x hsp=%#x tune=%#x test=%#x\n",
-		 utmi, hsp, tune, test);
+		 "E981D: USB PHY utmi=%#x hsp=%#x\n", utmi, hsp);
+	dev_info(phy_drd->dev,
+		 "E981D: USB PHY tune=%#x pll=%#x test=%#x\n",
+		 tune, pll, test);
 	dev_info(phy_drd->dev,
 		 "E981D: USB PHY debug=%#x/%#x history=%#x\n",
 		 debug_l, debug_h, history);
