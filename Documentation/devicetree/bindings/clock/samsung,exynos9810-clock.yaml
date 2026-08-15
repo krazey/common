@@ -26,6 +26,7 @@ properties:
       - samsung,exynos9810-cmu-cmgp
       - samsung,exynos9810-cmu-fsys0
       - samsung,exynos9810-cmu-peric0
+      - samsung,exynos9810-cmu-top
 
   clocks:
     minItems: 2
@@ -42,6 +43,28 @@ properties:
     maxItems: 1
 
 allOf:
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-cmu-top
+
+    then:
+      properties:
+        clocks:
+          minItems: 2
+          maxItems: 2
+          items:
+            - description: External reference clock
+            - description: Bootstrap source for the CMGP bus clock
+
+        clock-names:
+          minItems: 2
+          maxItems: 2
+          items:
+            - const: oscclk
+            - const: cmgp_bus_bootclk
+
   - if:
       properties:
         compatible:
