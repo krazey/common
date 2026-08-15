@@ -2940,6 +2940,8 @@ static int dwc3_gadget_soft_disconnect(struct dwc3 *dwc)
 
 static int dwc3_gadget_soft_connect(struct dwc3 *dwc)
 {
+	u32 reg;
+	int i;
 	int ret;
 
 	if (dwc3_is_exynos9810(dwc)) {
@@ -2957,6 +2959,15 @@ static int dwc3_gadget_soft_connect(struct dwc3 *dwc)
 	ret = dwc3_core_soft_reset(dwc);
 	if (ret)
 		return ret;
+
+	if (dwc->dis_u2_freeclk_exists_quirk ||
+	    dwc->gfladj_refclk_lpm_sel) {
+		for (i = 0; i < dwc->num_usb2_ports; i++) {
+			reg = dwc3_readl(dwc, DWC3_GUSB2PHYCFG(i));
+			reg &= ~DWC3_GUSB2PHYCFG_U2_FREECLK_EXISTS;
+			dwc3_writel(dwc, DWC3_GUSB2PHYCFG(i), reg);
+		}
+	}
 
 	dwc3_event_buffers_setup(dwc);
 	__dwc3_gadget_start(dwc);
