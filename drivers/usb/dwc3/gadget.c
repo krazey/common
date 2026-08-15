@@ -91,7 +91,9 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	struct dwc3 *dwc =
 		container_of(to_delayed_work(work), struct dwc3,
 			     exynos9810_diagnostics_work);
+	dma_addr_t ep0_dma, event_dma;
 	unsigned long flags;
+	u64 coherent_dma_mask, streaming_dma_mask;
 	bool driver_bound;
 	bool connected;
 	bool pullups;
@@ -99,13 +101,14 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	bool softconnect;
 	s32 last_setup_ret;
 	u32 connect_count, dcfg, dctl, depcmd0, depcmd1, devten;
-	u32 disconnect_count, dsts, ep0_flags, ep0_trb_ctrl;
-	u32 ep0_trb_size, ep_complete_count, ep_event_count, evcount;
+	u32 disconnect_count, dsts, ep0_flags, ep0_trb_bph, ep0_trb_bpl;
+	u32 ep0_trb_ctrl, ep0_trb_size, ep_complete_count, ep_event_count;
+	u32 evcount;
 	u32 gbuserraddr0, gbuserraddr1, gdbgfifospace, gdbgltssm;
 	u32 gsbuscfg0, gsbuscfg1, gctl, gsts, guctl, gusb2phycfg;
 	u32 last_setup_value, reset_count, set_address_count;
 	u32 set_config_count, setup_count, dalepena;
-	u8 ep0_dequeue, ep0_enqueue, ep0_resource, ep0state;
+	u8 dma_awidth, ep0_dequeue, ep0_enqueue, ep0_resource, ep0state;
 	u8 gadget_speed, last_ep, last_ep_event;
 	u8 last_request, last_request_type, speed, state;
 
@@ -125,6 +128,8 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	ep0_dequeue = 0;
 	ep0_trb_size = 0;
 	ep0_trb_ctrl = 0;
+	ep0_trb_bpl = 0;
+	ep0_trb_bph = 0;
 	if (dwc->eps[0] && dwc->ep0_trb) {
 		ep0_flags = dwc->eps[0]->flags;
 		ep0_resource = dwc->eps[0]->resource_index;
@@ -132,6 +137,8 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 		ep0_dequeue = dwc->eps[0]->trb_dequeue;
 		ep0_trb_size = dwc->ep0_trb[0].size;
 		ep0_trb_ctrl = dwc->ep0_trb[0].ctrl;
+		ep0_trb_bpl = dwc->ep0_trb[0].bpl;
+		ep0_trb_bph = dwc->ep0_trb[0].bph;
 	}
 	reset_count = dwc->exynos9810_reset_count;
 	connect_count = dwc->exynos9810_connect_count;
@@ -148,6 +155,12 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	last_ep = dwc->exynos9810_last_ep;
 	last_ep_event = dwc->exynos9810_last_ep_event;
 	spin_unlock_irqrestore(&dwc->lock, flags);
+
+	ep0_dma = dwc->ep0_trb_addr;
+	event_dma = dwc->ev_buf ? dwc->ev_buf->dma : 0;
+	streaming_dma_mask = dma_get_mask(dwc->sysdev);
+	coherent_dma_mask = dwc->sysdev->coherent_dma_mask;
+	dma_awidth = DWC3_GHWPARAMS0_AWIDTH(dwc->hwparams.hwparams0);
 
 	gctl = dwc3_readl(dwc, DWC3_GCTL);
 	gsts = dwc3_readl(dwc, DWC3_GSTS);
@@ -198,9 +211,16 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 		 ep0_flags, ep0_resource, ep0_enqueue, ep0_dequeue,
 		 depcmd0, depcmd1);
 	dev_info(dwc->dev,
-		 "E981D: DWC3 ep0 trb size=%#x ctrl=%#x phy2=%#x bus=%#x/%#x\n",
-		 ep0_trb_size, ep0_trb_ctrl, gusb2phycfg,
-		 gsbuscfg0, gsbuscfg1);
+		 "E981D: DWC3 ep0 trb=%#x/%#x size=%#x ctrl=%#x\n",
+		 ep0_trb_bpl, ep0_trb_bph, ep0_trb_size, ep0_trb_ctrl);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 dma ep0=%pad event=%pad mask=%#llx/%#llx width=%u\n",
+		 &ep0_dma, &event_dma,
+		 (unsigned long long)streaming_dma_mask,
+		 (unsigned long long)coherent_dma_mask, dma_awidth);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 phy2=%#x bus=%#x/%#x\n",
+		 gusb2phycfg, gsbuscfg0, gsbuscfg1);
 	if (++dwc->exynos9810_diagnostics_count <
 	    EXYNOS9810_DWC3_DIAGNOSTIC_SAMPLES)
 		schedule_delayed_work(&dwc->exynos9810_diagnostics_work,
