@@ -14,5 +14,6 @@ obj-$(CONFIG_EXYNOS_PMU_ARM_DRIVERS)	+= exynos3250-pmu.o exynos4-pmu.o \
 obj-$(CONFIG_EXYNOS_REGULATOR_COUPLER) += exynos-regulator-coupler.o
 obj-$(CONFIG_EXYNOS_UFS_SRPMB) += exynos-ufs-srpmb.o
 obj-$(CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS) += exynos9810-diagnostics.o
+obj-$(CONFIG_EXYNOS9810_SINGLE_CPU_BRINGUP) += exynos9810-smp.o
 
 obj-$(CONFIG_SAMSUNG_PM_CHECK)	+= s3c-pm-check.o

@@ -159,12 +159,12 @@ config EXYNOS9810_EARLY_BOOT_MARKERS
 
 config EXYNOS9810_SINGLE_CPU_BRINGUP
 	bool "Keep Exynos9810 secondary CPUs offline during bring-up"
-	depends on ARCH_EXYNOS
+	depends on ARCH_EXYNOS && HOTPLUG_CPU
 	help
-	  Clear the generic SMP activation limit before arm64 prepares its CPU
-	  present mask. This keeps secondary CPUs offline while their PSCI boot
-	  path is being ported. It lets platform userspace run on the boot CPU
-	  independently of firmware command-line changes.
+	  Keep the boot CPU as the only online CPU until late initcalls while
+	  retaining supported secondary CPUs in the present mask. Bring those
+	  CPUs online after device probes so early firmware clients initialize
+	  before PSCI starts the secondary cores.
 
 config EXYNOS9810_DEFER_MONGOOSE_CPUS
 	bool "Defer Exynos9810 Mongoose CPU bring-up"
