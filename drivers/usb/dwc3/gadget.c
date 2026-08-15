@@ -18,6 +18,7 @@
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/dma-mapping.h>
+#include <linux/mux/consumer.h>
 #include <linux/of.h>
 
 #include <linux/usb/ch9.h>
@@ -59,6 +60,49 @@ static int dwc3_exynos9810_update_dp_pullup(struct dwc3 *dwc, bool enable)
 static int dwc3_exynos9810_prepare_pullup(struct dwc3 *dwc)
 {
 	return dwc3_exynos9810_update_dp_pullup(dwc, false);
+}
+
+static int dwc3_exynos9810_select_usb_mux(struct dwc3 *dwc)
+{
+	struct mux_state *mux;
+	int ret;
+
+	if (!dwc3_is_exynos9810(dwc))
+		return 0;
+
+	if (!dwc->exynos9810_usb_mux) {
+		mux = devm_mux_state_get_optional(dwc->dev, "usb");
+		if (IS_ERR(mux))
+			return dev_err_probe(dwc->dev, PTR_ERR(mux),
+					     "failed to get USB data mux\n");
+		dwc->exynos9810_usb_mux = mux;
+	}
+
+	if (!dwc->exynos9810_usb_mux ||
+	    dwc->exynos9810_usb_mux_selected)
+		return 0;
+
+	ret = mux_state_select(dwc->exynos9810_usb_mux);
+	dev_info(dwc->dev, "E981D: DWC3 data mux=usb ret=%d\n", ret);
+	if (!ret)
+		dwc->exynos9810_usb_mux_selected = true;
+
+	return ret;
+}
+
+static int dwc3_exynos9810_release_usb_mux(struct dwc3 *dwc)
+{
+	int ret;
+
+	if (!dwc->exynos9810_usb_mux ||
+	    !dwc->exynos9810_usb_mux_selected)
+		return 0;
+
+	ret = mux_state_deselect(dwc->exynos9810_usb_mux);
+	dwc->exynos9810_usb_mux_selected = false;
+	dev_info(dwc->dev, "E981D: DWC3 data mux=open ret=%d\n", ret);
+
+	return ret;
 }
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
@@ -3066,6 +3110,8 @@ static void dwc3_exynos9810_reconnect_work(struct work_struct *work)
 	enum usb_device_state state;
 	int connect_ret;
 	int disconnect_ret;
+	int mux_down_ret;
+	int mux_up_ret;
 	int vbus_ret;
 
 	if (!dwc->exynos9810_reconnect_initialized ||
@@ -3084,15 +3130,18 @@ static void dwc3_exynos9810_reconnect_work(struct work_struct *work)
 
 	disconnect_ret = usb_gadget_disconnect(gadget);
 	vbus_ret = dwc3_exynos9810_update_dp_pullup(dwc, false);
+	mux_down_ret = dwc3_exynos9810_release_usb_mux(dwc);
 	msleep(EXYNOS9810_DWC3_DISCONNECT_TIME_MS);
 
 	if (!dwc->exynos9810_reconnect_initialized || !dwc->gadget_driver)
 		return;
 
-	connect_ret = usb_gadget_connect(gadget);
+	mux_up_ret = dwc3_exynos9810_select_usb_mux(dwc);
+	connect_ret = mux_up_ret ? mux_up_ret : usb_gadget_connect(gadget);
 	dev_info(dwc->dev,
-		 "E981D: DWC3 boot reconnect down=%d vbus=%d up=%d\n",
-		 disconnect_ret, vbus_ret, connect_ret);
+		 "E981D: DWC3 boot reconnect down=%d vbus=%d mux=%d/%d up=%d\n",
+		 disconnect_ret, vbus_ret, mux_down_ret, mux_up_ret,
+		 connect_ret);
 }
 
 static void dwc3_gadget_enable_irq(struct dwc3 *dwc)
@@ -5064,6 +5113,10 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 		goto err4;
 
 	if (dwc3_is_exynos9810(dwc)) {
+		ret = dwc3_exynos9810_select_usb_mux(dwc);
+		if (ret)
+			goto err4;
+
 		INIT_DELAYED_WORK(&dwc->exynos9810_reconnect_work,
 				  dwc3_exynos9810_reconnect_work);
 		dwc->exynos9810_reconnect_attempted = false;
@@ -5104,6 +5157,7 @@ err5:
 		dwc->exynos9810_reconnect_initialized = false;
 		cancel_delayed_work_sync(&dwc->exynos9810_reconnect_work);
 	}
+	dwc3_exynos9810_release_usb_mux(dwc);
 	dwc3_gadget_free_endpoints(dwc);
 err4:
 	usb_put_gadget(dwc->gadget);
@@ -5132,6 +5186,7 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 		dwc->exynos9810_reconnect_initialized = false;
 		cancel_delayed_work_sync(&dwc->exynos9810_reconnect_work);
 	}
+	dwc3_exynos9810_release_usb_mux(dwc);
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	if (dwc->exynos9810_diagnostics_initialized)
