@@ -31,6 +31,13 @@
 #define DWC3_ALIGN_FRAME(d, n)	(((d)->frame_number + ((d)->interval * (n))) \
 					& ~((d)->interval - 1))
 
+static bool dwc3_is_exynos9810(struct dwc3 *dwc)
+{
+	return dwc->dev->parent && dwc->dev->parent->of_node &&
+		of_device_is_compatible(dwc->dev->parent->of_node,
+					"samsung,exynos9810-dwusb3");
+}
+
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 #define EXYNOS9810_DWC3_DIAGNOSTIC_SAMPLES	5
 
@@ -71,12 +78,6 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 				      10 * HZ);
 }
 
-static bool dwc3_is_exynos9810(struct dwc3 *dwc)
-{
-	return dwc->dev->parent && dwc->dev->parent->of_node &&
-		of_device_is_compatible(dwc->dev->parent->of_node,
-					"samsung,exynos9810-dwusb3");
-}
 #endif
 
 /**
@@ -4241,6 +4242,13 @@ static void dwc3_gadget_conndone_interrupt(struct dwc3 *dwc)
 
 	if (DWC3_IP_IS(DWC32))
 		lanes = DWC3_DSTS_CONNLANES(reg) + 1;
+
+	if (dwc3_is_exynos9810(dwc)) {
+		reg = dwc3_readl(dwc, DWC3_GCTL);
+		reg &= ~DWC3_GCTL_RAMCLKSEL(DWC3_GCTL_CLK_MASK);
+		reg |= DWC3_GCTL_RAMCLKSEL(DWC3_GCTL_CLK_MASK);
+		dwc3_writel(dwc, DWC3_GCTL, reg);
+	}
 
 	dwc->gadget->ssp_rate = USB_SSP_GEN_UNKNOWN;
 
