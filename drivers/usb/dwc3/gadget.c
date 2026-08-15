@@ -38,17 +38,25 @@ static bool dwc3_is_exynos9810(struct dwc3 *dwc)
 					"samsung,exynos9810-dwusb3");
 }
 
-static void dwc3_exynos9810_phy_work(struct work_struct *work)
+static int dwc3_exynos9810_update_dp_pullup(struct dwc3 *dwc, bool enable)
 {
-	struct dwc3 *dwc = container_of(work, struct dwc3,
-					exynos9810_phy_work);
-	bool enable = READ_ONCE(dwc->exynos9810_dp_pullup);
 	int ret;
 
 	ret = phy_set_mode_ext(dwc->usb2_generic_phy[0],
 			       PHY_MODE_USB_DEVICE, enable);
 	dev_info(dwc->dev, "E981D: DWC3 PHY pull-up=%u ret=%d\n",
 		 enable, ret);
+
+	return ret;
+}
+
+static void dwc3_exynos9810_phy_work(struct work_struct *work)
+{
+	struct dwc3 *dwc = container_of(work, struct dwc3,
+					exynos9810_phy_work);
+	bool enable = READ_ONCE(dwc->exynos9810_dp_pullup);
+
+	dwc3_exynos9810_update_dp_pullup(dwc, enable);
 }
 
 static void dwc3_exynos9810_set_dp_pullup(struct dwc3 *dwc, bool enable)
@@ -61,6 +69,18 @@ static void dwc3_exynos9810_set_dp_pullup(struct dwc3 *dwc, bool enable)
 
 	WRITE_ONCE(dwc->exynos9810_dp_pullup, enable);
 	schedule_work(&dwc->exynos9810_phy_work);
+}
+
+static int dwc3_exynos9810_prepare_pullup(struct dwc3 *dwc)
+{
+	if (!READ_ONCE(dwc->exynos9810_phy_work_initialized) ||
+	    !dwc->usb2_generic_phy[0])
+		return 0;
+
+	cancel_work_sync(&dwc->exynos9810_phy_work);
+	WRITE_ONCE(dwc->exynos9810_dp_pullup, false);
+
+	return dwc3_exynos9810_update_dp_pullup(dwc, false);
 }
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
@@ -2891,6 +2911,12 @@ static int dwc3_gadget_soft_disconnect(struct dwc3 *dwc)
 static int dwc3_gadget_soft_connect(struct dwc3 *dwc)
 {
 	int ret;
+
+	if (dwc3_is_exynos9810(dwc)) {
+		ret = dwc3_exynos9810_prepare_pullup(dwc);
+		if (ret)
+			return ret;
+	}
 
 	/*
 	 * In the Synopsys DWC_usb31 1.90a programming guide section
