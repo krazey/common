@@ -147,6 +147,13 @@
 		clock-output-names = "dout_clkcmu_peric0_ip";
 	};
 
+	cmgp_bus_bootclk: cmgp-bus-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <200000000>;
+		clock-output-names = "dout_clkcmu_cmgp_bus";
+	};
+
 	fsys0_bus_bootclk: fsys0-bus-boot-clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
@@ -404,6 +411,15 @@
 			reg = <0x14060000 0x10000>;
 		};
 
+		cmu_cmgp: clock-controller@14200000 {
+			compatible = "samsung,exynos9810-cmu-cmgp";
+			reg = <0x14200000 0x8000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>, <&cmgp_bus_bootclk>;
+			clock-names = "oscclk", "dout_clkcmu_cmgp_bus";
+		};
+
 		pinctrl_cmgp: pinctrl@14220000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x14220000 0x1000>;
@@ -413,6 +429,21 @@
 					     "samsung,exynos850-wakeup-eint",
 					     "samsung,exynos7-wakeup-eint";
 			};
+		};
+
+		hsi2c_40: i2c@14360000 {
+			compatible = "samsung,exynos9810-hsi2c";
+			reg = <0x14360000 0x1000>;
+			interrupts = <GIC_SPI 6 IRQ_TYPE_LEVEL_HIGH>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+			clock-frequency = <400000>;
+			clocks = <&cmu_cmgp CLK_GOUT_CMGP_USI3_IPCLK>,
+				 <&cmu_cmgp CLK_GOUT_CMGP_USI3_PCLK>;
+			clock-names = "hsi2c", "hsi2c_pclk";
+			pinctrl-0 = <&hsi2c40_bus>;
+			pinctrl-names = "default";
+			status = "disabled";
 		};
 
 		pinctrl_aud: pinctrl@17c60000 {

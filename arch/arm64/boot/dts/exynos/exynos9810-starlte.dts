@@ -10,6 +10,7 @@
 #include "exynos9810.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/mux/maxim,max77705.h>
 
 / {
 	model = "Samsung Galaxy S9 (SM-G960F)";
@@ -147,6 +148,11 @@ firmware_class.path=/vendor/firmware bootconfig";
 	status = "okay";
 };
 
+&usbdrd_dwc3 {
+	mux-states = <&max77705_muic MAX77705_MUIC_USB>;
+	mux-state-names = "usb";
+};
+
 &usbdrd_phy {
 	status = "okay";
 };
@@ -154,6 +160,27 @@ firmware_class.path=/vendor/firmware bootconfig";
 &ufs {
 	vcc-supply = <&ufs_vcc>;
 	status = "okay";
+};
+
+&hsi2c_40 {
+	status = "okay";
+
+	max77705: pmic@66 {
+		compatible = "maxim,max77705";
+		reg = <0x66>;
+		interrupt-parent = <&gpa1>;
+		interrupts = <6 IRQ_TYPE_LEVEL_LOW>;
+		interrupt-controller;
+		#interrupt-cells = <1>;
+		pinctrl-0 = <&max77705_irq>;
+		pinctrl-names = "default";
+
+		max77705_muic: usb-mux {
+			compatible = "maxim,max77705-muic";
+			#mux-state-cells = <1>;
+			idle-state = <MAX77705_MUIC_OPEN>;
+		};
+	};
 };
 
 &pinctrl_alive {
@@ -182,6 +209,13 @@ firmware_class.path=/vendor/firmware bootconfig";
 		samsung,pins = "gpa0-6";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	max77705_irq: max77705-irq-pins {
+		samsung,pins = "gpa1-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
 	};
 };
