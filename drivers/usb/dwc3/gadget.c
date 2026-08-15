@@ -98,11 +98,14 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	bool setup_pending;
 	bool softconnect;
 	s32 last_setup_ret;
-	u32 connect_count, dcfg, dctl, devten, disconnect_count;
-	u32 dsts, ep_complete_count, ep_event_count, evcount, gctl;
-	u32 guctl, last_setup_value, reset_count, set_address_count;
+	u32 connect_count, dcfg, dctl, depcmd0, depcmd1, devten;
+	u32 disconnect_count, dsts, ep0_flags, ep0_trb_ctrl;
+	u32 ep0_trb_size, ep_complete_count, ep_event_count, evcount;
+	u32 gsbuscfg0, gsbuscfg1, gctl, guctl, gusb2phycfg;
+	u32 last_setup_value, reset_count, set_address_count;
 	u32 set_config_count, setup_count, dalepena;
-	u8 ep0state, gadget_speed, last_ep, last_ep_event;
+	u8 ep0_dequeue, ep0_enqueue, ep0_resource, ep0state;
+	u8 gadget_speed, last_ep, last_ep_event;
 	u8 last_request, last_request_type, speed, state;
 
 	spin_lock_irqsave(&dwc->lock, flags);
@@ -115,6 +118,20 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	state = dwc->gadget->state;
 	gadget_speed = dwc->gadget->speed;
 	ep0state = dwc->ep0state;
+	ep0_flags = 0;
+	ep0_resource = 0;
+	ep0_enqueue = 0;
+	ep0_dequeue = 0;
+	ep0_trb_size = 0;
+	ep0_trb_ctrl = 0;
+	if (dwc->eps[0] && dwc->ep0_trb) {
+		ep0_flags = dwc->eps[0]->flags;
+		ep0_resource = dwc->eps[0]->resource_index;
+		ep0_enqueue = dwc->eps[0]->trb_enqueue;
+		ep0_dequeue = dwc->eps[0]->trb_dequeue;
+		ep0_trb_size = dwc->ep0_trb[0].size;
+		ep0_trb_ctrl = dwc->ep0_trb[0].ctrl;
+	}
 	reset_count = dwc->exynos9810_reset_count;
 	connect_count = dwc->exynos9810_connect_count;
 	disconnect_count = dwc->exynos9810_disconnect_count;
@@ -139,6 +156,11 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	dalepena = dwc3_readl(dwc, DWC3_DALEPENA);
 	devten = dwc3_readl(dwc, DWC3_DEVTEN);
 	evcount = dwc3_readl(dwc, DWC3_GEVNTCOUNT(0));
+	depcmd0 = dwc3_readl(dwc, DWC3_DEPCMD(0));
+	depcmd1 = dwc3_readl(dwc, DWC3_DEPCMD(1));
+	gusb2phycfg = dwc3_readl(dwc, DWC3_GUSB2PHYCFG(0));
+	gsbuscfg0 = dwc3_readl(dwc, DWC3_GSBUSCFG0);
+	gsbuscfg1 = dwc3_readl(dwc, DWC3_GSBUSCFG1);
 	dev_info(dwc->dev,
 		 "E981D: DWC3 sample=%u rev=%#x irq=%u driver=%u state=%u speed=%u/%u\n",
 		 dwc->exynos9810_diagnostics_count + 1, dwc->revision,
@@ -161,6 +183,14 @@ static void dwc3_exynos9810_diagnostics_work(struct work_struct *work)
 	dev_info(dwc->dev,
 		 "E981D: DWC3 dcfg=%#x dalep=%#x devten=%#x evcount=%#x\n",
 		 dcfg, dalepena, devten, evcount);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 ep0 flags=%#x rsc=%u ring=%u/%u cmd=%#x/%#x\n",
+		 ep0_flags, ep0_resource, ep0_enqueue, ep0_dequeue,
+		 depcmd0, depcmd1);
+	dev_info(dwc->dev,
+		 "E981D: DWC3 ep0 trb size=%#x ctrl=%#x phy2=%#x bus=%#x/%#x\n",
+		 ep0_trb_size, ep0_trb_ctrl, gusb2phycfg,
+		 gsbuscfg0, gsbuscfg1);
 	if (++dwc->exynos9810_diagnostics_count <
 	    EXYNOS9810_DWC3_DIAGNOSTIC_SAMPLES)
 		schedule_delayed_work(&dwc->exynos9810_diagnostics_work,
