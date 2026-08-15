@@ -319,6 +319,7 @@
 				phys = <&usbdrd_phy 0>;
 				phy-names = "usb2-phy";
 				snps,dis-u2-freeclk-exists-quirk;
+				snps,incr-burst-type-adjustment = <1>, <16>;
 				snps,quirk-frame-length-adjustment = <0x20>;
 				snps,ref-clock-period-ns = <20>;
 			};
