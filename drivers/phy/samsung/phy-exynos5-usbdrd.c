@@ -1933,6 +1933,8 @@ static int exynos9810_usbdrd_phy_set_mode(struct phy *phy,
 	    mode != PHY_MODE_USB_DEVICE_FS &&
 	    mode != PHY_MODE_USB_DEVICE_HS)
 		return 0;
+	if (submode != 0 && submode != 1)
+		return -EINVAL;
 
 	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
 				      phy_drd->clks);
@@ -1941,7 +1943,10 @@ static int exynos9810_usbdrd_phy_set_mode(struct phy *phy,
 
 	mutex_lock(&phy_drd->phy_mutex);
 	reg = readl(phy_drd->reg_phy + EXYNOS850_DRD_HSP);
-	reg &= ~HSP_VBUSVLDEXT;
+	if (submode)
+		reg |= HSP_VBUSVLDEXT;
+	else
+		reg &= ~HSP_VBUSVLDEXT;
 	writel(reg, phy_drd->reg_phy + EXYNOS850_DRD_HSP);
 	mutex_unlock(&phy_drd->phy_mutex);
 
@@ -1949,7 +1954,7 @@ static int exynos9810_usbdrd_phy_set_mode(struct phy *phy,
 				   phy_drd->clks);
 
 	dev_info(phy_drd->dev,
-		 "E981D: USB PHY device mode=%d submode=%d hsp=%#x\n",
+		 "E981D: USB PHY device mode=%d pullup=%d hsp=%#x\n",
 		 mode, submode, reg);
 
 	return 0;

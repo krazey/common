@@ -1216,6 +1216,9 @@ struct dwc3 {
 
 	struct usb_gadget	*gadget;
 	struct usb_gadget_driver *gadget_driver;
+	struct work_struct	exynos9810_phy_work;
+	bool			exynos9810_phy_work_initialized;
+	bool			exynos9810_dp_pullup;
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	struct delayed_work	exynos9810_diagnostics_work;
