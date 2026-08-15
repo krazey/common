@@ -4,6 +4,7 @@
  *
  * Copyright (C) 2025 Dzmitry Sankouski <dsankouski@gmail.com>
  **/
+#include <linux/delay.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/mfd/core.h>
@@ -14,6 +15,8 @@
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
+
+#define MAX77705_REVISION_RETRIES	5
 
 static struct mfd_cell max77705_devs[] = {
 	MFD_CELL_OF("max77705-muic", NULL, NULL, 0, 0,
@@ -80,6 +83,24 @@ static const struct regmap_irq_chip max77705_irq_chip = {
 	.num_irqs	= ARRAY_SIZE(max77705_irqs),
 };
 
+static int max77705_read_revision(struct regmap *regmap,
+				  unsigned int *revision)
+{
+	int attempt;
+	int ret;
+
+	for (attempt = 0; attempt < MAX77705_REVISION_RETRIES; attempt++) {
+		ret = regmap_read(regmap, MAX77705_PMIC_REG_PMICREV,
+				  revision);
+		if (!ret)
+			return 0;
+		if (attempt + 1 < MAX77705_REVISION_RETRIES)
+			usleep_range(10000, 20000);
+	}
+
+	return ret;
+}
+
 static int max77705_i2c_probe(struct i2c_client *i2c)
 {
 	struct device *dev = &i2c->dev;
@@ -102,16 +123,29 @@ static int max77705_i2c_probe(struct i2c_client *i2c)
 	if (IS_ERR(max77705->regmap))
 		return PTR_ERR(max77705->regmap);
 
-	ret = regmap_read(max77705->regmap, MAX77705_PMIC_REG_PMICREV, &pmic_rev_value);
-	if (ret < 0)
-		return -ENODEV;
+	ret = max77705_read_revision(max77705->regmap, &pmic_rev_value);
+	if (ret) {
+		if (ret == -ETIMEDOUT || ret == -EAGAIN)
+			return dev_err_probe(dev, -EPROBE_DEFER,
+					     "PMIC revision read failed: %d\n",
+					     ret);
+		return dev_err_probe(dev, ret,
+				     "Failed to read PMIC revision\n");
+	}
 
 	pmic_rev = pmic_rev_value & MAX77705_REVISION_MASK;
-	if (pmic_rev != MAX77705_PASS3)
+	if (pmic_rev < MAX77705_PASS1 || pmic_rev > MAX77705_PASS3)
 		return dev_err_probe(dev, -ENODEV, "Rev.0x%x is not tested\n", pmic_rev);
 
+	dev_info(dev, "E981D: MAX77705 revision=%#x version=%#x irq=%d\n",
+		 pmic_rev, pmic_rev_value >> 3, i2c->irq);
+
 	/* Active Discharge Enable */
-	regmap_update_bits(max77705->regmap, MAX77705_PMIC_REG_MAINCTRL1, 1, 1);
+	ret = regmap_update_bits(max77705->regmap,
+				 MAX77705_PMIC_REG_MAINCTRL1, 1, 1);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				     "Failed to enable active discharge\n");
 
 	max77705->i2c_muic = devm_i2c_new_dummy_device(dev, i2c->adapter,
 						       MAX77705_I2C_ADDR_MUIC);
@@ -138,6 +172,8 @@ static int max77705_i2c_probe(struct i2c_client *i2c)
 	ret = devm_device_init_wakeup(dev);
 	if (ret)
 		return dev_err_probe(dev, ret, "Failed to init wakeup\n");
+
+	dev_info(dev, "E981D: MAX77705 MFD children registered\n");
 
 	return 0;
 }
