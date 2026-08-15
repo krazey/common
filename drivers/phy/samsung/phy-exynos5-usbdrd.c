@@ -541,7 +541,10 @@ struct exynos5_usbdrd_phy {
 	struct typec_switch_dev *sw;
 	enum typec_orientation orientation;
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+#define EXYNOS9810_USB_PHY_DIAGNOSTIC_SAMPLES	5
+
 	struct delayed_work diagnostics_work;
+	unsigned int diagnostics_count;
 	unsigned int init_count;
 	unsigned int exit_count;
 #endif
@@ -585,11 +588,15 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
 				   phy_drd->clks);
 	dev_info(phy_drd->dev,
-		 "E981D: USB PHY init=%u exit=%u link=%#x port=%#x clkrst=%#x\n",
-		 phy_drd->init_count, phy_drd->exit_count, link, port, clkrst);
+		 "E981D: USB PHY sample=%u init=%u exit=%u link=%#x port=%#x clkrst=%#x\n",
+		 phy_drd->diagnostics_count + 1, phy_drd->init_count,
+		 phy_drd->exit_count, link, port, clkrst);
 	dev_info(phy_drd->dev,
 		 "E981D: USB PHY utmi=%#x hsp=%#x tune=%#x test=%#x\n",
 		 utmi, hsp, tune, test);
+	if (++phy_drd->diagnostics_count <
+	    EXYNOS9810_USB_PHY_DIAGNOSTIC_SAMPLES)
+		schedule_delayed_work(&phy_drd->diagnostics_work, 10 * HZ);
 }
 
 static void exynos9810_cancel_diagnostics(void *data)
@@ -1913,9 +1920,45 @@ static int exynos9810_usbdrd_phy_exit(struct phy *phy)
 	return 0;
 }
 
+static int exynos9810_usbdrd_phy_set_mode(struct phy *phy,
+					  enum phy_mode mode, int submode)
+{
+	struct phy_usb_instance *inst = phy_get_drvdata(phy);
+	struct exynos5_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
+	u32 reg;
+	int ret;
+
+	if (mode != PHY_MODE_USB_DEVICE &&
+	    mode != PHY_MODE_USB_DEVICE_LS &&
+	    mode != PHY_MODE_USB_DEVICE_FS &&
+	    mode != PHY_MODE_USB_DEVICE_HS)
+		return 0;
+
+	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
+				      phy_drd->clks);
+	if (ret)
+		return ret;
+
+	mutex_lock(&phy_drd->phy_mutex);
+	reg = readl(phy_drd->reg_phy + EXYNOS850_DRD_HSP);
+	reg &= ~HSP_VBUSVLDEXT;
+	writel(reg, phy_drd->reg_phy + EXYNOS850_DRD_HSP);
+	mutex_unlock(&phy_drd->phy_mutex);
+
+	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
+				   phy_drd->clks);
+
+	dev_info(phy_drd->dev,
+		 "E981D: USB PHY device mode=%d submode=%d hsp=%#x\n",
+		 mode, submode, reg);
+
+	return 0;
+}
+
 static const struct phy_ops exynos9810_usbdrd_phy_ops = {
 	.init		= exynos9810_usbdrd_phy_init,
 	.exit		= exynos9810_usbdrd_phy_exit,
+	.set_mode	= exynos9810_usbdrd_phy_set_mode,
 	.owner		= THIS_MODULE,
 };
 
