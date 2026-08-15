@@ -16,6 +16,8 @@
 #include <linux/of.h>
 
 static struct mfd_cell max77705_devs[] = {
+	MFD_CELL_OF("max77705-muic", NULL, NULL, 0, 0,
+		    "maxim,max77705-muic"),
 	MFD_CELL_OF("max77705-rgb", NULL, NULL, 0, 0, "maxim,max77705-rgb"),
 	MFD_CELL_OF("max77705-charger", NULL, NULL, 0, 0, "maxim,max77705-charger"),
 	MFD_CELL_OF("max77705-haptic", NULL, NULL, 0, 0, "maxim,max77705-haptic"),
@@ -110,6 +112,12 @@ static int max77705_i2c_probe(struct i2c_client *i2c)
 
 	/* Active Discharge Enable */
 	regmap_update_bits(max77705->regmap, MAX77705_PMIC_REG_MAINCTRL1, 1, 1);
+
+	max77705->i2c_muic = devm_i2c_new_dummy_device(dev, i2c->adapter,
+						       MAX77705_I2C_ADDR_MUIC);
+	if (IS_ERR(max77705->i2c_muic))
+		return dev_err_probe(dev, PTR_ERR(max77705->i2c_muic),
+				     "Failed to register MUIC I2C client\n");
 
 	ret = devm_regmap_add_irq_chip(dev, max77705->regmap,
 					i2c->irq,

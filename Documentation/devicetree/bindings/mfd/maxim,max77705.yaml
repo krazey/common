@@ -113,6 +113,25 @@ properties:
     required:
       - compatible
 
+  usb-mux:
+    type: object
+    $ref: /schemas/mux/mux-controller.yaml#
+    unevaluatedProperties: false
+
+    properties:
+      compatible:
+        const: maxim,max77705-muic
+
+      '#mux-state-cells':
+        const: 1
+
+      idle-state:
+        enum: [0, 1]
+
+    required:
+      - compatible
+      - '#mux-state-cells'
+
 required:
   - compatible
 

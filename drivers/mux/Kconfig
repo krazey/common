@@ -70,6 +70,14 @@ config MUX_MMIO
 	  To compile the driver as a module, choose M here: the module will
 	  be called mux-mmio.
 
+config MUX_MAX77705
+	tristate "Maxim MAX77705 USB data path"
+	depends on MFD_MAX77705
+	help
+	  Select this to control the MAX77705 internal USB data switch. The
+	  switch can isolate the connector or route its D+ and D- lines to
+	  the application processor.
+
 endmenu
 
 endif # MULTIPLEXER
