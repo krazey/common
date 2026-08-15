@@ -37,4 +37,8 @@ void mc_fastcall_exit(void);
 
 int mc_fastcall_debug_smclog(struct kasnprintf_buf *buf);
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+void mc_fastcall_diag_dump(void);
+#endif
+
 #endif /* _TBASE_FASTCALL_H_ */
