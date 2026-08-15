@@ -207,12 +207,13 @@ allOf:
     then:
       properties:
         clocks:
-          minItems: 2
-          maxItems: 2
+          minItems: 3
+          maxItems: 3
         clock-names:
           items:
             - const: aclk
             - const: sclk
+            - const: ctrl
       required:
         - reg
 
