@@ -40,6 +40,7 @@
 #include "nq.h"
 #include "client.h"
 #include "admin.h"
+#include "fastcall.h"
 
 static struct {
 	struct mutex admin_tgid_mutex;  /* Lock for admin_tgid below */
@@ -152,6 +153,7 @@ static void admin_diag_work(struct work_struct *work)
 		READ_ONCE(admin_diag.last_ioctl_ret));
 	pr_info("E981D: Trustonic state client=%d server=%d request=%u\n",
 		client_state, server_state, request_id);
+	mc_fastcall_diag_dump();
 
 	if (sample < ADMIN_DIAG_SAMPLES)
 		schedule_delayed_work(&admin_diag.work, ADMIN_DIAG_INTERVAL);

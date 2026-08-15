@@ -28,6 +28,10 @@
 #include <linux/interrupt.h>
 #include <linux/arm-smccc.h>
 
+#ifdef CONFIG_ARM64
+#include <asm/cputype.h>
+#endif
+
 #include "public/mc_user.h"
 #include "public/mc_linux_api.h"
 
@@ -145,6 +149,23 @@ struct smc_log_entry {
 static struct smc_log_entry smc_log[SMC_LOG_SIZE];
 static int smc_log_index;
 
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+static struct {
+	int affinity_ret;
+	unsigned int count;
+	unsigned int cpu;
+	u64 mpidr;
+	struct mc_fc_as_in in;
+	struct {
+		u32 resp;
+		u32 ret;
+		u32 param[2];
+	} out;
+} fastcall_diag = {
+	.affinity_ret = -EINPROGRESS,
+};
+#endif
+
 /*
  * _smc() - fast call to MobiCore
  *
@@ -152,8 +173,26 @@ static int smc_log_index;
  */
 static inline int _smc(union mc_fc_generic *mc_fc_generic)
 {
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	bool trace_mem;
+#endif
+
 	if (!mc_fc_generic)
 		return -EINVAL;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	trace_mem = mc_fc_generic->as_in.cmd == MC_FC_MEM_TRACE;
+	if (trace_mem) {
+		fastcall_diag.count++;
+		fastcall_diag.cpu = raw_smp_processor_id();
+#ifdef CONFIG_ARM64
+		fastcall_diag.mpidr = read_cpuid_mpidr();
+#else
+		fastcall_diag.mpidr = fastcall_diag.cpu;
+#endif
+		fastcall_diag.in = mc_fc_generic->as_in;
+	}
+#endif
 
 	/* Log SMC call */
 	smc_log[smc_log_index].cpu_clk = local_clock();
@@ -177,6 +216,14 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 		mc_fc_generic->as_out.ret = res.a1;
 		mc_fc_generic->as_out.param[0] = res.a2;
 		mc_fc_generic->as_out.param[1] = res.a3;
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		if (trace_mem) {
+			fastcall_diag.out.resp = res.a0;
+			fastcall_diag.out.ret = res.a1;
+			fastcall_diag.out.param[0] = res.a2;
+			fastcall_diag.out.param[1] = res.a3;
+		}
+#endif
 #else /* CONFIG_ARM64 */
 		/* SMC expect values in r0-r3 */
 		register u32 reg0 __asm__("r0") = mc_fc_generic->as_in.cmd;
@@ -536,7 +583,12 @@ int mc_fastcall_init(void)
 	set_user_nice(fastcall_thread, MIN_NICE);
 
 	/* this thread MUST run on CPU 0 at startup */
-	nq_set_cpus_allowed(fastcall_thread, CPU_MASK_CPU0);
+	ret = nq_set_cpus_allowed(fastcall_thread, CPU_MASK_CPU0);
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+	fastcall_diag.affinity_ret = ret;
+#endif
+	if (ret)
+		mc_dev_err("cannot bind fastcall thread to CPU 0: %d", ret);
 
 	wake_up_process(fastcall_thread);
 #ifdef TBASE_CORE_SWITCHER
@@ -759,6 +811,21 @@ int mc_fastcall_debug_smclog(struct kasnprintf_buf *buf)
 
 	return ret;
 }
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+void mc_fastcall_diag_dump(void)
+{
+	pr_info("E981D: Trustonic fastcall bind=%d count=%u cpu=%u mpidr=%#llx\n",
+		fastcall_diag.affinity_ret, fastcall_diag.count,
+		fastcall_diag.cpu, fastcall_diag.mpidr);
+	pr_info("E981D: Trustonic fastcall in=%#x/%#x/%#x/%#x\n",
+		fastcall_diag.in.cmd, fastcall_diag.in.param[0],
+		fastcall_diag.in.param[1], fastcall_diag.in.param[2]);
+	pr_info("E981D: Trustonic fastcall out=%#x/%#x/%#x/%#x\n",
+		fastcall_diag.out.resp, fastcall_diag.out.ret,
+		fastcall_diag.out.param[0], fastcall_diag.out.param[1]);
+}
+#endif
 
 #ifdef TBASE_CORE_SWITCHER
 int mc_active_core(void)
