@@ -1941,7 +1941,8 @@ static int exynos9810_usbdrd_phy_set_mode(struct phy *phy,
 {
 	struct phy_usb_instance *inst = phy_get_drvdata(phy);
 	struct exynos5_usbdrd_phy *phy_drd = to_usbdrd_phy(inst);
-	u32 reg;
+	void __iomem *regs_base = phy_drd->reg_phy;
+	u32 hsp, utmi;
 	int ret;
 
 	if (mode != PHY_MODE_USB_DEVICE &&
@@ -1958,20 +1959,29 @@ static int exynos9810_usbdrd_phy_set_mode(struct phy *phy,
 		return ret;
 
 	mutex_lock(&phy_drd->phy_mutex);
-	reg = readl(phy_drd->reg_phy + EXYNOS850_DRD_HSP);
-	if (submode)
-		reg |= HSP_VBUSVLDEXT;
-	else
-		reg &= ~HSP_VBUSVLDEXT;
-	writel(reg, phy_drd->reg_phy + EXYNOS850_DRD_HSP);
+	utmi = readl(regs_base + EXYNOS850_DRD_UTMI);
+	hsp = readl(regs_base + EXYNOS850_DRD_HSP);
+	if (submode) {
+		utmi &= ~(UTMI_DP_PULLDOWN | UTMI_DM_PULLDOWN);
+		utmi |= UTMI_FORCE_BVALID | UTMI_FORCE_VBUSVALID;
+		hsp |= HSP_VBUSVLDEXTSEL | HSP_VBUSVLDEXT;
+		writel(utmi, regs_base + EXYNOS850_DRD_UTMI);
+		writel(hsp, regs_base + EXYNOS850_DRD_HSP);
+	} else {
+		hsp &= ~(HSP_VBUSVLDEXTSEL | HSP_VBUSVLDEXT);
+		utmi &= ~(UTMI_FORCE_BVALID | UTMI_FORCE_VBUSVALID);
+		utmi |= UTMI_DP_PULLDOWN | UTMI_DM_PULLDOWN;
+		writel(hsp, regs_base + EXYNOS850_DRD_HSP);
+		writel(utmi, regs_base + EXYNOS850_DRD_UTMI);
+	}
 	mutex_unlock(&phy_drd->phy_mutex);
 
 	clk_bulk_disable_unprepare(phy_drd->drv_data->n_clks,
 				   phy_drd->clks);
 
 	dev_info(phy_drd->dev,
-		 "E981D: USB PHY device mode=%d pullup=%d hsp=%#x\n",
-		 mode, submode, reg);
+		 "E981D: USB PHY device mode=%d attached=%d utmi=%#x hsp=%#x\n",
+		 mode, submode, utmi, hsp);
 
 	return 0;
 }
