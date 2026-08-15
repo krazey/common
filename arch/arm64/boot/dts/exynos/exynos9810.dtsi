@@ -129,9 +129,10 @@
 	};
 
 	/*
-	 * CMU_TOP is not implemented yet. S-Boot leaves these domain inputs
-	 * running at the rates below, so describe them as bootstrap clocks until
-	 * the PLL and top-level mux tree is available.
+	 * Most of CMU_TOP is not implemented yet. S-Boot leaves these domain
+	 * inputs running at the rates below, so describe the preserved mux and
+	 * divider outputs as bootstrap clocks until the complete tree is
+	 * available.
 	 */
 	peric0_bus_bootclk: peric0-bus-boot-clock {
 		compatible = "fixed-clock";
@@ -151,7 +152,7 @@
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
 		clock-frequency = <200000000>;
-		clock-output-names = "dout_clkcmu_cmgp_bus";
+		clock-output-names = "cmgp_bus_bootclk";
 	};
 
 	fsys0_bus_bootclk: fsys0-bus-boot-clock {
@@ -253,6 +254,15 @@
 			compatible = "samsung,exynos9810-chipid",
 				     "samsung,exynos850-chipid";
 			reg = <0x10000000 0x100>;
+		};
+
+		cmu_top: clock-controller@1a240000 {
+			compatible = "samsung,exynos9810-cmu-top";
+			reg = <0x1a240000 0x8000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>, <&cmgp_bus_bootclk>;
+			clock-names = "oscclk", "cmgp_bus_bootclk";
 		};
 
 		gic: interrupt-controller@10101000 {
@@ -416,7 +426,8 @@
 			reg = <0x14200000 0x8000>;
 			#clock-cells = <1>;
 
-			clocks = <&oscclk>, <&cmgp_bus_bootclk>;
+			clocks = <&oscclk>,
+				 <&cmu_top CLK_GOUT_TOP_CMGP_BUS>;
 			clock-names = "oscclk", "dout_clkcmu_cmgp_bus";
 		};
 
