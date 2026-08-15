@@ -11,4 +11,3 @@ config TRUSTONIC_TEE
 config TRUSTONIC_TEE_LPAE
 	bool
 	depends on TRUSTONIC_TEE
-	default y
