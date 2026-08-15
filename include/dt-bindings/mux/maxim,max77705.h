@@ -1,0 +1,8 @@
+/* SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause) */
+#ifndef _DT_BINDINGS_MUX_MAXIM_MAX77705_H
+#define _DT_BINDINGS_MUX_MAXIM_MAX77705_H
+
+#define MAX77705_MUIC_OPEN	0
+#define MAX77705_MUIC_USB	1
+
+#endif /* _DT_BINDINGS_MUX_MAXIM_MAX77705_H */
