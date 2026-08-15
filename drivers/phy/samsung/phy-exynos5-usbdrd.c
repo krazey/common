@@ -215,6 +215,10 @@
 #define LINKPORT_HOST_NUM_U3			GENMASK(19, 16)
 #define LINKPORT_HOST_NUM_U2			GENMASK(15, 12)
 
+#define EXYNOS9810_DRD_LINK_DEBUG_L		0x0c
+#define EXYNOS9810_DRD_LINK_DEBUG_H		0x10
+#define EXYNOS9810_DRD_LTSTATE_HIS		0x14
+
 #define EXYNOS850_DRD_CLKRST			0x20
 /*
  * On versions without SS ports (like E850), bit 3 is for the 2.0 phy (HS),
@@ -564,7 +568,8 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 		container_of(to_delayed_work(work), struct exynos5_usbdrd_phy,
 			     diagnostics_work);
 	void __iomem *base = phy_drd->reg_phy;
-	u32 clkrst, hsp, link, port, test, tune, utmi;
+	u32 clkrst, debug_h, debug_l, history, hsp;
+	u32 link, port, test, tune, utmi;
 	int ret;
 
 	ret = clk_bulk_prepare_enable(phy_drd->drv_data->n_clks,
@@ -578,6 +583,9 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 	mutex_lock(&phy_drd->phy_mutex);
 	link = readl(base + EXYNOS850_DRD_LINKCTRL);
 	port = readl(base + EXYNOS850_DRD_LINKPORT);
+	debug_l = readl(base + EXYNOS9810_DRD_LINK_DEBUG_L);
+	debug_h = readl(base + EXYNOS9810_DRD_LINK_DEBUG_H);
+	history = readl(base + EXYNOS9810_DRD_LTSTATE_HIS);
 	clkrst = readl(base + EXYNOS850_DRD_CLKRST);
 	utmi = readl(base + EXYNOS850_DRD_UTMI);
 	hsp = readl(base + EXYNOS850_DRD_HSP);
@@ -594,6 +602,9 @@ static void exynos9810_usbdrd_diagnostics_work(struct work_struct *work)
 	dev_info(phy_drd->dev,
 		 "E981D: USB PHY utmi=%#x hsp=%#x tune=%#x test=%#x\n",
 		 utmi, hsp, tune, test);
+	dev_info(phy_drd->dev,
+		 "E981D: USB PHY debug=%#x/%#x history=%#x\n",
+		 debug_l, debug_h, history);
 	if (++phy_drd->diagnostics_count <
 	    EXYNOS9810_USB_PHY_DIAGNOSTIC_SAMPLES)
 		schedule_delayed_work(&phy_drd->diagnostics_work, 10 * HZ);
