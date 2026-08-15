@@ -62,6 +62,14 @@ properties:
   iommus:
     maxItems: 1
 
+  mux-states:
+    maxItems: 1
+    description: USB connector data-path state
+
+  mux-state-names:
+    items:
+      - const: usb
+
   power-domains:
     description:
       The DWC3 has 2 power-domains. The power management unit (PMU) and
