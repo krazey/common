@@ -178,7 +178,6 @@ firmware_class.path=/vendor/firmware bootconfig";
 		max77705_muic: usb-mux {
 			compatible = "maxim,max77705-muic";
 			#mux-state-cells = <1>;
-			idle-state = <MAX77705_MUIC_OPEN>;
 		};
 	};
 };
