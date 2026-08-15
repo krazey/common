@@ -59,6 +59,7 @@
 #define HSI2C_TIMING_SLA	0x6C
 #define HSI2C_ADDR		0x70
 #define HSI2C_USI_CON		0xc4
+#define HSI2C_USI_OPTION	0xc8
 
 /* I2C_CTL Register bits */
 #define HSI2C_FUNC_MODE_I2C			(1u << 0)
@@ -164,8 +165,6 @@
 #define HSI2C_MASTER_ID(x)			((x & 0xff) << 24)
 #define MASTER_ID(x)				((x & 0x7) + 0x08)
 
-#define EXYNOS5_I2C_TIMEOUT (msecs_to_jiffies(100))
-
 enum i2c_type_exynos {
 	I2C_TYPE_EXYNOS5,
 	I2C_TYPE_EXYNOS7,
@@ -204,6 +203,7 @@ struct exynos5_i2c {
 
 	/* Controller operating frequency */
 	unsigned int		op_clock;
+	bool			timeout_dumped;
 
 	/* Version of HS-I2C Hardware */
 	const struct exynos_hsi2c_variant *variant;
@@ -786,11 +786,17 @@ static void exynos5_i2c_message_start(struct exynos5_i2c *i2c, int stop)
 	 * miss any INT_I2C interrupts.
 	 */
 	spin_lock_irqsave(&i2c->lock, flags);
+	if (i2c->variant->has_usi_v2)
+		exynos5_i2c_clr_pend_irq(i2c);
 	writel(int_en, i2c->regs + HSI2C_INT_ENABLE);
 
 	if (stop == 1)
 		i2c_auto_conf |= HSI2C_STOP_AFTER_TRANS;
 	i2c_auto_conf |= i2c->msg->len;
+	if (i2c->variant->has_usi_v2) {
+		writel(i2c_auto_conf, i2c->regs + HSI2C_AUTO_CONF);
+		i2c_auto_conf = readl(i2c->regs + HSI2C_AUTO_CONF);
+	}
 	i2c_auto_conf |= HSI2C_MASTER_RUN;
 	writel(i2c_auto_conf, i2c->regs + HSI2C_AUTO_CONF);
 	spin_unlock_irqrestore(&i2c->lock, flags);
@@ -812,26 +818,81 @@ static bool exynos5_i2c_poll_irqs_timeout(struct exynos5_i2c *i2c,
 	return time_before(jiffies, time_left);
 }
 
+static unsigned long exynos5_i2c_xfer_timeout(struct exynos5_i2c *i2c)
+{
+	if (i2c->variant->has_usi_v2)
+		return msecs_to_jiffies(1000);
+
+	return msecs_to_jiffies(100);
+}
+
+static void exynos5_i2c_dump_timeout(struct exynos5_i2c *i2c)
+{
+	unsigned long pclk_rate = 0;
+
+	if (!i2c->variant->has_usi_v2 || i2c->timeout_dumped)
+		return;
+
+	i2c->timeout_dumped = true;
+	if (i2c->pclk)
+		pclk_rate = clk_get_rate(i2c->pclk);
+
+	dev_warn(i2c->dev, "E981D: HSI2C timeout clk=%lu pclk=%lu\n",
+		 clk_get_rate(i2c->clk), pclk_rate);
+	dev_warn(i2c->dev, "E981D: ctl=%08x fifo_ctl=%08x trailing=%08x\n",
+		 readl(i2c->regs + HSI2C_CTL),
+		 readl(i2c->regs + HSI2C_FIFO_CTL),
+		 readl(i2c->regs + HSI2C_TRAILIG_CTL));
+	dev_warn(i2c->dev, "E981D: int_en=%08x int_st=%08x err=%08x fifo=%08x\n",
+		 readl(i2c->regs + HSI2C_INT_ENABLE),
+		 readl(i2c->regs + HSI2C_INT_STATUS),
+		 readl(i2c->regs + HSI2C_ERR_STATUS),
+		 readl(i2c->regs + HSI2C_FIFO_STATUS));
+	dev_warn(i2c->dev, "E981D: conf=%08x auto=%08x timeout=%08x trans=%08x\n",
+		 readl(i2c->regs + HSI2C_CONF),
+		 readl(i2c->regs + HSI2C_AUTO_CONF),
+		 readl(i2c->regs + HSI2C_TIMEOUT),
+		 readl(i2c->regs + HSI2C_TRANS_STATUS));
+	dev_warn(i2c->dev, "E981D: fs=%08x/%08x/%08x sla=%08x addr=%08x\n",
+		 readl(i2c->regs + HSI2C_TIMING_FS1),
+		 readl(i2c->regs + HSI2C_TIMING_FS2),
+		 readl(i2c->regs + HSI2C_TIMING_FS3),
+		 readl(i2c->regs + HSI2C_TIMING_SLA),
+		 readl(i2c->regs + HSI2C_ADDR));
+	dev_warn(i2c->dev, "E981D: usi_con=%08x usi_option=%08x\n",
+		 readl(i2c->regs + HSI2C_USI_CON),
+		 readl(i2c->regs + HSI2C_USI_OPTION));
+}
+
 static int exynos5_i2c_xfer_msg(struct exynos5_i2c *i2c,
 			      struct i2c_msg *msgs, int stop)
 {
+	bool irq_disabled;
+	bool poll_irqs;
 	unsigned long time_left;
+	unsigned long timeout;
 	int ret;
 
 	i2c->msg = msgs;
 	i2c->msg_ptr = 0;
+	i2c->state = 0;
 	i2c->trans_done = 0;
 
 	reinit_completion(&i2c->msg_complete);
 
-	exynos5_i2c_message_start(i2c, stop);
+	poll_irqs = i2c->atomic || i2c->variant->has_usi_v2;
+	irq_disabled = !i2c->atomic && i2c->variant->has_usi_v2;
+	if (irq_disabled)
+		disable_irq(i2c->irq);
 
-	if (!i2c->atomic)
+	exynos5_i2c_message_start(i2c, stop);
+	timeout = exynos5_i2c_xfer_timeout(i2c);
+
+	if (!poll_irqs)
 		time_left = wait_for_completion_timeout(&i2c->msg_complete,
-							EXYNOS5_I2C_TIMEOUT);
+							timeout);
 	else
-		time_left = exynos5_i2c_poll_irqs_timeout(i2c,
-							  EXYNOS5_I2C_TIMEOUT);
+		time_left = exynos5_i2c_poll_irqs_timeout(i2c, timeout);
 
 	if (time_left == 0)
 		ret = -ETIMEDOUT;
@@ -846,10 +907,17 @@ static int exynos5_i2c_xfer_msg(struct exynos5_i2c *i2c,
 		ret = exynos5_i2c_wait_bus_idle(i2c);
 
 	if (ret < 0) {
+		if (ret == -ETIMEDOUT)
+			exynos5_i2c_dump_timeout(i2c);
 		exynos5_i2c_reset(i2c);
 		if (ret == -ETIMEDOUT)
 			dev_warn(i2c->dev, "%s timeout\n",
 				 (msgs->flags & I2C_M_RD) ? "rx" : "tx");
+	}
+	if (irq_disabled) {
+		writel(0, i2c->regs + HSI2C_INT_ENABLE);
+		exynos5_i2c_clr_pend_irq(i2c);
+		enable_irq(i2c->irq);
 	}
 
 	/* Return the state as in interrupt routine */
