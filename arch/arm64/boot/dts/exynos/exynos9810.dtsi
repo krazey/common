@@ -420,6 +420,15 @@
 			compatible = "samsung,exynos9810-pmu",
 				     "samsung,exynos7-pmu", "syscon";
 			reg = <0x14060000 0x10000>;
+
+			reboot-mode {
+				compatible = "syscon-reboot-mode";
+				offset = <0x080c>;
+				mode-normal = <0x12345670>;
+				mode-download = <0x12345671>;
+				mode-recovery = <0x12345674>;
+				mode-bootloader = <0x1234567d>;
+			};
 		};
 
 		cmu_cmgp: clock-controller@14200000 {
