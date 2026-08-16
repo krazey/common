@@ -480,6 +480,23 @@
 			};
 		};
 
+		pd_g3d: power-domain@14064040 {
+			compatible = "samsung,exynos5433-pd";
+			reg = <0x14064040 0x20>;
+			#power-domain-cells = <0>;
+			label = "G3D";
+		};
+
+		gpu: gpu@17500000 {
+			compatible = "arm,mali-bifrost";
+			reg = <0x17500000 0x5000>;
+			interrupts = <GIC_SPI 282 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH>,
+				     <GIC_SPI 283 IRQ_TYPE_LEVEL_HIGH>;
+			interrupt-names = "JOB", "MMU", "GPU";
+			power-domains = <&pd_g3d>;
+		};
+
 		cmu_cmgp: clock-controller@14200000 {
 			compatible = "samsung,exynos9810-cmu-cmgp";
 			reg = <0x14200000 0x8000>;
