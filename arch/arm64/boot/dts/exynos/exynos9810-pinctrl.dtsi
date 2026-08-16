@@ -456,6 +456,13 @@
 		#interrupt-cells = <2>;
 	};
 
+	hsi2c10_bus: hsi2c10-bus-pins {
+		samsung,pins = "gpp1-4", "gpp1-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_2>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
 	uart0_bus: uart0-bus-pins {
 		samsung,pins = "gpp3-2", "gpp3-3";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_3>;
