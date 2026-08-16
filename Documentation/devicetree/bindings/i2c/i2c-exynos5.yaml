@@ -76,6 +76,12 @@ properties:
       - const: hsi2c
       - const: hsi2c_pclk
 
+  samsung,stop-after-trans:
+    type: boolean
+    description:
+      Always terminate each message with a STOP condition. This is needed by
+      peripherals which cannot use a repeated START between messages.
+
 required:
   - compatible
   - reg

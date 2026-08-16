@@ -228,6 +228,7 @@ struct exynos5_i2c {
 
 	/* Controller operating frequency */
 	unsigned int		op_clock;
+	bool			stop_after_trans;
 	bool			timeout_dumped;
 
 	/* Version of HS-I2C Hardware */
@@ -876,7 +877,7 @@ static void exynos5_i2c_message_start(struct exynos5_i2c *i2c, int stop)
 		exynos5_i2c_clr_pend_irq(i2c);
 	writel(int_en, i2c->regs + HSI2C_INT_ENABLE);
 
-	if (stop == 1)
+	if (stop == 1 || i2c->stop_after_trans)
 		i2c_auto_conf |= HSI2C_STOP_AFTER_TRANS;
 	i2c_auto_conf |= i2c->msg->len;
 	if (i2c->variant->has_usi_v2) {
@@ -1109,6 +1110,8 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 
 	if (of_property_read_u32(np, "clock-frequency", &i2c->op_clock))
 		i2c->op_clock = I2C_MAX_STANDARD_MODE_FREQ;
+	i2c->stop_after_trans =
+		of_property_read_bool(np, "samsung,stop-after-trans");
 
 	strscpy(i2c->adap.name, "exynos5-i2c", sizeof(i2c->adap.name));
 	i2c->adap.owner   = THIS_MODULE;
