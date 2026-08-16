@@ -84,4 +84,11 @@ config EXYNOS_UFS_SRPMB
 	  Provide the shared-memory bridge used by Samsung secure firmware to
 	  access the replay-protected UFS partition on Exynos SoCs. The bridge
 	  uses the kernel RPMB core for the underlying authenticated transfers.
+
+config EXYNOS_ACPM
+	bool "Samsung Exynos ACPM IPC"
+	depends on ARM64 && ARCH_EXYNOS
+	help
+	  Enable the mailbox transport used to communicate with the ACPM
+	  firmware found on Samsung Exynos SoCs.
 endif
