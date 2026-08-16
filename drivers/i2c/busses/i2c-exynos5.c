@@ -62,6 +62,11 @@
 #define EXYNOS9810_CMGP_SIZE			0x4000
 #define EXYNOS9810_CMGP_PINCTRL_BASE		0x14220000
 #define EXYNOS9810_CMGP_PINCTRL_SIZE		0x1000
+#define EXYNOS9810_PERIC0_PINCTRL_BASE		0x10430000
+#define EXYNOS9810_HSI2C10_BASE			0x104b0000
+#define EXYNOS9810_PERIC0_USI3_BASE		0x104b00c0
+#define EXYNOS9810_USI_SIZE			0x8
+#define PERIC0_GPP1				0x0020
 #define CMGP_GPM14				0x0180
 #define CMGP_GPM15				0x01a0
 #define CMGP_PIN_CON				0x0000
@@ -207,6 +212,8 @@ struct exynos5_i2c {
 	void __iomem		*regs;
 	void __iomem		*cmu_regs;
 	void __iomem		*pinctrl_regs;
+	void __iomem		*usi_regs;
+	bool			peric0_touch;
 	struct clk		*clk;		/* operating clock */
 	struct clk		*pclk;		/* bus clock */
 	struct device		*dev;
@@ -973,6 +980,18 @@ static void exynos5_i2c_dump_timeout(struct exynos5_i2c *i2c)
 	if (!i2c->pinctrl_regs)
 		return;
 
+	if (i2c->peric0_touch) {
+		dev_warn(i2c->dev,
+			 "E981D: peric0 gpp1 con=%08x dat=%08x pud=%08x drv=%08x usi=%08x/%08x\n",
+			 readl(i2c->pinctrl_regs + PERIC0_GPP1 + CMGP_PIN_CON),
+			 readl(i2c->pinctrl_regs + PERIC0_GPP1 + CMGP_PIN_DAT),
+			 readl(i2c->pinctrl_regs + PERIC0_GPP1 + CMGP_PIN_PUD),
+			 readl(i2c->pinctrl_regs + PERIC0_GPP1 + CMGP_PIN_DRV),
+			 i2c->usi_regs ? readl(i2c->usi_regs) : 0,
+			 i2c->usi_regs ? readl(i2c->usi_regs + 4) : 0);
+		return;
+	}
+
 	dev_warn(i2c->dev,
 		 "E981D: pins gpm14=%08x/%08x/%08x/%08x gpm15=%08x/%08x/%08x/%08x\n",
 		 readl(i2c->pinctrl_regs + CMGP_GPM14 + CMGP_PIN_CON),
@@ -1149,6 +1168,13 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 	i2c->adap.algo_data = i2c;
 	i2c->adap.dev.parent = &pdev->dev;
 	i2c->variant = of_device_get_match_data(&pdev->dev);
+	if (platform_get_resource(pdev, IORESOURCE_MEM, 0)->start ==
+	    EXYNOS9810_HSI2C10_BASE) {
+		i2c->peric0_touch = true;
+		i2c->usi_regs = devm_ioremap(&pdev->dev,
+					    EXYNOS9810_PERIC0_USI3_BASE,
+					    EXYNOS9810_USI_SIZE);
+	}
 	if (i2c->variant->cmu_base) {
 		i2c->cmu_regs = devm_ioremap(&pdev->dev,
 					     i2c->variant->cmu_base,
@@ -1158,6 +1184,8 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 	}
 	if (i2c->variant->has_usi_v2) {
 		i2c->pinctrl_regs = devm_ioremap(&pdev->dev,
+						 i2c->peric0_touch ?
+						 EXYNOS9810_PERIC0_PINCTRL_BASE :
 						 EXYNOS9810_CMGP_PINCTRL_BASE,
 						 EXYNOS9810_CMGP_PINCTRL_SIZE);
 		if (!i2c->pinctrl_regs)
