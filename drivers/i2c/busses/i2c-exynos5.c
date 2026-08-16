@@ -749,6 +749,7 @@ static void exynos5_i2c_message_start(struct exynos5_i2c *i2c, int stop)
 	u32 i2c_auto_conf = 0;
 	u32 i2c_addr = 0;
 	u32 fifo_ctl;
+	unsigned int len;
 	unsigned long flags;
 	unsigned short trig_lvl;
 
@@ -793,6 +794,22 @@ static void exynos5_i2c_message_start(struct exynos5_i2c *i2c, int stop)
 	writel(i2c_ctl, i2c->regs + HSI2C_CTL);
 
 	exynos5_i2c_bus_check(i2c);
+
+	/*
+	 * The USI v2 controller can enter its wait state before the polled
+	 * TX-almost-empty condition is serviced. Seed the FIFO before starting
+	 * the transfer so the first byte is available immediately.
+	 */
+	if (i2c->variant->has_usi_v2 &&
+	    !(i2c->msg->flags & I2C_M_RD)) {
+		len = min_t(unsigned int, i2c->msg->len,
+			    i2c->variant->fifo_depth);
+		while (len--)
+			writel(i2c->msg->buf[i2c->msg_ptr++],
+			       i2c->regs + HSI2C_TX_DATA);
+		if (i2c->msg_ptr == i2c->msg->len)
+			int_en &= ~HSI2C_INT_TX_ALMOSTEMPTY_EN;
+	}
 
 	/*
 	 * Enable interrupts before starting the transfer so that we don't
