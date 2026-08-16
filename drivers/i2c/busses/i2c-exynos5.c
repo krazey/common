@@ -307,6 +307,50 @@ static void exynos5_i2c_clr_pend_irq(struct exynos5_i2c *i2c)
 				i2c->regs + HSI2C_INT_STATUS);
 }
 
+static int exynos9810_i2c_set_fs_timing(struct exynos5_i2c *i2c)
+{
+	unsigned long clkin = clk_get_rate(i2c->clk);
+	unsigned long denominator;
+	u32 cycles, div, scl_high, start_hold, val;
+
+	if (!clkin || !i2c->op_clock ||
+	    i2c->op_clock > clkin / 15)
+		return -EINVAL;
+
+	denominator = (unsigned long)i2c->op_clock * 15;
+	div = clkin / denominator;
+	if (div > 0xff)
+		return -EINVAL;
+
+	val = readl(i2c->regs + HSI2C_TIMING_FS3);
+	val &= ~0x00ff0000;
+	val |= div << 16;
+	writel(val, i2c->regs + HSI2C_TIMING_FS3);
+
+	cycles = (9 * (clkin / 1000000)) / ((div + 1) * 10);
+	scl_high = cycles;
+	if (scl_high > 7)
+		scl_high = 7;
+	scl_high = (0xff << scl_high) & 0xff;
+
+	val = readl(i2c->regs + HSI2C_TIMING_FS2);
+	val &= ~0xff;
+	val |= scl_high;
+	writel(val, i2c->regs + HSI2C_TIMING_FS2);
+
+	start_hold = cycles - 1;
+	if (start_hold > 7)
+		start_hold = 7;
+	start_hold = (0xff << start_hold) & 0xff;
+
+	val = readl(i2c->regs + HSI2C_TIMING_FS1);
+	val &= ~0x00ff0000;
+	val |= start_hold << 16;
+	writel(val, i2c->regs + HSI2C_TIMING_FS1);
+
+	return 0;
+}
+
 /*
  * exynos5_i2c_set_timing: updates the registers with appropriate
  * timing values calculated
@@ -334,6 +378,9 @@ static int exynos5_i2c_set_timing(struct exynos5_i2c *i2c, bool hs_timings)
 		(i2c->op_clock >= I2C_MAX_FAST_MODE_PLUS_FREQ) ? I2C_MAX_STANDARD_MODE_FREQ :
 		i2c->op_clock;
 	int div, clk_cycle, temp;
+
+	if (i2c->variant->has_usi_v2 && !hs_timings)
+		return exynos9810_i2c_set_fs_timing(i2c);
 
 	/*
 	 * In case of HSI2C controllers in ExynosAutoV9:
