@@ -37,6 +37,7 @@ properties:
               - samsung,exynos8895-peric1-sysreg
               - samsung,exynos9810-cmgp-sysreg
               - samsung,exynos9810-fsys0-sysreg
+              - samsung,exynos9810-peric0-sysreg
               - samsung,exynos990-peric0-sysreg
               - samsung,exynos990-peric1-sysreg
               - samsung,exynosautov920-hsi2-sysreg
