@@ -17,7 +17,7 @@
 
 #define CLKS_NR_TOP		(CLK_GOUT_TOP_CMGP_BUS + 1)
 #define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
-#define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_UART_DBG_IPCLK + 1)
+#define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI3_PCLK + 1)
 #define CLKS_NR_CMGP		(CLK_GOUT_CMGP_USI3_PCLK + 1)
 
 /* ---- CMU_TOP ---------------------------------------------------------- */
@@ -125,21 +125,37 @@ static const struct samsung_cmu_info fsys0_cmu_info __initconst = {
 #define PLL_CON0_MUX_CLKCMU_PERIC0_BUS_USER		0x0100
 #define PLL_CON0_MUX_CLKCMU_PERIC0_IP_USER		0x0120
 #define CLK_CON_DIV_DIV_CLK_PERIC0_UART_DBG		0x1800
+#define CLK_CON_DIV_DIV_CLK_PERIC0_USI03			0x1810
 #define CLK_CON_GAT_GATE_PERIC0_UART_DBG			0x2008
+#define CLK_CON_GAT_GATE_CLK_PERIC0_USI03		0x2018
 #define CLK_CON_GAT_GOUT_PERIC0_UART_DBG_RST		0x204c
+#define CLK_CON_GAT_GOUT_PERIC0_USI03_RST		0x206c
+#define CLK_CON_GAT_GOUT_PERIC0_SYSREG_PCLK		0x2098
 #define CLK_CON_GAT_GOUT_PERIC0_UART_DBG_IPCLK		0x209c
 #define CLK_CON_GAT_GOUT_PERIC0_UART_DBG_PCLK		0x20a0
+#define CLK_CON_GAT_GOUT_PERIC0_USI03_IPCLK		0x20dc
+#define CLK_CON_GAT_GOUT_PERIC0_USI03_PCLK		0x20e0
+#define QCH_CON_SYSREG_PERIC0				0x3014
 #define QCH_CON_UART_DBG					0x3018
+#define QCH_CON_USI03					0x3038
 
 static const unsigned long peric0_clk_regs[] __initconst = {
 	PLL_CON0_MUX_CLKCMU_PERIC0_BUS_USER,
 	PLL_CON0_MUX_CLKCMU_PERIC0_IP_USER,
 	CLK_CON_DIV_DIV_CLK_PERIC0_UART_DBG,
+	CLK_CON_DIV_DIV_CLK_PERIC0_USI03,
 	CLK_CON_GAT_GATE_PERIC0_UART_DBG,
+	CLK_CON_GAT_GATE_CLK_PERIC0_USI03,
 	CLK_CON_GAT_GOUT_PERIC0_UART_DBG_RST,
+	CLK_CON_GAT_GOUT_PERIC0_USI03_RST,
+	CLK_CON_GAT_GOUT_PERIC0_SYSREG_PCLK,
 	CLK_CON_GAT_GOUT_PERIC0_UART_DBG_IPCLK,
 	CLK_CON_GAT_GOUT_PERIC0_UART_DBG_PCLK,
+	CLK_CON_GAT_GOUT_PERIC0_USI03_IPCLK,
+	CLK_CON_GAT_GOUT_PERIC0_USI03_PCLK,
+	QCH_CON_SYSREG_PERIC0,
 	QCH_CON_UART_DBG,
+	QCH_CON_USI03,
 };
 
 PNAME(mout_peric0_bus_user_p) = {
@@ -160,16 +176,31 @@ static const struct samsung_mux_clock peric0_mux_clks[] __initconst = {
 };
 
 /*
- * S-Boot configures the UART divider before entering Linux. Register it
- * without forcing a new rate so the early console keeps its 200 MHz clock.
+ * S-Boot configures the peripheral dividers before entering Linux. Register
+ * them without forcing new rates so the early console and USI retain their
+ * working clocks.
  */
 static const struct samsung_div_clock peric0_div_clks[] __initconst = {
 	DIV(CLK_DOUT_PERIC0_UART_DBG, "dout_peric0_uart_dbg",
 	    "gout_peric0_uart_dbg", CLK_CON_DIV_DIV_CLK_PERIC0_UART_DBG,
 	    0, 4),
+	DIV(CLK_DOUT_PERIC0_USI3, "dout_peric0_usi3",
+	    "gout_peric0_usi3", CLK_CON_DIV_DIV_CLK_PERIC0_USI03,
+	    0, 4),
 };
 
 static const struct samsung_gate_clock peric0_gate_clks[] __initconst = {
+	/* Keep SYSREG accessible while USI protocol selection is active. */
+	GATE(0, "gout_peric0_sysreg_qch_ignore", "mout_peric0_bus_user",
+	     QCH_CON_SYSREG_PERIC0, 2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_peric0_sysreg_qch_mode",
+	     "gout_peric0_sysreg_qch_ignore", QCH_CON_SYSREG_PERIC0,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_peric0_sysreg_qch", "gout_peric0_sysreg_qch_mode",
+	     QCH_CON_SYSREG_PERIC0, 1, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_peric0_sysreg_pclk", "gout_peric0_sysreg_qch",
+	     CLK_CON_GAT_GOUT_PERIC0_SYSREG_PCLK, 21,
+	     CLK_IS_CRITICAL, 0),
 	/* Hold the UART clock request when Q-channel HWACG is disabled. */
 	GATE(0, "gout_peric0_uart_dbg_qch", "mout_peric0_bus_user",
 	     QCH_CON_UART_DBG, 1, CLK_IS_CRITICAL, 0),
@@ -184,6 +215,26 @@ static const struct samsung_gate_clock peric0_gate_clks[] __initconst = {
 	     21, 0, 0),
 	GATE(CLK_GOUT_PERIC0_UART_DBG_IPCLK, "gout_peric0_uart_dbg_ipclk",
 	     "dout_peric0_uart_dbg", CLK_CON_GAT_GOUT_PERIC0_UART_DBG_IPCLK,
+	     21, 0, 0),
+	/* USI3 provides the HSI2C10 link used by the touchscreen. */
+	GATE(0, "gout_peric0_usi3_qch_ignore", "mout_peric0_bus_user",
+	     QCH_CON_USI03, 2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_peric0_usi3_qch_mode",
+	     "gout_peric0_usi3_qch_ignore", QCH_CON_USI03,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(CLK_GOUT_PERIC0_USI3_QCH, "gout_peric0_usi3_qch",
+	     "gout_peric0_usi3_qch_mode", QCH_CON_USI03, 1, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI3, "gout_peric0_usi3",
+	     "mout_peric0_ip_user", CLK_CON_GAT_GATE_CLK_PERIC0_USI03,
+	     21, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI3_RST, "gout_peric0_usi3_rst",
+	     "dout_peric0_usi3", CLK_CON_GAT_GOUT_PERIC0_USI03_RST,
+	     21, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI3_IPCLK, "gout_peric0_usi3_ipclk",
+	     "gout_peric0_usi3_rst", CLK_CON_GAT_GOUT_PERIC0_USI03_IPCLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI3_PCLK, "gout_peric0_usi3_pclk",
+	     "gout_peric0_usi3_qch", CLK_CON_GAT_GOUT_PERIC0_USI03_PCLK,
 	     21, 0, 0),
 };
 
