@@ -99,7 +99,7 @@ firmware_class.path=/vendor/firmware bootconfig";
 			no-map;
 		};
 
-		framebuffer@cc000000 {
+		cont_splash_mem: framebuffer@cc000000 {
 			reg = <0x0 0xcc000000 (1440 * 2960 * 4)>;
 			no-map;
 		};
@@ -151,6 +151,17 @@ firmware_class.path=/vendor/firmware bootconfig";
 		regulator-max-microvolt = <1800000>;
 		regulator-always-on;
 		regulator-boot-on;
+	};
+
+	decon_f: decon_f@16030000 {
+		compatible = "samsung,exynos9810-bootfb";
+		reg = <0x0 0x16030000 0x1000>;
+		memory-region = <&cont_splash_mem>;
+		width = <1440>;
+		height = <2960>;
+		stride = <(1440 * 4)>;
+		width-mm = <64>;
+		height-mm = <132>;
 	};
 };
 
