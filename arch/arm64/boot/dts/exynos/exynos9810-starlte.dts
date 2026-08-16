@@ -221,6 +221,7 @@ firmware_class.path=/vendor/firmware bootconfig";
 
 &hsi2c_10 {
 	status = "okay";
+	samsung,stop-after-trans;
 
 	touchscreen@48 {
 		compatible = "samsung,s6sy761";

@@ -340,6 +340,8 @@
 				clocks = <&cmu_peric0 CLK_GOUT_PERIC0_USI3_IPCLK>,
 					 <&cmu_peric0 CLK_GOUT_PERIC0_USI3_PCLK>;
 				clock-names = "hsi2c", "hsi2c_pclk";
+				assigned-clocks = <&cmu_peric0 CLK_DOUT_PERIC0_USI3>;
+				assigned-clock-rates = <200000000>;
 				pinctrl-0 = <&hsi2c10_bus>;
 				pinctrl-names = "default";
 				status = "disabled";
