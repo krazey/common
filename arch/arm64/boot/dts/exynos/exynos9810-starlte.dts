@@ -134,6 +134,24 @@ firmware_class.path=/vendor/firmware bootconfig";
 		enable-active-high;
 		regulator-boot-on;
 	};
+
+	tsp_avdd: regulator-tsp-avdd {
+		compatible = "regulator-fixed";
+		regulator-name = "tsp_avdd";
+		regulator-min-microvolt = <3000000>;
+		regulator-max-microvolt = <3000000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	tsp_vdd: regulator-tsp-vdd {
+		compatible = "regulator-fixed";
+		regulator-name = "tsp_io";
+		regulator-min-microvolt = <1800000>;
+		regulator-max-microvolt = <1800000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
 };
 
 &oscclk {
@@ -186,6 +204,27 @@ firmware_class.path=/vendor/firmware bootconfig";
 	};
 };
 
+&usi_peric0_3 {
+	status = "okay";
+};
+
+&hsi2c_10 {
+	status = "okay";
+
+	touchscreen@48 {
+		compatible = "samsung,s6sy761";
+		reg = <0x48>;
+		interrupt-parent = <&gpa1>;
+		interrupts = <0 IRQ_TYPE_LEVEL_LOW>;
+		pinctrl-0 = <&tsp_irq>;
+		pinctrl-names = "default";
+		avdd-supply = <&tsp_avdd>;
+		vdd-supply = <&tsp_vdd>;
+		touchscreen-size-x = <4096>;
+		touchscreen-size-y = <4096>;
+	};
+};
+
 &pinctrl_alive {
 	key_power: key-power-pins {
 		samsung,pins = "gpa2-4";
@@ -217,6 +256,13 @@ firmware_class.path=/vendor/firmware bootconfig";
 
 	max77705_irq: max77705-irq-pins {
 		samsung,pins = "gpa1-6";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	tsp_irq: tsp-irq-pins {
+		samsung,pins = "gpa1-0";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
