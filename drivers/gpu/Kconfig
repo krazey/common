@@ -5,6 +5,8 @@ config GPU_BUDDY
        help
          A page based buddy allocator for GPU memory.
 
+source "drivers/gpu/arm/Kconfig"
+
 config GPU_BUDDY_KUNIT_TEST
        tristate "KUnit tests for GPU buddy allocator" if !KUNIT_ALL_TESTS
        depends on GPU_BUDDY && KUNIT
