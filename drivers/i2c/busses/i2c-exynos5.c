@@ -60,6 +60,14 @@
 #define HSI2C_ADDR		0x70
 #define EXYNOS9810_CMGP_BASE			0x14200000
 #define EXYNOS9810_CMGP_SIZE			0x4000
+#define EXYNOS9810_CMGP_PINCTRL_BASE		0x14220000
+#define EXYNOS9810_CMGP_PINCTRL_SIZE		0x1000
+#define CMGP_GPM14				0x0180
+#define CMGP_GPM15				0x01a0
+#define CMGP_PIN_CON				0x0000
+#define CMGP_PIN_DAT				0x0004
+#define CMGP_PIN_PUD				0x0008
+#define CMGP_PIN_DRV				0x000c
 #define CMGP_CONTROLLER_OPTION			0x0800
 #define CMGP_MUX_BUS_USER			0x0100
 #define CMGP_MUX_BUS				0x1004
@@ -198,6 +206,7 @@ struct exynos5_i2c {
 
 	void __iomem		*regs;
 	void __iomem		*cmu_regs;
+	void __iomem		*pinctrl_regs;
 	struct clk		*clk;		/* operating clock */
 	struct clk		*pclk;		/* bus clock */
 	struct device		*dev;
@@ -960,6 +969,19 @@ static void exynos5_i2c_dump_timeout(struct exynos5_i2c *i2c)
 		 readl(i2c->cmu_regs + CMGP_GATE_USI3_IPCLK),
 		 readl(i2c->cmu_regs + CMGP_GATE_USI3_PCLK),
 		 readl(i2c->cmu_regs + CMGP_QCH_USI3));
+	if (!i2c->pinctrl_regs)
+		return;
+
+	dev_warn(i2c->dev,
+		 "E981D: pins gpm14=%08x/%08x/%08x/%08x gpm15=%08x/%08x/%08x/%08x\n",
+		 readl(i2c->pinctrl_regs + CMGP_GPM14 + CMGP_PIN_CON),
+		 readl(i2c->pinctrl_regs + CMGP_GPM14 + CMGP_PIN_DAT),
+		 readl(i2c->pinctrl_regs + CMGP_GPM14 + CMGP_PIN_PUD),
+		 readl(i2c->pinctrl_regs + CMGP_GPM14 + CMGP_PIN_DRV),
+		 readl(i2c->pinctrl_regs + CMGP_GPM15 + CMGP_PIN_CON),
+		 readl(i2c->pinctrl_regs + CMGP_GPM15 + CMGP_PIN_DAT),
+		 readl(i2c->pinctrl_regs + CMGP_GPM15 + CMGP_PIN_PUD),
+		 readl(i2c->pinctrl_regs + CMGP_GPM15 + CMGP_PIN_DRV));
 }
 
 static int exynos5_i2c_xfer_msg(struct exynos5_i2c *i2c,
@@ -1130,6 +1152,14 @@ static int exynos5_i2c_probe(struct platform_device *pdev)
 					     EXYNOS9810_CMGP_SIZE);
 		if (!i2c->cmu_regs)
 			dev_warn(&pdev->dev, "cannot map CMGP registers\n");
+	}
+	if (i2c->variant->has_usi_v2) {
+		i2c->pinctrl_regs = devm_ioremap(&pdev->dev,
+						 EXYNOS9810_CMGP_PINCTRL_BASE,
+						 EXYNOS9810_CMGP_PINCTRL_SIZE);
+		if (!i2c->pinctrl_regs)
+			dev_warn(&pdev->dev,
+				 "cannot map CMGP pinctrl registers\n");
 	}
 
 	/* Clear pending interrupts from u-boot or misc causes */
