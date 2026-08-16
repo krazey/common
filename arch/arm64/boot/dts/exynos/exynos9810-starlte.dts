@@ -135,22 +135,23 @@ firmware_class.path=/vendor/firmware bootconfig";
 		regulator-boot-on;
 	};
 
-	tsp_avdd: regulator-tsp-avdd {
-		compatible = "regulator-fixed";
-		regulator-name = "tsp_avdd";
-		regulator-min-microvolt = <3000000>;
-		regulator-max-microvolt = <3000000>;
-		regulator-always-on;
-		regulator-boot-on;
-	};
+	s2mps18: pmic {
+		compatible = "samsung,s2mps18-regulator";
+		acpm-ipc-channel = <2>;
 
-	tsp_vdd: regulator-tsp-vdd {
-		compatible = "regulator-fixed";
-		regulator-name = "tsp_io";
-		regulator-min-microvolt = <1800000>;
-		regulator-max-microvolt = <1800000>;
-		regulator-always-on;
-		regulator-boot-on;
+		tsp_vdd: LDO35 {
+			regulator-name = "tsp_io";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-boot-on;
+		};
+
+		tsp_avdd: LDO43 {
+			regulator-name = "tsp_avdd";
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3000000>;
+			regulator-boot-on;
+		};
 	};
 
 	decon_f: decon_f@16030000 {

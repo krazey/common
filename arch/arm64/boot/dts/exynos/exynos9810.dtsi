@@ -129,6 +129,18 @@
 		clock-output-names = "oscclk";
 	};
 
+	acpm_ipc: mailbox@14100000 {
+		compatible = "samsung,exynos-acpm-ipc";
+		reg = <0x0 0x14100000 0x1000>,
+		      <0x0 0x02039000 0x30000>;
+		reg-names = "mailbox", "sram";
+		interrupts = <GIC_SPI 68 IRQ_TYPE_LEVEL_HIGH>;
+		initdata-base = <0x7f00>;
+		num-timestamps = <32>;
+		debug-log-level = <0>;
+		logging-period = <0>;
+	};
+
 	/*
 	 * Most of CMU_TOP is not implemented yet. S-Boot leaves these domain
 	 * inputs running at the rates below, so describe the preserved mux and
