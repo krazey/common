@@ -94,9 +94,6 @@ static BLOCKING_NOTIFIER_HEAD(reboot_notifier_list);
  */
 void emergency_restart(void)
 {
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	panic("Exynos9810 emergency restart request");
-#endif
 	kmsg_dump(KMSG_DUMP_EMERG);
 	system_state = SYSTEM_RESTART;
 	machine_emergency_restart();
@@ -292,9 +289,6 @@ static void do_kernel_restart_prepare(void)
  */
 void kernel_restart(char *cmd)
 {
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-	panic("Exynos9810 restart request: %s", cmd ?: "none");
-#endif
 	kernel_restart_prepare(cmd);
 	do_kernel_restart_prepare();
 	migrate_to_reboot_cpu();
