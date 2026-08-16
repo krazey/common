@@ -1776,6 +1776,21 @@ config FB_SIMPLE
 	  Configuration re: surface address, size, and format must be provided
 	  through device tree, or plain old platform data.
 
+config FB_EXYNOS9810_BOOT
+	tristate "Exynos9810 boot framebuffer compatibility"
+	depends on FB && DMA_SHARED_BUFFER
+	depends on ARCH_EXYNOS || COMPILE_TEST
+	depends on !DRM_SIMPLEDRM
+	select FB_IOMEM_HELPERS
+	help
+	  Expose the framebuffer and internal display scanout left running by
+	  the Samsung Exynos9810 bootloader.  The driver also implements the
+	  subset of the Samsung fbdev window ABI used by Android's Exynos9810
+	  hardware composer.
+
+	  This is a bootstrap driver for systems whose native DECON, DPP and
+	  DSIM drivers are not available yet.
+
 config FB_SSD1307
 	tristate "Solomon SSD1307 framebuffer support"
 	depends on FB && I2C
