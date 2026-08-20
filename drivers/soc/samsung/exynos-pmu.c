@@ -24,6 +24,14 @@
 
 #include "exynos-pmu.h"
 
+/*
+ * Samsung S-Boot distinguishes a reset from a power-off with INFORM2.
+ * INFORM3 remains owned by the existing syscon-reboot-mode child.
+ */
+#define EXYNOS9810_PMU_INFORM2			0x0808
+#define EXYNOS9810_POWER_OFF			0x00000000
+#define EXYNOS9810_POWER_RESET			0x12345678
+
 struct exynos_pmu_context {
 	struct device *dev;
 	const struct exynos_pmu_data *pmu_data;
@@ -385,6 +393,36 @@ static struct notifier_block gs101_cpu_pm_notifier = {
 	.priority = INT_MAX
 };
 
+static int exynos9810_reboot_notifier(struct notifier_block *nb,
+				      unsigned long event, void *cmd)
+{
+	u32 value;
+	int ret;
+
+	switch (event) {
+	case SYS_RESTART:
+		value = EXYNOS9810_POWER_RESET;
+		break;
+	case SYS_POWER_OFF:
+		value = EXYNOS9810_POWER_OFF;
+		break;
+	default:
+		return NOTIFY_DONE;
+	}
+
+	ret = regmap_write(pmu_context->pmureg, EXYNOS9810_PMU_INFORM2, value);
+	if (ret)
+		dev_err(pmu_context->dev,
+			"failed to write Exynos9810 INFORM2: %d\n", ret);
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block exynos9810_reboot_nb = {
+	.notifier_call = exynos9810_reboot_notifier,
+	.priority = INT_MAX,
+};
+
 static int exynos_cpupm_reboot_notifier(struct notifier_block *nb,
 					unsigned long event, void *v)
 {
@@ -530,6 +568,14 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 	raw_spin_lock_init(&pmu_context->cpupm_lock);
 	pmu_context->sys_inreboot = false;
 	pmu_context->sys_insuspend = false;
+
+	if (of_device_is_compatible(dev->of_node,
+				    "samsung,exynos9810-pmu")) {
+		ret = devm_register_reboot_notifier(dev, &exynos9810_reboot_nb);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "failed to register Exynos9810 reboot notifier\n");
+	}
 
 	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_cpuhp) {
 		ret = setup_cpuhp_and_cpuidle(dev);
