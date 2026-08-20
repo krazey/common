@@ -141,6 +141,40 @@
 		logging-period = <0>;
 	};
 
+	acpm_dvfs: clock-controller {
+		compatible = "samsung,exynos9810-acpm-dvfs";
+		#clock-cells = <1>;
+		acpm-ipc-channel = <5>;
+	};
+
+	g3d_opp_table: opp-table-g3d {
+		compatible = "operating-points-v2";
+
+		opp-260000000 {
+			opp-hz = /bits/ 64 <260000000>;
+		};
+
+		opp-299000000 {
+			opp-hz = /bits/ 64 <299000000>;
+		};
+
+		opp-338000000 {
+			opp-hz = /bits/ 64 <338000000>;
+		};
+
+		opp-455000000 {
+			opp-hz = /bits/ 64 <455000000>;
+		};
+
+		opp-546000000 {
+			opp-hz = /bits/ 64 <546000000>;
+		};
+
+		opp-572000000 {
+			opp-hz = /bits/ 64 <572000000>;
+		};
+	};
+
 	/*
 	 * Most of CMU_TOP is not implemented yet. S-Boot leaves these domain
 	 * inputs running at the rates below, so describe the preserved mux and
@@ -521,7 +555,11 @@
 				     <GIC_SPI 281 IRQ_TYPE_LEVEL_HIGH>,
 				     <GIC_SPI 283 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "JOB", "MMU", "GPU";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_G3D>;
+			clock-names = "core";
 			power-domains = <&pd_g3d>;
+			operating-points-v2 = <&g3d_opp_table>;
+			#cooling-cells = <2>;
 		};
 
 		cmu_dpu: clock-controller@16000000 {
