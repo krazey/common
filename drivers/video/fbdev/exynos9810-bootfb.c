@@ -41,6 +41,7 @@
 #define EXYNOS9810_BOOTFB_MAX_WINDOWS	6
 #define EXYNOS9810_BOOTFB_PLANES		3
 #define EXYNOS9810_BOOTFB_CHIP_ID	9810
+#define EXYNOS9810_BOOTFB_PSR_MIPI	2
 
 #define EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT	2U
 #define EXYNOS9810_BOOTFB_NATIVE_SLOT0_IOVA	0x24000000ULL
@@ -1944,7 +1945,7 @@ static int exynos9810_bootfb_ioctl(struct fb_info *info, unsigned int cmd,
 	case EXYNOS_DISP_INFO:
 		if (get_user(disp_info.ver, (int __user *)argp))
 			return -EFAULT;
-		disp_info.psr_mode = 1;
+		disp_info.psr_mode = EXYNOS9810_BOOTFB_PSR_MIPI;
 		disp_info.chip_ver = EXYNOS9810_BOOTFB_CHIP_ID;
 		if (copy_to_user(argp, &disp_info, sizeof(disp_info)))
 			return -EFAULT;
@@ -2000,7 +2001,8 @@ static ssize_t psr_info_show(struct device *dev, struct device_attribute *attr,
 	 * damage rectangle while the preserved DECON still performs a full
 	 * hardware frame transfer.
 	 */
-	return sysfs_emit(buf, "1\n1\n%u\n%u\n%u\n1\n0\n",
+	return sysfs_emit(buf, "%u\n1\n%u\n%u\n%u\n1\n0\n",
+			  EXYNOS9810_BOOTFB_PSR_MIPI,
 			  bootfb->width, bootfb->height, bootfb->width);
 }
 static DEVICE_ATTR_RO(psr_info);
