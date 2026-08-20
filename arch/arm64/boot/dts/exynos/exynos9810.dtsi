@@ -474,9 +474,19 @@
 				compatible = "syscon-reboot-mode";
 				offset = <0x080c>;
 				mode-normal = <0x12345670>;
+				/* Android user-requested system reboot reasons. */
+				mode-userrequested = <0x12345670>;
+				mode-userrequested-recovery = <0x12345670>;
 				mode-download = <0x12345671>;
 				mode-recovery = <0x12345674>;
 				mode-bootloader = <0x1234567d>;
+			};
+
+			poweroff {
+				compatible = "syscon-poweroff";
+				offset = <0x330c>;
+				mask = <0x100>;
+				value = <0x0>;
 			};
 		};
 
