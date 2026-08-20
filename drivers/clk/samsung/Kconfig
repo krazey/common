@@ -105,6 +105,16 @@ config EXYNOS_ACPM_CLK
 	  This driver uses the ACPM interface to interact with the firmware
 	  providing all the clock controlls.
 
+config EXYNOS9810_ACPM_CLK
+	bool "Exynos9810 ACPM DVFS clock support"
+	depends on EXYNOS_ACPM
+	help
+	  Support the common clock representation of Exynos9810 DVFS domains.
+	  The ACPM firmware handles the coordinated frequency and voltage
+	  transition for each domain through the legacy ACPM IPC transport.
+	  Enable this for Exynos9810 platforms that use firmware-managed
+	  DVFS.
+
 config TESLA_FSD_COMMON_CLK
 	bool "Tesla FSD clock controller support" if COMPILE_TEST
 	depends on COMMON_CLK_SAMSUNG
