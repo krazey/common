@@ -115,6 +115,11 @@ properties:
     description:
       Phandle to PMU interrupt generation interface.
 
+  samsung,pmu-intr-gen-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos PMU interrupt generation interface.
+
 required:
   - compatible
   - reg
@@ -188,6 +193,18 @@ allOf:
     else:
       properties:
         google,pmu-intr-gen-syscon: false
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-pmu
+    then:
+      required:
+        - samsung,pmu-intr-gen-syscon
+    else:
+      properties:
+        samsung,pmu-intr-gen-syscon: false
 
 examples:
   - |
