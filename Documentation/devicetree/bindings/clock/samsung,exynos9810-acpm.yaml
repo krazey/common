@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/clock/samsung,exynos9810-acpm.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung Exynos9810 ACPM DVFS clocks
+
+maintainers:
+  - Mathias Gluszczynski <admin@krazey.de>
+
+description: |
+  ACPM firmware coordinates clock and voltage changes for the Exynos9810
+  DVFS domains. Clock rates sent over the firmware interface are expressed
+  in kHz.
+
+properties:
+  compatible:
+    const: samsung,exynos9810-acpm-dvfs
+
+  "#clock-cells":
+    const: 1
+
+  acpm-ipc-channel:
+    $ref: /schemas/types.yaml#/definitions/uint32
+    description: ACPM firmware channel used for DVFS requests.
+
+required:
+  - compatible
+  - "#clock-cells"
+  - acpm-ipc-channel
+
+additionalProperties: false
+
+examples:
+  - |
+    clock-controller {
+        compatible = "samsung,exynos9810-acpm-dvfs";
+        #clock-cells = <1>;
+        acpm-ipc-channel = <5>;
+    };
+...
