@@ -15,27 +15,26 @@
 #include <soc/samsung/acpm_ipc_ctrl.h>
 
 #define EXYNOS9810_ACPM_FREQ_SET		0
-#define EXYNOS9810_ACPM_FREQ_GET		1
 #define EXYNOS9810_ACPM_COMMAND_WORDS		4
 
 struct exynos9810_acpm_clk {
 	struct clk_hw hw;
-	struct device *dev;
 	unsigned int channel;
 	u32 id;
+	unsigned long rate;
 };
 
 #define to_exynos9810_acpm_clk(_hw) \
 	container_of(_hw, struct exynos9810_acpm_clk, hw)
 
 static int exynos9810_acpm_clk_xfer(struct exynos9810_acpm_clk *aclk,
-				    u32 request, u32 *rate)
+				    u32 rate)
 {
 	struct ipc_config config = {};
 	u32 command[EXYNOS9810_ACPM_COMMAND_WORDS] = {
 		aclk->id,
-		*rate,
-		request,
+		rate,
+		EXYNOS9810_ACPM_FREQ_SET,
 		0,
 	};
 	int ret;
@@ -47,8 +46,6 @@ static int exynos9810_acpm_clk_xfer(struct exynos9810_acpm_clk *aclk,
 	if (ret)
 		return ret;
 
-	*rate = command[1];
-
 	return 0;
 }
 
@@ -56,19 +53,8 @@ static unsigned long exynos9810_acpm_clk_recalc_rate(struct clk_hw *hw,
 						     unsigned long parent_rate)
 {
 	struct exynos9810_acpm_clk *aclk = to_exynos9810_acpm_clk(hw);
-	u32 rate = 0;
-	int ret;
 
-	ret = exynos9810_acpm_clk_xfer(aclk, EXYNOS9810_ACPM_FREQ_GET,
-				       &rate);
-	if (ret) {
-		dev_err_ratelimited(aclk->dev,
-				    "failed to read clock %u rate: %d\n",
-				    aclk->id, ret);
-		return 0;
-	}
-
-	return rate * 1000UL;
+	return aclk->rate;
 }
 
 static int exynos9810_acpm_clk_determine_rate(struct clk_hw *hw,
@@ -89,9 +75,15 @@ static int exynos9810_acpm_clk_set_rate(struct clk_hw *hw,
 {
 	struct exynos9810_acpm_clk *aclk = to_exynos9810_acpm_clk(hw);
 	u32 rate_khz = rate / 1000;
+	int ret;
 
-	return exynos9810_acpm_clk_xfer(aclk, EXYNOS9810_ACPM_FREQ_SET,
-					&rate_khz);
+	ret = exynos9810_acpm_clk_xfer(aclk, rate_khz);
+	if (ret)
+		return ret;
+
+	aclk->rate = rate;
+
+	return 0;
 }
 
 static const struct clk_ops exynos9810_acpm_clk_ops = {
@@ -114,6 +106,11 @@ static const char *const exynos9810_acpm_clk_names[] = {
 	[CLK_ACPM_DVFS_IVA] = "acpm_dvfs_iva",
 	[CLK_ACPM_DVFS_SCORE] = "acpm_dvfs_score",
 	[CLK_ACPM_DVFS_CP] = "acpm_dvfs_cp",
+};
+
+static const unsigned long
+exynos9810_acpm_clk_initial_rates[ARRAY_SIZE(exynos9810_acpm_clk_names)] = {
+	[CLK_ACPM_DVFS_G3D] = 260000000,
 };
 
 static int exynos9810_acpm_clk_probe(struct platform_device *pdev)
@@ -153,13 +150,12 @@ static int exynos9810_acpm_clk_probe(struct platform_device *pdev)
 		struct clk_init_data init = {
 			.name = exynos9810_acpm_clk_names[i],
 			.ops = &exynos9810_acpm_clk_ops,
-			.flags = CLK_GET_RATE_NOCACHE,
 		};
 		struct exynos9810_acpm_clk *aclk = &aclks[i];
 
-		aclk->dev = dev;
 		aclk->channel = channel;
 		aclk->id = i;
+		aclk->rate = exynos9810_acpm_clk_initial_rates[i];
 		aclk->hw.init = &init;
 
 		ret = devm_clk_hw_register(dev, &aclk->hw);
