@@ -26,6 +26,10 @@ int kbase_devfreq_init(struct kbase_device *kbdev);
 
 void kbase_devfreq_term(struct kbase_device *kbdev);
 
+int kbase_exynos9810_gpu_clock_init(struct kbase_device *kbdev);
+
+void kbase_exynos9810_gpu_clock_term(struct kbase_device *kbdev);
+
 /**
  * kbase_devfreq_force_freq - Set GPU frequency on L2 power on/off.
  * @kbdev:      Device pointer

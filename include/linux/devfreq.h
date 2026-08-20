@@ -247,6 +247,9 @@ int devfreq_resume_device(struct devfreq *devfreq);
 void devfreq_suspend(void);
 void devfreq_resume(void);
 
+void devfreq_get_freq_range(struct devfreq *devfreq,
+			    unsigned long *min_freq,
+			    unsigned long *max_freq);
 /* update_devfreq() - Reevaluate the device and configure frequency */
 int update_devfreq(struct devfreq *devfreq);
 

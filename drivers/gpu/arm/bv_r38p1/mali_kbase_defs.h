@@ -158,6 +158,7 @@
 /* Forward declarations */
 struct kbase_context;
 struct kbase_device;
+struct kbase_exynos9810_gpu_clock;
 struct kbase_as;
 struct kbase_mmu_setup;
 struct kbase_kinstr_jm;
@@ -1105,6 +1106,7 @@ struct kbase_device {
 #ifdef CONFIG_MALI_DEVFREQ
 	struct devfreq_dev_profile devfreq_profile;
 	struct devfreq *devfreq;
+	struct kbase_exynos9810_gpu_clock *exynos9810_gpu_clock;
 	unsigned long current_freqs[BASE_MAX_NR_CLOCKS_REGULATORS];
 	unsigned long current_nominal_freq;
 	unsigned long current_voltages[BASE_MAX_NR_CLOCKS_REGULATORS];
