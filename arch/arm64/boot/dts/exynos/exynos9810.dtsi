@@ -161,46 +161,57 @@
 
 		opp-455000000 {
 			opp-hz = /bits/ 64 <455000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-598000000 {
 			opp-hz = /bits/ 64 <598000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-715000000 {
 			opp-hz = /bits/ 64 <715000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-832000000 {
 			opp-hz = /bits/ 64 <832000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-949000000 {
 			opp-hz = /bits/ 64 <949000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-1053000000 {
 			opp-hz = /bits/ 64 <1053000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-1248000000 {
 			opp-hz = /bits/ 64 <1248000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-1456000000 {
 			opp-hz = /bits/ 64 <1456000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-1690000000 {
 			opp-hz = /bits/ 64 <1690000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-1794000000 {
 			opp-hz = /bits/ 64 <1794000000>;
+			clock-latency-ns = <100000>;
 		};
 
 		opp-1950000000 {
 			opp-hz = /bits/ 64 <1950000000>;
+			clock-latency-ns = <100000>;
 		};
 	};
 
