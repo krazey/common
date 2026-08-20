@@ -157,6 +157,7 @@ static void s6sy761_report_coordinates(struct s6sy761_data *sdata,
 	input_report_abs(sdata->input, ABS_MT_TOUCH_MINOR, minor);
 	input_report_abs(sdata->input, ABS_MT_PRESSURE, z);
 
+	input_mt_report_pointer_emulation(sdata->input, false);
 	input_sync(sdata->input);
 }
 
@@ -166,6 +167,7 @@ static void s6sy761_report_release(struct s6sy761_data *sdata,
 	input_mt_slot(sdata->input, tid);
 	input_mt_report_slot_state(sdata->input, MT_TOOL_FINGER, false);
 
+	input_mt_report_pointer_emulation(sdata->input, false);
 	input_sync(sdata->input);
 }
 
@@ -291,6 +293,7 @@ ATTRIBUTE_GROUPS(s6sy761_sysfs);
 static int s6sy761_power_on(struct s6sy761_data *sdata)
 {
 	u8 buffer[S6SY761_EVENT_SIZE];
+	bool boot_complete;
 	u8 event;
 	int ret;
 
@@ -311,11 +314,9 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
 
 	event = (buffer[0] >> 2) & 0xf;
 
-	if ((event != S6SY761_EVENT_INFO &&
-	     event != S6SY761_EVENT_VENDOR_INFO) ||
-	    buffer[1] != S6SY761_INFO_BOOT_COMPLETE) {
-		return -ENODEV;
-	}
+	boot_complete = (event == S6SY761_EVENT_INFO ||
+			 event == S6SY761_EVENT_VENDOR_INFO) &&
+			buffer[1] == S6SY761_INFO_BOOT_COMPLETE;
 
 	ret = i2c_smbus_read_byte_data(sdata->client, S6SY761_BOOT_STATUS);
 	if (ret < 0)
@@ -324,6 +325,11 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
 	/* for some reasons the device might be stuck in the bootloader */
 	if (ret != S6SY761_BS_APPLICATION)
 		return -ENODEV;
+
+	if (!boot_complete)
+		dev_dbg(&sdata->client->dev,
+			"controller already in application mode; "
+			"no boot-complete event\n");
 
 	/* enable touch functionality */
 	ret = i2c_smbus_write_word_data(sdata->client,
@@ -433,8 +439,6 @@ static int s6sy761_probe(struct i2c_client *client)
 	input_set_abs_params(sdata->input, ABS_MT_POSITION_Y, 0, max_y, 0, 0);
 	input_set_abs_params(sdata->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
 	input_set_abs_params(sdata->input, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
-	input_set_abs_params(sdata->input, ABS_MT_TOUCH_MAJOR, 0, 255, 0, 0);
-	input_set_abs_params(sdata->input, ABS_MT_TOUCH_MINOR, 0, 255, 0, 0);
 	input_set_abs_params(sdata->input, ABS_MT_PRESSURE, 0, 255, 0, 0);
 
 	touchscreen_parse_properties(sdata->input, true, &sdata->prop);
@@ -500,10 +504,15 @@ static int s6sy761_suspend(struct device *dev)
 static int s6sy761_resume(struct device *dev)
 {
 	struct s6sy761_data *sdata = dev_get_drvdata(dev);
+	int ret;
+
+	ret = s6sy761_power_on(sdata);
+	if (ret)
+		return ret;
 
 	enable_irq(sdata->client->irq);
 
-	return s6sy761_power_on(sdata);
+	return 0;
 }
 
 static const struct dev_pm_ops s6sy761_pm_ops = {
