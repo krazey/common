@@ -13,6 +13,7 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 #include <linux/psci.h>
+#include <linux/soc/samsung/exynos-pmu.h>
 #include <linux/mm.h>
 
 #include <uapi/linux/psci.h>
@@ -36,10 +37,17 @@ static int __init cpu_psci_cpu_init(unsigned int cpu)
 	return 0;
 }
 
+static bool cpu_psci_is_exynos9810_mongoose(unsigned int cpu)
+{
+	return IS_ENABLED(CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS) &&
+	       of_machine_is_compatible("samsung,exynos9810") &&
+	       MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
+}
+
 static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 {
-	if (IS_ENABLED(CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS) &&
-	    MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1)
+	if (cpu_psci_is_exynos9810_mongoose(cpu) &&
+	    MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 0) != 0)
 		return -EOPNOTSUPP;
 
 	if (!psci_ops.cpu_on) {
@@ -54,6 +62,12 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 {
 	phys_addr_t pa_secondary_entry = __pa_symbol(secondary_entry);
 	int err;
+
+	if (cpu_psci_is_exynos9810_mongoose(cpu) &&
+	    !exynos9810_cpu_power_ready(cpu)) {
+		pr_err("CPU%d power handshake is not ready\n", cpu);
+		return -EAGAIN;
+	}
 
 	exynos9810_psci_marker('P', cpu);
 	err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
