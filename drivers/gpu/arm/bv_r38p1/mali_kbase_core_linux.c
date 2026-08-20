@@ -432,41 +432,32 @@ static struct kbase_device *to_kbase_device(struct device *dev)
 
 int assign_irqs(struct kbase_device *kbdev)
 {
+	static const char * const irq_names[] = {
+		[JOB_IRQ_TAG] = "JOB",
+		[MMU_IRQ_TAG] = "MMU",
+		[GPU_IRQ_TAG] = "GPU",
+	};
 	struct platform_device *pdev;
-	int i;
+	unsigned int i;
 
 	if (!kbdev)
 		return -ENODEV;
 
 	pdev = to_platform_device(kbdev->dev);
-	/* 3 IRQ resources */
-	for (i = 0; i < 3; i++) {
-		struct resource *irq_res;
-		int irqtag;
+	for (i = 0; i < ARRAY_SIZE(irq_names); i++) {
+		int irq;
 
-		irq_res = platform_get_resource(pdev, IORESOURCE_IRQ, i);
-		if (!irq_res) {
-			dev_err(kbdev->dev, "No IRQ resource at index %d\n", i);
-			return -ENOENT;
-		}
+		irq = platform_get_irq_byname_optional(pdev, irq_names[i]);
+		if (irq == -ENXIO)
+			irq = platform_get_irq(pdev, i);
+		if (irq < 0)
+			return dev_err_probe(kbdev->dev, irq,
+					     "Failed to get %s IRQ\n",
+					     irq_names[i]);
 
-#if IS_ENABLED(CONFIG_OF)
-		if (!strncasecmp(irq_res->name, "JOB", 4)) {
-			irqtag = JOB_IRQ_TAG;
-		} else if (!strncasecmp(irq_res->name, "MMU", 4)) {
-			irqtag = MMU_IRQ_TAG;
-		} else if (!strncasecmp(irq_res->name, "GPU", 4)) {
-			irqtag = GPU_IRQ_TAG;
-		} else {
-			dev_err(&pdev->dev, "Invalid irq res name: '%s'\n",
-				irq_res->name);
-			return -EINVAL;
-		}
-#else
-		irqtag = i;
-#endif /* CONFIG_OF */
-		kbdev->irqs[irqtag].irq = irq_res->start;
-		kbdev->irqs[irqtag].flags = irq_res->flags & IRQF_TRIGGER_MASK;
+		kbdev->irqs[i].irq = irq;
+		/* The firmware IRQ domain has already set the trigger type. */
+		kbdev->irqs[i].flags = 0;
 	}
 
 	return 0;
