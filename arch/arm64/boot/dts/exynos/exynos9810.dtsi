@@ -71,6 +71,8 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x0>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
+			operating-points-v2 = <&cpucl0_opp_table>;
 		};
 
 		cpu1: cpu@1 {
@@ -78,6 +80,8 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x1>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
+			operating-points-v2 = <&cpucl0_opp_table>;
 		};
 
 		cpu2: cpu@2 {
@@ -85,6 +89,8 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x2>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
+			operating-points-v2 = <&cpucl0_opp_table>;
 		};
 
 		cpu3: cpu@3 {
@@ -92,6 +98,8 @@
 			compatible = "arm,cortex-a55";
 			reg = <0x3>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
+			operating-points-v2 = <&cpucl0_opp_table>;
 		};
 
 		cpu4: cpu@100 {
@@ -145,6 +153,55 @@
 		compatible = "samsung,exynos9810-acpm-dvfs";
 		#clock-cells = <1>;
 		acpm-ipc-channel = <5>;
+	};
+
+	cpucl0_opp_table: opp-table-cpucl0 {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-455000000 {
+			opp-hz = /bits/ 64 <455000000>;
+		};
+
+		opp-598000000 {
+			opp-hz = /bits/ 64 <598000000>;
+		};
+
+		opp-715000000 {
+			opp-hz = /bits/ 64 <715000000>;
+		};
+
+		opp-832000000 {
+			opp-hz = /bits/ 64 <832000000>;
+		};
+
+		opp-949000000 {
+			opp-hz = /bits/ 64 <949000000>;
+		};
+
+		opp-1053000000 {
+			opp-hz = /bits/ 64 <1053000000>;
+		};
+
+		opp-1248000000 {
+			opp-hz = /bits/ 64 <1248000000>;
+		};
+
+		opp-1456000000 {
+			opp-hz = /bits/ 64 <1456000000>;
+		};
+
+		opp-1690000000 {
+			opp-hz = /bits/ 64 <1690000000>;
+		};
+
+		opp-1794000000 {
+			opp-hz = /bits/ 64 <1794000000>;
+		};
+
+		opp-1950000000 {
+			opp-hz = /bits/ 64 <1950000000>;
+		};
 	};
 
 	g3d_opp_table: opp-table-g3d {
