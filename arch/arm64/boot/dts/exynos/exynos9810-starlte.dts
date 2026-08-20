@@ -156,8 +156,15 @@ firmware_class.path=/vendor/firmware bootconfig";
 
 	decon_f: decon_f@16030000 {
 		compatible = "samsung,exynos9810-bootfb";
-		reg = <0x0 0x16030000 0x1000>;
+		reg = <0x0 0x16030000 0x1000>,
+		      <0x0 0x16021000 0x1000>,
+		      <0x0 0x16071000 0x1000>;
+		reg-names = "decon", "dpp-g0", "idma-g0";
+		interrupts = <GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>,
+			     <GIC_SPI 204 IRQ_TYPE_LEVEL_HIGH>;
+		interrupt-names = "idma-g0", "dpp-g0";
 		memory-region = <&cont_splash_mem>;
+		iommus = <&sysmmu_dpu1>;
 		width = <1440>;
 		height = <2960>;
 		stride = <(1440 * 4)>;
