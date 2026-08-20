@@ -31,17 +31,23 @@
 	do { (void)(first); (void)(cpu); } while (0)
 #endif
 
+static bool cpu_psci_is_exynos9810_mongoose(unsigned int cpu)
+{
+	return IS_ENABLED(CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS) &&
+	       of_machine_is_compatible("samsung,exynos9810") &&
+	       MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
+}
+
 static int __init cpu_psci_cpu_init(unsigned int cpu)
 {
+	if (cpu_psci_is_exynos9810_mongoose(cpu))
+		return -EOPNOTSUPP;
+
 	return 0;
 }
 
 static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 {
-	if (IS_ENABLED(CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS) &&
-	    MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1)
-		return -EOPNOTSUPP;
-
 	if (!psci_ops.cpu_on) {
 		pr_err("no cpu_on method, not booting CPU%d\n", cpu);
 		return -ENODEV;
