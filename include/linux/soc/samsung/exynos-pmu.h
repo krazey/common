@@ -9,6 +9,8 @@
 #ifndef __LINUX_SOC_EXYNOS_PMU_H
 #define __LINUX_SOC_EXYNOS_PMU_H
 
+#include <linux/types.h>
+
 struct regmap;
 struct device_node;
 
@@ -34,6 +36,15 @@ static inline struct regmap *exynos_get_pmu_regmap_by_phandle(struct device_node
 							      const char *propname)
 {
 	return ERR_PTR(-ENODEV);
+}
+#endif
+
+#ifdef CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS
+bool exynos9810_cpu_power_ready(unsigned int cpu);
+#else
+static inline bool exynos9810_cpu_power_ready(unsigned int cpu)
+{
+	return true;
 }
 #endif
 

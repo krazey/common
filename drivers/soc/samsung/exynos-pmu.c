@@ -13,6 +13,7 @@
 #include <linux/of_address.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/syscon.h>
+#include <linux/mutex.h>
 #include <linux/of_platform.h>
 #include <linux/platform_device.h>
 #include <linux/delay.h>
@@ -21,6 +22,8 @@
 
 #include <linux/soc/samsung/exynos-regs-pmu.h>
 #include <linux/soc/samsung/exynos-pmu.h>
+
+#include <asm/smp_plat.h>
 
 #include "exynos-pmu.h"
 
@@ -31,6 +34,13 @@
 #define EXYNOS9810_PMU_INFORM2			0x0808
 #define EXYNOS9810_POWER_OFF			0x00000000
 #define EXYNOS9810_POWER_RESET			0x12345678
+
+#define EXYNOS9810_PMU_EVENT_ENABLE_GRP2		0x7f08
+#define EXYNOS9810_GRP1_INTR_BID_UPEND		0x0108
+#define EXYNOS9810_GRP1_INTR_BID_CLEAR		0x010c
+#define EXYNOS9810_GRP2_INTR_BID_ENABLE		0x0200
+#define EXYNOS9810_GRP2_INTR_BID_UPEND		0x0208
+#define EXYNOS9810_GRP2_INTR_BID_CLEAR		0x020c
 
 struct exynos_pmu_context {
 	struct device *dev;
@@ -46,6 +56,11 @@ struct exynos_pmu_context {
 	unsigned long *in_cpuhp;
 	bool sys_insuspend;
 	bool sys_inreboot;
+	/* Serializes Exynos9810 ACPM handshake register updates. */
+	struct mutex exynos9810_cpu_lock;
+	unsigned long *exynos9810_cpu_ready;
+	int exynos9810_prepare_state;
+	int exynos9810_online_state;
 };
 
 void __iomem *pmu_base_addr;
@@ -226,6 +241,249 @@ struct regmap *exynos_get_pmu_regmap_by_phandle(struct device_node *np,
 	return syscon_node_to_regmap(pmu_np);
 }
 EXPORT_SYMBOL_GPL(exynos_get_pmu_regmap_by_phandle);
+
+#ifdef CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS
+static bool exynos9810_is_mongoose_cpu(unsigned int cpu)
+{
+	return MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
+}
+
+static u32 exynos9810_cpu_power_mask(unsigned int cpu)
+{
+	return BIT(MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 0));
+}
+
+bool exynos9810_cpu_power_ready(unsigned int cpu)
+{
+	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
+
+	if (!context || !context->exynos9810_cpu_ready ||
+	    !exynos9810_is_mongoose_cpu(cpu))
+		return false;
+
+	return test_bit(cpu, context->exynos9810_cpu_ready);
+}
+
+static int __exynos9810_cpu_power_on(struct exynos_pmu_context *context,
+				     unsigned int cpu)
+{
+	u32 enable;
+	u32 event;
+	u32 mask = exynos9810_cpu_power_mask(cpu);
+	u32 pending;
+	int ret;
+
+	ret = regmap_update_bits(context->pmuintrgen,
+				 EXYNOS9810_GRP2_INTR_BID_ENABLE, mask, 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(context->pmuintrgen,
+			  EXYNOS9810_GRP2_INTR_BID_UPEND, &pending);
+	if (ret)
+		return ret;
+
+	if (pending & mask) {
+		ret = regmap_write(context->pmuintrgen,
+				   EXYNOS9810_GRP2_INTR_BID_CLEAR, mask);
+		if (ret)
+			return ret;
+	}
+
+	ret = regmap_update_bits(context->pmureg,
+				 EXYNOS9810_PMU_EVENT_ENABLE_GRP2, mask, 0);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(context->pmuintrgen,
+			  EXYNOS9810_GRP2_INTR_BID_ENABLE, &enable);
+	if (ret)
+		return ret;
+	ret = regmap_read(context->pmuintrgen,
+			  EXYNOS9810_GRP2_INTR_BID_UPEND, &pending);
+	if (ret)
+		return ret;
+	ret = regmap_read(context->pmureg,
+			  EXYNOS9810_PMU_EVENT_ENABLE_GRP2, &event);
+	if (ret)
+		return ret;
+
+	set_bit(cpu, context->exynos9810_cpu_ready);
+	dev_info(context->dev,
+		 "CPU%u power-on handshake: enable=%#x pending=%#x event=%#x\n",
+		 cpu, enable, pending, event);
+
+	return 0;
+}
+
+static int __exynos9810_cpu_power_off(struct exynos_pmu_context *context,
+				      unsigned int cpu)
+{
+	u32 enable;
+	u32 event;
+	u32 mask = exynos9810_cpu_power_mask(cpu);
+	u32 pending;
+	int ret;
+
+	ret = regmap_update_bits(context->pmuintrgen,
+				 EXYNOS9810_GRP2_INTR_BID_ENABLE, mask, mask);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(context->pmuintrgen,
+			  EXYNOS9810_GRP1_INTR_BID_UPEND, &pending);
+	if (ret)
+		return ret;
+
+	if (pending & mask) {
+		ret = regmap_write(context->pmuintrgen,
+				   EXYNOS9810_GRP1_INTR_BID_CLEAR, mask);
+		if (ret)
+			return ret;
+	}
+
+	ret = regmap_update_bits(context->pmureg,
+				 EXYNOS9810_PMU_EVENT_ENABLE_GRP2,
+				 mask, mask);
+	if (ret)
+		return ret;
+
+	ret = regmap_read(context->pmuintrgen,
+			  EXYNOS9810_GRP2_INTR_BID_ENABLE, &enable);
+	if (ret)
+		return ret;
+	ret = regmap_read(context->pmuintrgen,
+			  EXYNOS9810_GRP1_INTR_BID_UPEND, &pending);
+	if (ret)
+		return ret;
+	ret = regmap_read(context->pmureg,
+			  EXYNOS9810_PMU_EVENT_ENABLE_GRP2, &event);
+	if (ret)
+		return ret;
+
+	clear_bit(cpu, context->exynos9810_cpu_ready);
+	dev_info(context->dev,
+		 "CPU%u power-off handshake: enable=%#x pending=%#x event=%#x\n",
+		 cpu, enable, pending, event);
+
+	return 0;
+}
+
+static int exynos9810_cpuhp_prepare(unsigned int cpu)
+{
+	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
+	int ret;
+
+	if (!exynos9810_is_mongoose_cpu(cpu))
+		return 0;
+	if (!context || !context->pmuintrgen ||
+	    !context->exynos9810_cpu_ready)
+		return -ENODEV;
+
+	mutex_lock(&context->exynos9810_cpu_lock);
+	ret = __exynos9810_cpu_power_on(context, cpu);
+	mutex_unlock(&context->exynos9810_cpu_lock);
+	if (ret)
+		dev_err(context->dev,
+			"CPU%u power-on handshake failed: %d\n", cpu, ret);
+
+	return ret;
+}
+
+static int exynos9810_cpuhp_online(unsigned int cpu)
+{
+	if (!exynos9810_is_mongoose_cpu(cpu) ||
+	    exynos9810_cpu_power_ready(cpu))
+		return 0;
+
+	return exynos9810_cpuhp_prepare(cpu);
+}
+
+static int exynos9810_cpuhp_offline(unsigned int cpu)
+{
+	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
+	int ret;
+
+	if (!exynos9810_is_mongoose_cpu(cpu))
+		return 0;
+	if (!context || !context->pmuintrgen ||
+	    !context->exynos9810_cpu_ready)
+		return -ENODEV;
+
+	mutex_lock(&context->exynos9810_cpu_lock);
+	ret = __exynos9810_cpu_power_off(context, cpu);
+	mutex_unlock(&context->exynos9810_cpu_lock);
+	if (ret)
+		dev_err(context->dev,
+			"CPU%u power-off handshake failed: %d\n", cpu, ret);
+
+	return ret;
+}
+
+static int exynos9810_cpuhp_unprepare(unsigned int cpu)
+{
+	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
+
+	if (context && context->exynos9810_cpu_ready &&
+	    exynos9810_is_mongoose_cpu(cpu))
+		clear_bit(cpu, context->exynos9810_cpu_ready);
+
+	return 0;
+}
+
+static void exynos9810_remove_cpuhp(void *data)
+{
+	struct exynos_pmu_context *context = data;
+
+	cpuhp_remove_state_nocalls(context->exynos9810_online_state);
+	cpuhp_remove_state_nocalls(context->exynos9810_prepare_state);
+}
+
+static int exynos9810_setup_cpuhp(struct device *dev)
+{
+	struct exynos_pmu_context *context = pmu_context;
+	int ret;
+
+	context->pmuintrgen =
+		syscon_regmap_lookup_by_phandle(dev->of_node,
+						"samsung,pmu-intr-gen-syscon");
+	if (IS_ERR(context->pmuintrgen))
+		return dev_err_probe(dev, PTR_ERR(context->pmuintrgen),
+				     "failed to get PMU interrupt generator\n");
+
+	context->exynos9810_cpu_ready =
+		devm_bitmap_zalloc(dev, num_possible_cpus(), GFP_KERNEL);
+	if (!context->exynos9810_cpu_ready)
+		return -ENOMEM;
+
+	mutex_init(&context->exynos9810_cpu_lock);
+
+	ret = cpuhp_setup_state_nocalls(CPUHP_BP_PREPARE_DYN,
+					"soc/exynos9810:prepare",
+					exynos9810_cpuhp_prepare,
+					exynos9810_cpuhp_unprepare);
+	if (ret < 0)
+		return ret;
+	context->exynos9810_prepare_state = ret;
+
+	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
+					"soc/exynos9810:online",
+					exynos9810_cpuhp_online,
+					exynos9810_cpuhp_offline);
+	if (ret < 0) {
+		cpuhp_remove_state_nocalls(context->exynos9810_prepare_state);
+		return ret;
+	}
+	context->exynos9810_online_state = ret;
+
+	ret = devm_add_action_or_reset(dev, exynos9810_remove_cpuhp, context);
+	if (ret)
+		return ret;
+
+	dev_info(dev, "Exynos9810 CPU power handshake registered\n");
+	return 0;
+}
+#endif
 
 /*
  * CPU_INFORM register "hint" values are required to be programmed in addition to
@@ -575,6 +833,13 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 		if (ret)
 			return dev_err_probe(dev, ret,
 					     "failed to register Exynos9810 reboot notifier\n");
+
+#ifdef CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS
+		ret = exynos9810_setup_cpuhp(dev);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "failed to register CPU power handshake\n");
+#endif
 	}
 
 	if (pmu_context->pmu_data && pmu_context->pmu_data->pmu_cpuhp) {
