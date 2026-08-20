@@ -1,6 +1,8 @@
 #ifndef __ACPM_IPC_H_
 #define __ACPM_IPC_H_
 
+#include <linux/mutex.h>
+
 #include <soc/samsung/acpm_ipc_ctrl.h>
 
 struct buff_info {

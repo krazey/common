@@ -518,25 +518,32 @@ static int enqueue_indirection_cmd(struct acpm_ipc_ch *channel,
 
 int acpm_ipc_send_data_sync(unsigned int channel_id, struct ipc_config *cfg)
 {
-	int ret;
 	struct acpm_ipc_ch *channel;
+	int ret;
+
+	if (!acpm_ipc || !cfg || channel_id >= acpm_ipc->num_channels)
+		return -EINVAL;
+
+	channel = &acpm_ipc->channel[channel_id];
+	mutex_lock(&channel->wait_lock);
+
+	if (!channel->polling && cfg->response)
+		reinit_completion(&channel->wait);
 
 	ret = acpm_ipc_send_data(channel_id, cfg);
-
-	if (!ret) {
-		channel = &acpm_ipc->channel[channel_id];
-
-		if (!channel->polling && cfg->response) {
-			ret = wait_for_completion_interruptible_timeout(&channel->wait,
-					msecs_to_jiffies(50));
-			if (!ret) {
-				pr_err("[%s] ipc_timeout!!!\n", __func__);
-				ret = -ETIMEDOUT;
-			} else {
-				ret = 0;
-			}
+	if (!ret && !channel->polling && cfg->response) {
+		ret = wait_for_completion_interruptible_timeout(&channel->wait,
+								msecs_to_jiffies(50));
+		if (!ret) {
+			pr_err("%s: channel %u timeout\n", __func__,
+			       channel_id);
+			ret = -ETIMEDOUT;
+		} else if (ret > 0) {
+			ret = 0;
 		}
 	}
+
+	mutex_unlock(&channel->wait_lock);
 
 	return ret;
 }
@@ -552,8 +559,9 @@ int acpm_ipc_send_data(unsigned int channel_id, struct ipc_config *cfg)
 	u64 timeout, now;
 	u32 retry_cnt = 0;
 
-	if (channel_id >= acpm_ipc->num_channels && !cfg)
-		return -EIO;
+	if (!acpm_ipc || !cfg || !cfg->cmd ||
+	    channel_id >= acpm_ipc->num_channels)
+		return -EINVAL;
 
 	channel = &acpm_ipc->channel[channel_id];
 
@@ -575,11 +583,6 @@ int acpm_ipc_send_data(unsigned int channel_id, struct ipc_config *cfg)
 		spin_unlock(&channel->tx_lock);
 		pr_err("[%s] tx buffer full! timeout!!!\n", __func__);
 		return -ETIMEDOUT;
-	}
-
-	if (!cfg->cmd) {
-		spin_unlock(&channel->tx_lock);
-		return -EIO;
 	}
 
 	if (++channel->seq_num == 64)
@@ -757,6 +760,7 @@ static int channel_init(void)
 				acpm_ipc->channel[i].tx_ch.size, GFP_KERNEL);
 
 		init_completion(&acpm_ipc->channel[i].wait);
+		mutex_init(&acpm_ipc->channel[i].wait_lock);
 		spin_lock_init(&acpm_ipc->channel[i].rx_lock);
 		spin_lock_init(&acpm_ipc->channel[i].tx_lock);
 		spin_lock_init(&acpm_ipc->channel[i].ch_lock);
