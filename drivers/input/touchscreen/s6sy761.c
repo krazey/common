@@ -108,6 +108,7 @@ struct s6sy761_data {
 
 	u16 devid;
 	u8 tx_channel;
+	bool powered;
 };
 
 /*
@@ -290,6 +291,51 @@ static struct attribute *s6sy761_sysfs_attrs[] = {
 };
 ATTRIBUTE_GROUPS(s6sy761_sysfs);
 
+static int s6sy761_enable_supplies(struct s6sy761_data *sdata)
+{
+	struct regulator_bulk_data *regulators = sdata->regulators;
+	struct regulator *avdd = regulators[S6SY761_REGULATOR_AVDD].consumer;
+	struct regulator *vdd = regulators[S6SY761_REGULATOR_VDD].consumer;
+	int ret;
+
+	if (sdata->powered)
+		return 0;
+
+	ret = regulator_enable(vdd);
+	if (ret)
+		return ret;
+
+	usleep_range(1000, 2000);
+
+	ret = regulator_enable(avdd);
+	if (ret) {
+		regulator_disable(vdd);
+		return ret;
+	}
+
+	sdata->powered = true;
+
+	return 0;
+}
+
+static void s6sy761_disable_supplies(struct s6sy761_data *sdata)
+{
+	struct regulator_bulk_data *regulators = sdata->regulators;
+	struct regulator *avdd = regulators[S6SY761_REGULATOR_AVDD].consumer;
+	struct regulator *vdd = regulators[S6SY761_REGULATOR_VDD].consumer;
+
+	if (!sdata->powered)
+		return;
+
+	sdata->powered = false;
+
+	regulator_disable(avdd);
+
+	usleep_range(4000, 5000);
+
+	regulator_disable(vdd);
+}
+
 static int s6sy761_power_on(struct s6sy761_data *sdata)
 {
 	u8 buffer[S6SY761_EVENT_SIZE];
@@ -297,8 +343,7 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
 	u8 event;
 	int ret;
 
-	ret = regulator_bulk_enable(ARRAY_SIZE(sdata->regulators),
-				    sdata->regulators);
+	ret = s6sy761_enable_supplies(sdata);
 	if (ret)
 		return ret;
 
@@ -310,7 +355,7 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
 					    S6SY761_EVENT_SIZE,
 					    buffer);
 	if (ret < 0)
-		return ret;
+		goto disable_supplies;
 
 	event = (buffer[0] >> 2) & 0xf;
 
@@ -320,11 +365,13 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
 
 	ret = i2c_smbus_read_byte_data(sdata->client, S6SY761_BOOT_STATUS);
 	if (ret < 0)
-		return ret;
+		goto disable_supplies;
 
 	/* for some reasons the device might be stuck in the bootloader */
-	if (ret != S6SY761_BS_APPLICATION)
-		return -ENODEV;
+	if (ret != S6SY761_BS_APPLICATION) {
+		ret = -ENODEV;
+		goto disable_supplies;
+	}
 
 	if (!boot_complete)
 		dev_dbg(&sdata->client->dev,
@@ -336,9 +383,17 @@ static int s6sy761_power_on(struct s6sy761_data *sdata)
 					S6SY761_TOUCH_FUNCTION,
 					S6SY761_MASK_TOUCH);
 	if (ret)
-		return ret;
+		goto disable_supplies;
+
+	ret = i2c_smbus_write_byte(sdata->client, S6SY761_SENSE_ON);
+	if (ret)
+		goto disable_supplies;
 
 	return 0;
+
+disable_supplies:
+	s6sy761_disable_supplies(sdata);
+	return ret;
 }
 
 static int s6sy761_hw_init(struct s6sy761_data *sdata,
@@ -387,9 +442,7 @@ static void s6sy761_power_off(void *data)
 {
 	struct s6sy761_data *sdata = data;
 
-	disable_irq(sdata->client->irq);
-	regulator_bulk_disable(ARRAY_SIZE(sdata->regulators),
-						sdata->regulators);
+	s6sy761_disable_supplies(sdata);
 }
 
 static int s6sy761_probe(struct i2c_client *client)
@@ -496,6 +549,7 @@ static int s6sy761_suspend(struct device *dev)
 {
 	struct s6sy761_data *sdata = dev_get_drvdata(dev);
 
+	disable_irq(sdata->client->irq);
 	s6sy761_power_off(sdata);
 
 	return 0;
