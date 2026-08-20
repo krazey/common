@@ -728,6 +728,11 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	}
 #endif
 
+	err = kbase_exynos9810_gpu_clock_init(kbdev);
+	if (err)
+		dev_warn(kbdev->dev,
+			 "Failed to create legacy GPU clock controls (%d)\n", err);
+
 	return 0;
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
@@ -763,6 +768,8 @@ void kbase_devfreq_term(struct kbase_device *kbdev)
 	int err;
 
 	dev_dbg(kbdev->dev, "Term Mali devfreq\n");
+
+	kbase_exynos9810_gpu_clock_term(kbdev);
 
 #if IS_ENABLED(CONFIG_DEVFREQ_THERMAL)
 	if (kbdev->devfreq_cooling)
