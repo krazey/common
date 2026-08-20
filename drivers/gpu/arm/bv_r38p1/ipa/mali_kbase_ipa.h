@@ -266,15 +266,13 @@ int kbase_get_real_power(struct devfreq *df, u32 *power,
 				unsigned long freq,
 				unsigned long voltage);
 
-#if MALI_UNIT_TEST
 /* Called by kbase_get_real_power() to invoke the power models.
  * Must be called with kbdev->ipa.lock held.
- * This function is only exposed for use by unit tests.
+ * This symbol is only exported for use by unit tests.
  */
 int kbase_get_real_power_locked(struct kbase_device *kbdev, u32 *power,
 				unsigned long freq,
 				unsigned long voltage);
-#endif /* MALI_UNIT_TEST */
 
 extern struct devfreq_cooling_power kbase_ipa_power_model_ops;
 
