@@ -480,6 +480,7 @@
 			compatible = "samsung,exynos9810-pmu",
 				     "samsung,exynos7-pmu", "syscon";
 			reg = <0x14060000 0x10000>;
+			samsung,pmu-intr-gen-syscon = <&pmu_intr_gen>;
 
 			reboot-mode {
 				compatible = "syscon-reboot-mode";
@@ -499,6 +500,11 @@
 				mask = <0x100>;
 				value = <0x0>;
 			};
+		};
+
+		pmu_intr_gen: syscon@14070000 {
+			compatible = "samsung,exynos9810-pmu-intr-gen", "syscon";
+			reg = <0x14070000 0x1000>;
 		};
 
 		pd_g3d: power-domain@14064040 {
