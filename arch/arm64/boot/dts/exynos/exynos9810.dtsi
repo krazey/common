@@ -528,6 +528,17 @@
 			clock-names = "oscclk", "dout_clkcmu_dpu_bus";
 		};
 
+		sysmmu_dpu1: iommu@160b0000 {
+			compatible = "samsung,exynos-sysmmu";
+			reg = <0x160b0000 0x9000>;
+			interrupts = <GIC_SPI 213 IRQ_TYPE_LEVEL_HIGH>;
+			clocks =
+				<&cmu_dpu CLK_GOUT_DPU_SYSMMU_DPUD1_QCH>,
+				<&cmu_dpu CLK_GOUT_DPU_SYSMMU_DPUD1_PCLK>;
+			clock-names = "aclk", "pclk";
+			#iommu-cells = <0>;
+		};
+
 		cmu_cmgp: clock-controller@14200000 {
 			compatible = "samsung,exynos9810-cmu-cmgp";
 			reg = <0x14200000 0x8000>;
