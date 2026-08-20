@@ -15,22 +15,28 @@
 #include "clk.h"
 #include "clk-exynos-arm64.h"
 
-#define CLKS_NR_TOP		(CLK_GOUT_TOP_CMGP_BUS + 1)
+#define CLKS_NR_TOP		(CLK_GOUT_TOP_DPU_BUS + 1)
 #define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
 #define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI3_PCLK + 1)
 #define CLKS_NR_CMGP		(CLK_GOUT_CMGP_USI3_PCLK + 1)
+#define CLKS_NR_DPU		(CLK_GOUT_DPU_SYSMMU_DPUD1_QCH + 1)
 
 /* ---- CMU_TOP ---------------------------------------------------------- */
 
 #define CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS		0x2028
+#define CLK_CON_GAT_GATE_CLKCMU_DPU_BUS		0x204c
 
 static const unsigned long top_clk_regs[] __initconst = {
 	CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS,
+	CLK_CON_GAT_GATE_CLKCMU_DPU_BUS,
 };
 
 static const struct samsung_gate_clock top_gate_clks[] __initconst = {
 	GATE(CLK_GOUT_TOP_CMGP_BUS, "dout_clkcmu_cmgp_bus",
 	     "cmgp_bus_bootclk", CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS,
+	     21, CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_TOP_DPU_BUS, "dout_clkcmu_dpu_bus",
+	     "dpu_bus_bootclk", CLK_CON_GAT_GATE_CLKCMU_DPU_BUS,
 	     21, CLK_IS_CRITICAL, 0),
 };
 
@@ -118,6 +124,68 @@ static const struct samsung_cmu_info fsys0_cmu_info __initconst = {
 	.clk_regs		= fsys0_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(fsys0_clk_regs),
 	.clk_name		= "dout_clkcmu_fsys0_bus",
+};
+
+/* ---- CMU_DPU ---------------------------------------------------------- */
+
+/*
+ * The Exynos9810 clock data places the DPU bus user mux at 0x0100 and the
+ * non-secure DPUD1 APB adapter clock gate at 0x205c.
+ *
+ * Keep the clocks critical while the driver hands the display state left by
+ * the bootloader to the kernel.
+ */
+#define PLL_CON0_MUX_CLKCMU_DPU_BUS_USER		0x0100
+#define CLK_CON_GAT_GOUT_DPU_SYSMMU_DPUD1_PCLK		0x205c
+#define QCH_CON_SYSMMU_DPUD1			0x3050
+
+static const unsigned long dpu_clk_regs[] __initconst = {
+	PLL_CON0_MUX_CLKCMU_DPU_BUS_USER,
+	CLK_CON_GAT_GOUT_DPU_SYSMMU_DPUD1_PCLK,
+	QCH_CON_SYSMMU_DPUD1,
+};
+
+PNAME(mout_dpu_bus_user_p) = {
+	"oscclk", "dout_clkcmu_dpu_bus"
+};
+
+static const struct samsung_mux_clock dpu_mux_clks[] __initconst = {
+	MUX(CLK_MOUT_DPU_BUS_USER, "mout_dpu_bus_user",
+	    mout_dpu_bus_user_p, PLL_CON0_MUX_CLKCMU_DPU_BUS_USER,
+	    4, 1),
+};
+
+static const struct samsung_gate_clock dpu_gate_clks[] __initconst = {
+	GATE(CLK_GOUT_DPU_SYSMMU_DPUD1_PCLK,
+	     "gout_dpu_sysmmu_dpud1_pclk", "mout_dpu_bus_user",
+	     CLK_CON_GAT_GOUT_DPU_SYSMMU_DPUD1_PCLK,
+	     21, CLK_IS_CRITICAL, 0),
+	/*
+	 * Samsung CAL exposes GATE_SYSMMU_DPUD1 through SYSMMU_DPUD1_QCH.
+	 * Force the Q-channel into software-request mode before asserting the
+	 * request, matching the established Exynos9810 CCF Q-channel model.
+	 */
+	GATE(0, "gout_dpu_sysmmu_dpud1_qch_ignore",
+	     "mout_dpu_bus_user", QCH_CON_SYSMMU_DPUD1,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_dpu_sysmmu_dpud1_qch_mode",
+	     "gout_dpu_sysmmu_dpud1_qch_ignore", QCH_CON_SYSMMU_DPUD1,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(CLK_GOUT_DPU_SYSMMU_DPUD1_QCH,
+	     "gout_dpu_sysmmu_dpud1_qch",
+	     "gout_dpu_sysmmu_dpud1_qch_mode", QCH_CON_SYSMMU_DPUD1,
+	     1, CLK_IS_CRITICAL, 0),
+};
+
+static const struct samsung_cmu_info dpu_cmu_info __initconst = {
+	.mux_clks		= dpu_mux_clks,
+	.nr_mux_clks		= ARRAY_SIZE(dpu_mux_clks),
+	.gate_clks		= dpu_gate_clks,
+	.nr_gate_clks		= ARRAY_SIZE(dpu_gate_clks),
+	.nr_clk_ids		= CLKS_NR_DPU,
+	.clk_regs		= dpu_clk_regs,
+	.nr_clk_regs		= ARRAY_SIZE(dpu_clk_regs),
+	.clk_name		= "dout_clkcmu_dpu_bus",
 };
 
 /* ---- CMU_PERIC0 -------------------------------------------------------- */
@@ -348,6 +416,9 @@ static const struct of_device_id exynos9810_cmu_of_match[] = {
 	{
 		.compatible = "samsung,exynos9810-cmu-top",
 		.data = &top_cmu_info,
+	}, {
+		.compatible = "samsung,exynos9810-cmu-dpu",
+		.data = &dpu_cmu_info,
 	}, {
 		.compatible = "samsung,exynos9810-cmu-fsys0",
 		.data = &fsys0_cmu_info,
