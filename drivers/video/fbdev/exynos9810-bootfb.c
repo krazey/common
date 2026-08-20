@@ -1005,6 +1005,25 @@ exynos9810_bootfb_find_fast_config(
 	return candidate;
 }
 
+static bool
+exynos9810_bootfb_has_visible_config(
+	const struct exynos9810_bootfb_config_data *data)
+{
+	unsigned int i;
+
+	for (i = 0; i < EXYNOS9810_BOOTFB_MAX_WINDOWS; i++) {
+		switch (data->config[i].state) {
+		case EXYNOS9810_WIN_DISABLED:
+		case EXYNOS9810_WIN_UPDATE:
+			break;
+		default:
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void
 exynos9810_bootfb_publish_stage_timings(
 	struct exynos9810_bootfb *bootfb,
@@ -1582,6 +1601,7 @@ exynos9810_bootfb_present(struct exynos9810_bootfb *bootfb,
 	bool damage_used = false;
 	bool auto_was_active = false;
 	bool fast_path = false;
+	bool native_scanout_retained = false;
 	bool updated = false;
 	int native_present_ret;
 	int native_release_index = -1;
@@ -1690,8 +1710,21 @@ native_fast_done:
 		;
 	}
 
+	/*
+	 * HWC blanks the display with an all-disabled configuration. Keep the
+	 * last Android buffer mapped instead of restoring the bootloader source
+	 * before the following power-mode transition.
+	 */
+	if (bootfb->native_present_enabled && !fast_config &&
+	    !exynos9810_bootfb_has_visible_config(&data)) {
+		native_scanout_retained = true;
+		dev_info_once(bootfb->dev,
+			      "E981D: retaining native scanout across blank\n");
+	}
+
 	/* A non-fast frame cannot remain on the previous native buffer. */
-	if (bootfb->native_present_enabled && !fast_config) {
+	if (bootfb->native_present_enabled && !fast_config &&
+	    !native_scanout_retained) {
 		atomic_inc(&bootfb->native_present_fallback_count);
 		native_present_ret =
 			exynos9810_bootfb_disable_native_present(bootfb);
@@ -1704,7 +1737,7 @@ native_fast_done:
 				native_present_ret);
 	}
 
-	if (!fast_path) {
+	if (!fast_path && !native_scanout_retained) {
 		damage_used = false;
 		scan_y = 0;
 		scan_rows = bootfb->height;
