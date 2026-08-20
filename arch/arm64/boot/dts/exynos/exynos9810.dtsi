@@ -168,6 +168,17 @@
 		clock-output-names = "cmgp_bus_bootclk";
 	};
 
+	dpu_bus_bootclk: dpu-bus-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		/*
+		 * Bootstrap metadata for the bus rate preserved by the
+		 * bootloader. Complete CMU_TOP modelling will replace this.
+		 */
+		clock-frequency = <400000000>;
+		clock-output-names = "dpu_bus_bootclk";
+	};
+
 	fsys0_bus_bootclk: fsys0-bus-boot-clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
@@ -505,6 +516,16 @@
 				     <GIC_SPI 283 IRQ_TYPE_LEVEL_HIGH>;
 			interrupt-names = "JOB", "MMU", "GPU";
 			power-domains = <&pd_g3d>;
+		};
+
+		cmu_dpu: clock-controller@16000000 {
+			compatible = "samsung,exynos9810-cmu-dpu";
+			reg = <0x16000000 0x8000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>,
+				 <&cmu_top CLK_GOUT_TOP_DPU_BUS>;
+			clock-names = "oscclk", "dout_clkcmu_dpu_bus";
 		};
 
 		cmu_cmgp: clock-controller@14200000 {

@@ -24,6 +24,7 @@ properties:
   compatible:
     enum:
       - samsung,exynos9810-cmu-cmgp
+      - samsung,exynos9810-cmu-dpu
       - samsung,exynos9810-cmu-fsys0
       - samsung,exynos9810-cmu-peric0
       - samsung,exynos9810-cmu-top
@@ -64,6 +65,28 @@ allOf:
           items:
             - const: oscclk
             - const: cmgp_bus_bootclk
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-cmu-dpu
+
+    then:
+      properties:
+        clocks:
+          minItems: 2
+          maxItems: 2
+          items:
+            - description: External reference clock
+            - description: CMU_DPU bus clock from CMU_TOP
+
+        clock-names:
+          minItems: 2
+          maxItems: 2
+          items:
+            - const: oscclk
+            - const: dout_clkcmu_dpu_bus
 
   - if:
       properties:
