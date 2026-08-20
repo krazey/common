@@ -19,6 +19,8 @@
 #include <linux/list.h>
 #include <linux/wait.h>
 #include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/sched.h>
 #include <linux/sched/clock.h>
 #include "acpm.h"
 #include "acpm_ipc.h"
@@ -470,6 +472,130 @@ static void apm_interrupt_gen(unsigned int id)
 	writel((1 << id) << 16, acpm_ipc->intr + INTGR0);
 }
 
+static int acpm_ipc_channel_owner(unsigned int channel_id)
+{
+	struct ipc_channel ipc_channel;
+	void __iomem *channels;
+	int i;
+
+	channels = acpm_ipc->sram_base + acpm_ipc->initdata->ipc_channels;
+	for (i = 0; i < acpm_ipc->initdata->num_ipc_channels; i++) {
+		memcpy_fromio(&ipc_channel,
+			      channels + i * sizeof(ipc_channel),
+			      sizeof(ipc_channel));
+		if (ipc_channel.id == channel_id)
+			return ipc_channel.owner;
+	}
+
+	return -ENOENT;
+}
+
+static int acpm_ipc_find_plugin(unsigned int id, struct plugin *plugin)
+{
+	void __iomem *plugins;
+	int i;
+
+	plugins = acpm_ipc->sram_base + acpm_ipc->initdata->plugins;
+	for (i = 0; i < acpm_ipc->initdata->num_plugins; i++) {
+		memcpy_fromio(plugin, plugins + i * sizeof(*plugin),
+			      sizeof(*plugin));
+		if (plugin->id == id)
+			return 0;
+	}
+
+	return -ENOENT;
+}
+
+static void acpm_ipc_plugin_name(const struct plugin *plugin, char *name,
+				 size_t size)
+{
+	if (!plugin->fw_name) {
+		strscpy(name, "built-in", size);
+		return;
+	}
+
+	memcpy_fromio(name, acpm_ipc->sram_base + plugin->fw_name, size - 1);
+	name[size - 1] = '\0';
+}
+
+static int acpm_ipc_attach_plugin(unsigned int channel_id,
+				  unsigned int plugin_id)
+{
+	struct ipc_config config = { };
+	u32 command[4] = { };
+
+	command[0] = BIT(ACPM_IPC_PROTOCOL_DP_A) |
+		      plugin_id << ACPM_IPC_PROTOCOL_ID;
+	config.cmd = command;
+	config.response = true;
+
+	return acpm_ipc_send_data_sync(channel_id, &config);
+}
+
+static void acpm_ipc_prepare_dvfs(struct device_node *node)
+{
+	unsigned int control_channel;
+	unsigned int dvfs_channel;
+	struct plugin plugin;
+	char name[32];
+	int owner;
+	int ret;
+
+	ret = of_property_read_u32(node, "samsung,dvfs-channel",
+				   &dvfs_channel);
+	if (ret)
+		return;
+
+	ret = of_property_read_u32(node, "samsung,plugin-channel",
+				   &control_channel);
+	if (ret) {
+		dev_warn(acpm_ipc->dev, "DVFS plugin channel is missing\n");
+		return;
+	}
+
+	owner = acpm_ipc_channel_owner(dvfs_channel);
+	if (owner < 0) {
+		dev_warn(acpm_ipc->dev,
+			 "DVFS channel %u has no plugin owner\n", dvfs_channel);
+		return;
+	}
+
+	ret = acpm_ipc_find_plugin(owner, &plugin);
+	if (ret) {
+		dev_warn(acpm_ipc->dev, "DVFS plugin %d is missing\n", owner);
+		return;
+	}
+
+	acpm_ipc_plugin_name(&plugin, name, sizeof(name));
+	dev_info(acpm_ipc->dev,
+		 "DVFS channel %u plugin %u (%s) attached=%u stay=%u\n",
+		 dvfs_channel, plugin.id, name, plugin.is_attached,
+		 plugin.stay_attached);
+
+	if (!plugin.is_attached) {
+		if (!plugin.base_addr) {
+			dev_warn(acpm_ipc->dev,
+				 "DVFS plugin %u has no firmware image\n",
+				 plugin.id);
+			return;
+		}
+
+		ret = acpm_ipc_attach_plugin(control_channel, plugin.id);
+		if (ret) {
+			dev_warn(acpm_ipc->dev,
+				 "failed to attach DVFS plugin %u: %d\n",
+				 plugin.id, ret);
+			return;
+		}
+
+		dev_info(acpm_ipc->dev, "DVFS plugin %u attached\n",
+			 plugin.id);
+	}
+
+	/* Reassert a request left pending across a warm reboot. */
+	apm_interrupt_gen(dvfs_channel);
+}
+
 static int enqueue_indirection_cmd(struct acpm_ipc_ch *channel,
 		struct ipc_config *cfg)
 {
@@ -558,6 +684,7 @@ int acpm_ipc_send_data(unsigned int channel_id, struct ipc_config *cfg)
 	int ret;
 	u64 timeout, now;
 	u32 retry_cnt = 0;
+	u32 command[3] = { };
 
 	if (!acpm_ipc || !cfg || !cfg->cmd ||
 	    channel_id >= acpm_ipc->num_channels)
@@ -575,15 +702,32 @@ int acpm_ipc_send_data(unsigned int channel_id, struct ipc_config *cfg)
 	if (tmp_index >= channel->tx_ch.len)
 		tmp_index = 0;
 
-	/* buffer full check */
-	UNTIL_EQUAL(true, tmp_index != __raw_readl(channel->tx_ch.rear), timeout_flag);
+	timeout = sched_clock() + IPC_TIMEOUT;
+	while (tmp_index == __raw_readl(channel->tx_ch.rear)) {
+		if (sched_clock() > timeout) {
+			timeout_flag = true;
+			break;
+		}
+		cpu_relax();
+	}
+
 	if (timeout_flag) {
-		acpm_log_print();
-		acpm_debug->debug_log_level = 1;
+		rear = __raw_readl(channel->tx_ch.rear);
+		if (!channel->stall_reported) {
+			channel->stall_reported = true;
+			memcpy(command, cfg->cmd,
+			       min_t(size_t, sizeof(command),
+				     channel->tx_ch.size));
+			acpm_log_print();
+			pr_err("ACPM channel %u stalled: %s tx=%u/%u len=%u cmd=%08x/%08x/%08x task=%s/%d\n",
+			       channel->id, channel->polling ? "poll" : "irq",
+			       rear, front, channel->tx_ch.len, command[0],
+			       command[1], command[2], current->comm, current->pid);
+		}
 		spin_unlock(&channel->tx_lock);
-		pr_err("[%s] tx buffer full! timeout!!!\n", __func__);
 		return -ETIMEDOUT;
 	}
+	channel->stall_reported = false;
 
 	if (++channel->seq_num == 64)
 		channel->seq_num = 1;
@@ -842,6 +986,8 @@ static int acpm_ipc_probe(struct platform_device *pdev)
 		queue_delayed_work(debug_logging_wq, &acpm_debug->periodic_work,
 				msecs_to_jiffies(10000));
 	}
+
+	acpm_ipc_prepare_dvfs(node);
 
 	return ret;
 }

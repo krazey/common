@@ -147,6 +147,8 @@
 		num-timestamps = <32>;
 		debug-log-level = <0>;
 		logging-period = <0>;
+		samsung,plugin-channel = <4>;
+		samsung,dvfs-channel = <5>;
 	};
 
 	acpm_dvfs: clock-controller {

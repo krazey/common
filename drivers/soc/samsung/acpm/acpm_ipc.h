@@ -38,6 +38,7 @@ struct acpm_ipc_ch {
 
 	struct completion wait;
 	bool polling;
+	bool stall_reported;
 };
 
 struct acpm_ipc_info {
