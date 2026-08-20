@@ -42,7 +42,7 @@ static int exynos9810_acpm_clk_xfer(struct exynos9810_acpm_clk *aclk,
 	config.cmd = command;
 	config.response = true;
 
-	ret = acpm_ipc_send_data(aclk->channel, &config);
+	ret = acpm_ipc_send_data_sync(aclk->channel, &config);
 	if (ret)
 		return ret;
 
@@ -76,6 +76,9 @@ static int exynos9810_acpm_clk_set_rate(struct clk_hw *hw,
 	struct exynos9810_acpm_clk *aclk = to_exynos9810_acpm_clk(hw);
 	u32 rate_khz = rate / 1000;
 	int ret;
+
+	if (rate == aclk->rate)
+		return 0;
 
 	ret = exynos9810_acpm_clk_xfer(aclk, rate_khz);
 	if (ret)
