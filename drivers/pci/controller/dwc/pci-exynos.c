@@ -64,9 +64,13 @@
 #define EXYNOS9810_PCIE_LINKDOWN_RESET	0x1b8
 #define EXYNOS9810_PCIE_LINKDOWN_MANUAL	BIT(1)
 #define EXYNOS9810_PCIE_CORE_RESET	0x1d0
+#define EXYNOS9810_PCIE_STATE_HISTORY	0x274
+#define EXYNOS9810_PCIE_HISTORY_ENABLE	GENMASK(1, 0)
 #define EXYNOS9810_PCIE_PCS_RESET	0x288
 #define EXYNOS9810_PCIE_PHY_RESET	0x28c
 #define EXYNOS9810_PCIE_MAC_RESET	0x290
+#define EXYNOS9810_PCIE_STATE_POWER_S	0x2bc
+#define EXYNOS9810_PCIE_STATE_POWER_M	0x2c0
 #define EXYNOS9810_PCIE_QCH_SELECT	0x2c8
 
 #define EXYNOS9810_PMU_PCIE_PHY		0x71c
@@ -257,6 +261,66 @@ static void exynos9810_pcie_phy_power_down(struct exynos_pcie *ep)
 	exynos_pcie_writel(ep->pcs_base, val | BIT(7), 0x104);
 }
 
+static int exynos9810_pcie_prepare_power_on(struct exynos_pcie *ep)
+{
+	int ret;
+
+	ret = regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_PCIE_PHY,
+				 BIT(0), BIT(0));
+	if (ret)
+		return ret;
+
+	exynos9810_pcie_phy_power_on(ep);
+
+	return 0;
+}
+
+static void exynos9810_pcie_enable_history(struct exynos_pcie *ep)
+{
+	void __iomem *elbi = ep->pci.elbi_base;
+
+	exynos_pcie_writel(elbi, 0, EXYNOS9810_PCIE_STATE_HISTORY);
+	exynos_pcie_writel(elbi, EXYNOS9810_PCIE_HISTORY_ENABLE,
+			   EXYNOS9810_PCIE_STATE_HISTORY);
+	exynos_pcie_writel(elbi, 0x200000,
+			   EXYNOS9810_PCIE_STATE_POWER_S);
+	exynos_pcie_writel(elbi, U32_MAX,
+			   EXYNOS9810_PCIE_STATE_POWER_M);
+}
+
+static void exynos9810_pcie_disable_history(struct exynos_pcie *ep)
+{
+	void __iomem *elbi = ep->pci.elbi_base;
+	u32 val;
+
+	val = exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_HISTORY);
+	val &= ~EXYNOS9810_PCIE_HISTORY_ENABLE;
+	exynos_pcie_writel(elbi, val, EXYNOS9810_PCIE_STATE_HISTORY);
+}
+
+static void exynos9810_pcie_log_power_state(struct exynos_pcie *ep)
+{
+	void __iomem *elbi = ep->pci.elbi_base;
+	int perst;
+	int perst_raw;
+	int rail;
+
+	rail = regulator_is_enabled(ep->vpcie3v3);
+	perst = gpiod_get_value_cansleep(ep->reset_gpio);
+	perst_raw = gpiod_get_raw_value_cansleep(ep->reset_gpio);
+
+	dev_info(ep->pci.dev,
+		 "E981D: WLAN PCIe controls rail=%d perst=%d/raw=%d\n",
+		 rail, perst, perst_raw);
+	dev_info(ep->pci.dev,
+		 "E981D: WLAN PCIe ELBI phy=%#x/%#x hist=%#x pwr=%#x/%#x\n",
+		 exynos_pcie_readl(ep->phy_base, 0x20 * 4),
+		 exynos_pcie_readl(ep->phy_base, 0x57 * 4),
+		 exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_HISTORY),
+		 exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_POWER_S),
+		 exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_POWER_M));
+}
+
 static int exynos9810_pcie_phy_init(struct exynos_pcie *ep)
 {
 	u32 val;
@@ -359,12 +423,6 @@ static int exynos9810_pcie_host_init(struct exynos_pcie *ep)
 	u32 val;
 	int ret;
 
-	ret = regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_PCIE_PHY,
-				 BIT(0), BIT(0));
-	if (ret)
-		return ret;
-
-	exynos9810_pcie_phy_power_on(ep);
 	exynos9810_pcie_set_rx_elecidle(ep, true);
 
 	exynos_pcie_writel(elbi, 0, EXYNOS9810_PCIE_CORE_RESET);
@@ -403,6 +461,7 @@ static void exynos9810_pcie_link_power_down(struct exynos_pcie *ep)
 		ep->irq_enabled = false;
 	}
 
+	exynos9810_pcie_disable_history(ep);
 	gpiod_set_value_cansleep(ep->reset_gpio, 1);
 	exynos_pcie_writel(ep->pci.elbi_base, 0, PCIE_APP_LTSSM_ENABLE);
 	exynos9810_pcie_phy_power_down(ep);
@@ -626,6 +685,12 @@ static int exynos9810_pcie_wlan_power_on(struct exynos_pcie *ep)
 	if (ret)
 		goto err_power_down;
 
+	ret = exynos9810_pcie_prepare_power_on(ep);
+	if (ret)
+		goto err_power_down;
+
+	exynos9810_pcie_enable_history(ep);
+
 	if (!ep->irq_enabled) {
 		enable_irq(pp->irq);
 		ep->irq_enabled = true;
@@ -640,6 +705,8 @@ static int exynos9810_pcie_wlan_power_on(struct exynos_pcie *ep)
 	ret = dw_pcie_setup_rc(pp);
 	if (ret)
 		goto err_power_down;
+
+	exynos9810_pcie_log_power_state(ep);
 
 	ret = exynos9810_pcie_start_link(ep);
 	if (ret)
