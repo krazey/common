@@ -304,6 +304,20 @@
 		clock-output-names = "dout_clkcmu_fsys0_usb30drd";
 	};
 
+	fsys1_bus_bootclk: fsys1-bus-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <200000000>;
+		clock-output-names = "dout_clkcmu_fsys1_bus";
+	};
+
+	fsys1_pcie_bootclk: fsys1-pcie-boot-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <26000000>;
+		clock-output-names = "dout_clkcmu_fsys1_pcie";
+	};
+
 	pmu-a55 {
 		compatible = "arm,cortex-a55-pmu";
 		interrupts = <GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>,
@@ -550,6 +564,17 @@
 			clock-names = "ref_clk";
 			#phy-cells = <0>;
 			samsung,pmu-syscon = <&pmu_system_controller 0x724>;
+		};
+
+		cmu_fsys1: clock-controller@11400000 {
+			compatible = "samsung,exynos9810-cmu-fsys1";
+			reg = <0x11400000 0x8000>;
+			#clock-cells = <1>;
+
+			clocks = <&oscclk>, <&fsys1_bus_bootclk>,
+				 <&fsys1_pcie_bootclk>;
+			clock-names = "oscclk", "dout_clkcmu_fsys1_bus",
+				      "dout_clkcmu_fsys1_pcie";
 		};
 
 		pinctrl_fsys1: pinctrl@11430000 {
