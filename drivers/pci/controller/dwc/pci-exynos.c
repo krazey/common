@@ -81,6 +81,7 @@
 
 struct exynos_pcie_data {
 	bool integrated_phy;
+	bool preserve_boot_clocks;
 };
 
 struct exynos_pcie_reg_value {
@@ -699,6 +700,7 @@ static const struct exynos_pcie_data exynos5433_pcie_data;
 
 static const struct exynos_pcie_data exynos9810_pcie_data = {
 	.integrated_phy = true,
+	.preserve_boot_clocks = true,
 };
 
 static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
@@ -779,9 +781,11 @@ static int exynos_pcie_probe(struct platform_device *pdev)
 	ep->pci.ops = &dw_pcie_ops;
 	platform_set_drvdata(pdev, ep);
 
-	ret = devm_clk_bulk_get_all_enabled(dev, &ep->clks);
-	if (ret < 0)
-		return ret;
+	if (!ep->data->preserve_boot_clocks) {
+		ret = devm_clk_bulk_get_all_enabled(dev, &ep->clks);
+		if (ret < 0)
+			return ret;
+	}
 
 	if (ep->data->integrated_phy)
 		ret = exynos9810_pcie_get_resources(ep, pdev);

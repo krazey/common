@@ -138,12 +138,6 @@ static const struct samsung_cmu_info fsys0_cmu_info __initconst = {
 #define CLK_CON_GAT_FSYS1_PCIE_SUBCTRL			0x2044
 #define CLK_CON_GAT_FSYS1_PCIE_PCS			0x2048
 #define CLK_CON_GAT_FSYS1_PCIE_SLV			0x204c
-#define DMYQCH_CON_FSYS1_PCIE_SOCPLL			0x3000
-#define QCH_CON_FSYS1_PCIE_APB				0x302c
-#define QCH_CON_FSYS1_PCIE_DBI				0x3030
-#define QCH_CON_FSYS1_PCIE_MSTR				0x3034
-#define QCH_CON_FSYS1_PCIE_PCS				0x3038
-#define QCH_CON_FSYS1_PCIE_PHY				0x303c
 
 static const unsigned long fsys1_clk_regs[] __initconst = {
 	PLL_CON0_MUX_CLKCMU_FSYS1_BUS_USER,
@@ -155,12 +149,6 @@ static const unsigned long fsys1_clk_regs[] __initconst = {
 	CLK_CON_GAT_FSYS1_PCIE_SUBCTRL,
 	CLK_CON_GAT_FSYS1_PCIE_PCS,
 	CLK_CON_GAT_FSYS1_PCIE_SLV,
-	DMYQCH_CON_FSYS1_PCIE_SOCPLL,
-	QCH_CON_FSYS1_PCIE_APB,
-	QCH_CON_FSYS1_PCIE_DBI,
-	QCH_CON_FSYS1_PCIE_MSTR,
-	QCH_CON_FSYS1_PCIE_PCS,
-	QCH_CON_FSYS1_PCIE_PHY,
 };
 
 PNAME(mout_fsys1_bus_user_p) = {
@@ -181,84 +169,27 @@ static const struct samsung_mux_clock fsys1_mux_clks[] __initconst = {
 };
 
 static const struct samsung_gate_clock fsys1_gate_clks[] __initconst = {
-	/* Match CAL's software-controlled Q-channel state. */
-	GATE(0, "gout_fsys1_pcie_socpll_qch_ignore",
-	     "mout_fsys1_pcie_user", DMYQCH_CON_FSYS1_PCIE_SOCPLL,
-	     2, CLK_IS_CRITICAL, 0),
-	GATE(0, "gout_fsys1_pcie_socpll_qch_mode",
-	     "gout_fsys1_pcie_socpll_qch_ignore",
-	     DMYQCH_CON_FSYS1_PCIE_SOCPLL, 0, CLK_IS_CRITICAL,
-	     CLK_GATE_SET_TO_DISABLE),
-	GATE(0, "gout_fsys1_pcie_socpll_qch",
-	     "gout_fsys1_pcie_socpll_qch_mode",
-	     DMYQCH_CON_FSYS1_PCIE_SOCPLL, 1, 0, 0),
-	GATE(0, "gout_fsys1_pcie_apb_qch_ignore",
-	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_APB,
-	     2, CLK_IS_CRITICAL, 0),
-	GATE(0, "gout_fsys1_pcie_apb_qch_mode",
-	     "gout_fsys1_pcie_apb_qch_ignore", QCH_CON_FSYS1_PCIE_APB,
-	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
-	GATE(0, "gout_fsys1_pcie_apb_qch",
-	     "gout_fsys1_pcie_apb_qch_mode", QCH_CON_FSYS1_PCIE_APB,
-	     1, 0, 0),
-	GATE(0, "gout_fsys1_pcie_dbi_qch_ignore",
-	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_DBI,
-	     2, CLK_IS_CRITICAL, 0),
-	GATE(0, "gout_fsys1_pcie_dbi_qch_mode",
-	     "gout_fsys1_pcie_dbi_qch_ignore", QCH_CON_FSYS1_PCIE_DBI,
-	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
-	GATE(0, "gout_fsys1_pcie_dbi_qch",
-	     "gout_fsys1_pcie_dbi_qch_mode", QCH_CON_FSYS1_PCIE_DBI,
-	     1, 0, 0),
-	GATE(0, "gout_fsys1_pcie_mstr_qch_ignore",
-	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_MSTR,
-	     2, CLK_IS_CRITICAL, 0),
-	GATE(0, "gout_fsys1_pcie_mstr_qch_mode",
-	     "gout_fsys1_pcie_mstr_qch_ignore", QCH_CON_FSYS1_PCIE_MSTR,
-	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
-	GATE(0, "gout_fsys1_pcie_mstr_qch",
-	     "gout_fsys1_pcie_mstr_qch_mode", QCH_CON_FSYS1_PCIE_MSTR,
-	     1, 0, 0),
-	GATE(0, "gout_fsys1_pcie_pcs_qch_ignore",
-	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_PCS,
-	     2, CLK_IS_CRITICAL, 0),
-	GATE(0, "gout_fsys1_pcie_pcs_qch_mode",
-	     "gout_fsys1_pcie_pcs_qch_ignore", QCH_CON_FSYS1_PCIE_PCS,
-	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
-	GATE(0, "gout_fsys1_pcie_pcs_qch",
-	     "gout_fsys1_pcie_pcs_qch_mode", QCH_CON_FSYS1_PCIE_PCS,
-	     1, 0, 0),
-	GATE(0, "gout_fsys1_pcie_phy_qch_ignore",
-	     "gout_fsys1_pcie_socpll_qch", QCH_CON_FSYS1_PCIE_PHY,
-	     2, CLK_IS_CRITICAL, 0),
-	GATE(0, "gout_fsys1_pcie_phy_qch_mode",
-	     "gout_fsys1_pcie_phy_qch_ignore", QCH_CON_FSYS1_PCIE_PHY,
-	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
-	GATE(0, "gout_fsys1_pcie_phy_qch",
-	     "gout_fsys1_pcie_phy_qch_mode", QCH_CON_FSYS1_PCIE_PHY,
-	     1, 0, 0),
-
 	GATE(CLK_GOUT_FSYS1_PCIE_PHY_REF,
-	     "gout_fsys1_pcie_phy_ref", "gout_fsys1_pcie_phy_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_PHY_REF, 21, 0, 0),
+	     "gout_fsys1_pcie_phy_ref", "mout_fsys1_pcie_user",
+	     CLK_CON_GAT_FSYS1_PCIE_PHY_REF, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CLK_GOUT_FSYS1_PCIE_DBI,
-	     "gout_fsys1_pcie_dbi", "gout_fsys1_pcie_dbi_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_DBI, 21, 0, 0),
+	     "gout_fsys1_pcie_dbi", "mout_fsys1_bus_user",
+	     CLK_CON_GAT_FSYS1_PCIE_DBI, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CLK_GOUT_FSYS1_PCIE_PHY_APB,
-	     "gout_fsys1_pcie_phy_apb", "gout_fsys1_pcie_apb_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_PHY_APB, 21, 0, 0),
+	     "gout_fsys1_pcie_phy_apb", "mout_fsys1_bus_user",
+	     CLK_CON_GAT_FSYS1_PCIE_PHY_APB, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CLK_GOUT_FSYS1_PCIE_MSTR,
-	     "gout_fsys1_pcie_mstr", "gout_fsys1_pcie_mstr_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_MSTR, 21, 0, 0),
+	     "gout_fsys1_pcie_mstr", "mout_fsys1_bus_user",
+	     CLK_CON_GAT_FSYS1_PCIE_MSTR, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CLK_GOUT_FSYS1_PCIE_SUBCTRL,
-	     "gout_fsys1_pcie_subctrl", "gout_fsys1_pcie_apb_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_SUBCTRL, 21, 0, 0),
+	     "gout_fsys1_pcie_subctrl", "mout_fsys1_bus_user",
+	     CLK_CON_GAT_FSYS1_PCIE_SUBCTRL, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CLK_GOUT_FSYS1_PCIE_PCS,
-	     "gout_fsys1_pcie_pcs", "gout_fsys1_pcie_pcs_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_PCS, 21, 0, 0),
+	     "gout_fsys1_pcie_pcs", "mout_fsys1_bus_user",
+	     CLK_CON_GAT_FSYS1_PCIE_PCS, 21, CLK_IGNORE_UNUSED, 0),
 	GATE(CLK_GOUT_FSYS1_PCIE_SLV,
-	     "gout_fsys1_pcie_slv", "gout_fsys1_pcie_dbi_qch",
-	     CLK_CON_GAT_FSYS1_PCIE_SLV, 21, 0, 0),
+	     "gout_fsys1_pcie_slv", "mout_fsys1_bus_user",
+	     CLK_CON_GAT_FSYS1_PCIE_SLV, 21, CLK_IGNORE_UNUSED, 0),
 };
 
 static const struct samsung_cmu_info fsys1_cmu_info __initconst = {
