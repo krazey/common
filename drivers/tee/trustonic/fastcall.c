@@ -26,7 +26,6 @@
 #include <linux/uaccess.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
-#include <linux/arm-smccc.h>
 
 #ifdef CONFIG_ARM64
 #include <asm/cputype.h>
@@ -178,6 +177,8 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 {
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	bool trace_mem;
+	u64 trace_mpidr;
+	unsigned int trace_cpu;
 #endif
 
 	if (!mc_fc_generic)
@@ -186,13 +187,15 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	trace_mem = mc_fc_generic->as_in.cmd == MC_FC_MEM_TRACE;
 	if (trace_mem) {
-		fastcall_diag.count++;
-		fastcall_diag.cpu = raw_smp_processor_id();
+		trace_cpu = raw_smp_processor_id();
 #ifdef CONFIG_ARM64
-		fastcall_diag.mpidr = read_cpuid_mpidr();
+		trace_mpidr = read_cpuid_mpidr();
 #else
-		fastcall_diag.mpidr = fastcall_diag.cpu;
+		trace_mpidr = trace_cpu;
 #endif
+		fastcall_diag.count++;
+		fastcall_diag.cpu = trace_cpu;
+		fastcall_diag.mpidr = trace_mpidr;
 		fastcall_diag.in = mc_fc_generic->as_in;
 	}
 #endif
@@ -208,25 +211,26 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 #else /* MC_SMC_FASTCALL */
 	{
 #ifdef CONFIG_ARM64
-		struct arm_smccc_res res;
+		register u64 reg0 __asm__("x0") = mc_fc_generic->as_in.cmd;
+		register u64 reg1 __asm__("x1") =
+			mc_fc_generic->as_in.param[0];
+		register u64 reg2 __asm__("x2") =
+			mc_fc_generic->as_in.param[1];
+		register u64 reg3 __asm__("x3") =
+			mc_fc_generic->as_in.param[2];
 
-		arm_smccc_smc(mc_fc_generic->as_in.cmd,
-			      mc_fc_generic->as_in.param[0],
-			      mc_fc_generic->as_in.param[1],
-			      mc_fc_generic->as_in.param[2],
-			      0, 0, 0, 0, &res);
-		mc_fc_generic->as_out.resp = res.a0;
-		mc_fc_generic->as_out.ret = res.a1;
-		mc_fc_generic->as_out.param[0] = res.a2;
-		mc_fc_generic->as_out.param[1] = res.a3;
-#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
-		if (trace_mem) {
-			fastcall_diag.out.resp = res.a0;
-			fastcall_diag.out.ret = res.a1;
-			fastcall_diag.out.param[0] = res.a2;
-			fastcall_diag.out.param[1] = res.a3;
-		}
-#endif
+		/*
+		 * According to AARCH64 SMC Calling Convention (ARM DEN 0028A),
+		 * section 3.1: registers x4-x17 are unpredictable/scratch
+		 * registers. So tell the compiler that the SMC may clobber them.
+		 */
+		__asm__ volatile(
+			"smc #0\n"
+			: "+r"(reg0), "+r"(reg1), "+r"(reg2), "+r"(reg3)
+			:
+			: "x4", "x5", "x6", "x7", "x8", "x9", "x10", "x11",
+			  "x12", "x13", "x14", "x15", "x16", "x17"
+		);
 #else /* CONFIG_ARM64 */
 		/* SMC expect values in r0-r3 */
 		register u32 reg0 __asm__("r0") = mc_fc_generic->as_in.cmd;
@@ -262,11 +266,20 @@ static inline int _smc(union mc_fc_generic *mc_fc_generic)
 #endif /* !CONFIG_ARM64 */
 
 		/* set response */
-#ifndef CONFIG_ARM64
 		mc_fc_generic->as_out.resp     = reg0;
 		mc_fc_generic->as_out.ret      = reg1;
 		mc_fc_generic->as_out.param[0] = reg2;
 		mc_fc_generic->as_out.param[1] = reg3;
+
+#ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
+		if (trace_mem) {
+			fastcall_diag.out.resp = mc_fc_generic->as_out.resp;
+			fastcall_diag.out.ret = mc_fc_generic->as_out.ret;
+			fastcall_diag.out.param[0] =
+				mc_fc_generic->as_out.param[0];
+			fastcall_diag.out.param[1] =
+				mc_fc_generic->as_out.param[1];
+		}
 #endif
 	}
 	return 0;
@@ -392,26 +405,6 @@ static int nq_cpu_down_prep(unsigned int cpu)
 {
 	mc_dev_info("CPU #%d is going to die", cpu);
 	return mc_cpu_offline(cpu);
-}
-
-static int nq_cpu_online(unsigned int cpu)
-{
-#ifdef CONFIG_SECURE_OS_BOOSTER_API
-	mc_cpu_online(cpu);
-	return 0;
-#else
-	int ret;
-
-	if (cpu != NONBOOT_LITTLE_CORE)
-		return 0;
-
-	ret = mc_switch_core(cpu);
-	if (!ret)
-		return 0;
-
-	mc_dev_err("cannot move secure OS to CPU%d: %d", cpu, ret);
-	return ret < 0 ? ret : -EIO;
-#endif
 }
 #endif
 #endif /* MC_FASTCALL_WORKER_THREAD */
@@ -613,14 +606,20 @@ int mc_fastcall_init(void)
 	/* ExySp */
 	set_user_nice(fastcall_thread, MIN_NICE);
 
-	/* this thread MUST run on CPU 0 at startup */
-	ret = nq_set_cpus_allowed(fastcall_thread, CPU_MASK_CPU0);
+	/*
+	 * This thread must run on CPU0 at startup. Modern kthreads restore
+	 * housekeeping affinity on their first wake unless a preferred mask
+	 * was installed while the thread was stopped.
+	 */
+	ret = kthread_affine_preferred(fastcall_thread, cpumask_of(0));
 	WRITE_ONCE(fastcall_bind_ret, ret);
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	fastcall_diag.affinity_ret = ret;
 #endif
-	if (ret)
-		mc_dev_err("cannot bind fastcall thread to CPU 0: %d", ret);
+	if (ret) {
+		mc_dev_err("cannot prefer CPU0 for fastcall thread: %d", ret);
+		goto err_thread;
+	}
 
 	wake_up_process(fastcall_thread);
 #ifdef TBASE_CORE_SWITCHER
@@ -629,7 +628,7 @@ int mc_fastcall_init(void)
 #else
 	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
 					"tee/trustonic:online",
-					nq_cpu_online, nq_cpu_down_prep);
+					NULL, nq_cpu_down_prep);
 #endif
 	if (ret < 0) {
 		mc_dev_err("cpu online callback setup failed: %d", ret);
@@ -762,6 +761,7 @@ int mc_fc_info(u32 ext_info_id, u32 *state, u32 *ext_info)
 int mc_fc_mem_trace(phys_addr_t buffer, u32 size)
 {
 	union mc_fc_generic mc_fc_generic;
+	int ret;
 
 	memset(&mc_fc_generic, 0, sizeof(mc_fc_generic));
 	mc_fc_generic.as_in.cmd = MC_FC_MEM_TRACE;
@@ -771,7 +771,13 @@ int mc_fc_mem_trace(phys_addr_t buffer, u32 size)
 #endif
 	mc_fc_generic.as_in.param[2] = size;
 	mc_fastcall(&mc_fc_generic);
-	return convert_fc_ret(mc_fc_generic.as_out.ret);
+	ret = convert_fc_ret(mc_fc_generic.as_out.ret);
+	if (ret)
+		mc_dev_err("MEM_TRACE buffer=%pa size=%u response=%#x result=%#x",
+			   &buffer, size, mc_fc_generic.as_out.resp,
+			   mc_fc_generic.as_out.ret);
+
+	return ret;
 }
 
 int mc_fc_nsiq(void)

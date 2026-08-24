@@ -12,12 +12,12 @@
  * GNU General Public License for more details.
  */
 
-#include <linux/workqueue.h>
+#include <linux/debugfs.h>
+#include <linux/device.h>
 #include <linux/mutex.h>
 #include <linux/slab.h>
-#include <linux/device.h>
-#include <linux/debugfs.h>
 #include <linux/version.h>
+#include <linux/workqueue.h>
 
 #include "main.h"
 #include "fastcall.h"
@@ -216,9 +216,8 @@ void mc_logging_run(void)
 
 int mc_logging_start(void)
 {
-	int ret = mc_fc_mem_trace(virt_to_phys((void *)(log_ctx.trace_page)),
+	int ret = mc_fc_mem_trace(virt_to_phys((void *)log_ctx.trace_page),
 				  BIT(LOG_BUF_ORDER) * PAGE_SIZE);
-
 	if (ret) {
 		mc_dev_err("shared traces setup failed");
 		return ret;
