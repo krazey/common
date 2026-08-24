@@ -312,13 +312,6 @@
 		clock-output-names = "dout_clkcmu_fsys1_bus";
 	};
 
-	fsys1_pcie_bootclk: fsys1-pcie-boot-clock {
-		compatible = "fixed-clock";
-		#clock-cells = <0>;
-		clock-frequency = <100000000>;
-		clock-output-names = "dout_clkcmu_fsys1_pcie";
-	};
-
 	pmu-a55 {
 		compatible = "arm,cortex-a55-pmu";
 		interrupts = <GIC_SPI 144 IRQ_TYPE_LEVEL_HIGH>,
@@ -573,7 +566,7 @@
 			#clock-cells = <1>;
 
 			clocks = <&oscclk>, <&fsys1_bus_bootclk>,
-				 <&fsys1_pcie_bootclk>;
+				 <&cmu_top CLK_DOUT_TOP_FSYS1_PCIE>;
 			clock-names = "oscclk", "dout_clkcmu_fsys1_bus",
 				      "dout_clkcmu_fsys1_pcie";
 		};
