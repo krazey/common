@@ -148,6 +148,13 @@ firmware_class.path=/vendor/firmware bootconfig";
 		pinctrl-names = "default";
 	};
 
+	wlan {
+		compatible = "samsung,brcm-wlan";
+		host-wake-gpios = <&gpa0 7 GPIO_ACTIVE_HIGH>;
+		pinctrl-0 = <&wlan_host_wake>;
+		pinctrl-names = "default";
+	};
+
 	s2mps18: pmic {
 		compatible = "samsung,s2mps18-regulator";
 		acpm-ipc-channel = <2>;
@@ -304,6 +311,15 @@ firmware_class.path=/vendor/firmware bootconfig";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+
+	wlan_host_wake: wlan-host-wake-pins {
+		samsung,pins = "gpa0-7";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_DOWN>;
+		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_PREV>;
+		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_DOWN>;
 	};
 };
 

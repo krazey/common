@@ -1,0 +1,47 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/net/wireless/samsung,brcm-wlan.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Samsung Exynos Broadcom DHD platform data
+
+maintainers:
+  - Mathias Gluszczynski <admin@krazey.de>
+
+description:
+  Samsung Exynos devices using the Broadcom DHD driver expose an
+  out-of-band interrupt from the WLAN endpoint.  WLAN power and PCIe
+  enumeration are controlled by the PCIe host and its regulator.
+
+properties:
+  compatible:
+    const: samsung,brcm-wlan
+
+  host-wake-gpios:
+    description:
+      GPIO asserted by the WLAN endpoint to wake the host.
+    maxItems: 1
+
+  pinctrl-names:
+    items:
+      - const: default
+
+  pinctrl-0: true
+
+required:
+  - compatible
+  - host-wake-gpios
+
+additionalProperties: false
+
+examples:
+  - |
+    #include <dt-bindings/gpio/gpio.h>
+
+    wlan {
+        compatible = "samsung,brcm-wlan";
+        host-wake-gpios = <&gpa0 7 GPIO_ACTIVE_HIGH>;
+    };
+
+...
