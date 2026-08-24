@@ -28,6 +28,7 @@
 
 #include <wldev_common.h>
 #include <bcmutils.h>
+#include <bcmstdlib_s.h>
 #ifdef WL_CFG80211
 #include <wl_cfg80211.h>
 #include <wl_cfgscan.h>

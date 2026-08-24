@@ -69,7 +69,7 @@ wl_bad_ap_mngr_add_entry(wl_bad_ap_mngr_t *bad_ap_mngr, wl_bad_ap_info_t *bad_ap
 #define WL_BAD_AP_INFO_FMT_ITEM_CNT	15u
 
 static inline void
-wl_bad_ap_mngr_tm2ts(struct timespec *ts, const struct tm tm)
+wl_bad_ap_mngr_tm2ts(struct timespec64 *ts, const struct tm tm)
 {
 	ts->tv_sec = mktime(tm.tm_year, tm.tm_mon, tm.tm_mday, tm.tm_hour, tm.tm_min, tm.tm_sec);
 	ts->tv_nsec = 0;
@@ -85,8 +85,8 @@ wl_bad_ap_mngr_timecmp(void *priv, struct list_head *a, struct list_head *b)
 {
 	int ret;
 
-	struct timespec ts1;
-	struct timespec ts2;
+	struct timespec64 ts1;
+	struct timespec64 ts2;
 
 	wl_bad_ap_info_entry_t *e1 = CONTAINEROF(a, wl_bad_ap_info_entry_t, list);
 	wl_bad_ap_info_entry_t *e2 = CONTAINEROF(b, wl_bad_ap_info_entry_t, list);
@@ -94,7 +94,7 @@ wl_bad_ap_mngr_timecmp(void *priv, struct list_head *a, struct list_head *b)
 	wl_bad_ap_mngr_tm2ts(&ts1, e1->bad_ap.tm);
 	wl_bad_ap_mngr_tm2ts(&ts2, e2->bad_ap.tm);
 
-	ret = timespec_compare((const struct timespec *)&ts1, (const struct timespec *)&ts2);
+	ret = timespec64_compare((const struct timespec64 *)&ts1, (const struct timespec64 *)&ts2);
 
 	return ret;
 }
@@ -223,8 +223,6 @@ static int
 wl_bad_ap_mngr_fread(struct bcm_cfg80211 *cfg, const char *fname)
 {
 	int ret = BCME_ERROR;
-
-	mm_segment_t fs;
 	struct file *fp = NULL;
 
 	if (fname == NULL) {
@@ -232,9 +230,6 @@ wl_bad_ap_mngr_fread(struct bcm_cfg80211 *cfg, const char *fname)
 		return ret;
 	}
 	mutex_lock(&cfg->bad_ap_mngr.fs_lock);
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	fp = filp_open(fname, O_RDONLY, 0);
 	if (IS_ERR(fp)) {
@@ -250,7 +245,6 @@ fail:
 	if (fp) {
 		filp_close(fp, NULL);
 	}
-	set_fs(fs);
 
 	mutex_unlock(&cfg->bad_ap_mngr.fs_lock);
 
@@ -261,8 +255,6 @@ static int
 wl_bad_ap_mngr_fwrite(struct bcm_cfg80211 *cfg, const char *fname)
 {
 	int ret = BCME_ERROR;
-
-	mm_segment_t fs;
 	struct file *fp = NULL;
 
 	int len = 0;
@@ -279,9 +271,6 @@ wl_bad_ap_mngr_fwrite(struct bcm_cfg80211 *cfg, const char *fname)
 	}
 
 	mutex_lock(&cfg->bad_ap_mngr.fs_lock);
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	fp = filp_open(fname, O_CREAT | O_RDWR | O_TRUNC,  0666);
 	if (IS_ERR(fp)) {
@@ -326,7 +315,6 @@ fail:
 	if (fp) {
 		filp_close(fp, NULL);
 	}
-	set_fs(fs);
 	mutex_unlock(&cfg->bad_ap_mngr.fs_lock);
 
 	return ret;
@@ -452,7 +440,7 @@ wl_event_adps_bad_ap_mngr(struct bcm_cfg80211 *cfg, void *data)
 	wl_bad_ap_info_entry_t *entry;
 	wl_bad_ap_info_t temp;
 #if !defined(DHD_ADPS_BAM_EXPORT)
-	struct timespec ts;
+	struct timespec64 ts;
 #endif	/* !DHD_ADPS_BAM_EXPORT */
 
 	if (event_data->version != WL_EVENT_ADPS_VER_1) {

@@ -35,6 +35,7 @@
 #include <dhd_linux.h>
 #include <bcmdevs.h>
 #include <bcmdevs_legacy.h>    /* need to still support chips no longer in trunk firmware */
+#include <bcmstdlib_s.h>
 
 #include <linux/fcntl.h>
 #include <linux/fs.h>
@@ -708,16 +709,9 @@ char version_old_info[MAX_VERSION_LEN];
 int write_filesystem(struct file *file, unsigned long long offset,
 	unsigned char* data, unsigned int size)
 {
-	mm_segment_t oldfs;
-	int ret;
+	loff_t pos = offset;
 
-	oldfs = get_fs();
-	set_fs(KERNEL_DS);
-
-	ret = dhd_vfs_write(file, data, size, &offset);
-
-	set_fs(oldfs);
-	return ret;
+	return kernel_write(file, data, size, &pos);
 }
 
 uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_ver)

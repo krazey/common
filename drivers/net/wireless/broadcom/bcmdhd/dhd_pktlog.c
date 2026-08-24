@@ -23,6 +23,8 @@
  * $Id$
  */
 
+#include <linux/vmalloc.h>
+
 #include <typedefs.h>
 #include <osl.h>
 #include <bcmutils.h>
@@ -1230,13 +1232,10 @@ dhd_pktlog_dump_write_file(dhd_pub_t *dhdp)
 {
 	struct file *w_pcap_fp = NULL;
 	uint32 file_mode;
-	mm_segment_t old_fs;
 	char pktlogdump_path[128];
 	int ret = BCME_OK;
 
 	dhd_pktlog_get_filename(dhdp, pktlogdump_path, 128);
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
 	file_mode = O_CREAT | O_WRONLY;
 
 	w_pcap_fp = dhd_filp_open(pktlogdump_path, file_mode, 0664);
@@ -1263,8 +1262,6 @@ fail:
 	if (!IS_ERR(w_pcap_fp)) {
 		dhd_filp_close(w_pcap_fp, NULL);
 	}
-
-	set_fs(old_fs);
 
 #ifdef DHD_DUMP_MNGR
 	if (ret >= 0) {

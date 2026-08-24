@@ -24,7 +24,7 @@
 #####################
 
 DHDCFLAGS += -DBCMUTILS_ERR_CODES -DUSE_NEW_RSPEC_DEFS
-DHDCFLAGS += -Wall -Werror -Wstrict-prototypes -Dlinux -DLINUX -DBCMDRIVER      \
+DHDCFLAGS += -Wall -Wstrict-prototypes -Dlinux -DLINUX -DBCMDRIVER      \
         -DBCMDONGLEHOST -DUNRELEASEDCHIP -DBCMDMA32 -DBCMFILEIMAGE      \
         -DDHDTHREAD -DDHD_BCMEVENTS -DSHOW_EVENTS -DWLP2P      \
         -DWIFI_ACT_FRAME -DARP_OFFLOAD_SUPPORT -DKEEP_ALIVE -DCSCAN     \
@@ -124,7 +124,7 @@ endif
 	# Disable watchdog thread
 	DHDCFLAGS += -DCUSTOM_DHD_WATCHDOG_MS=0
 	# Runtime PM
-ifneq ($(CONFIG_SOC_EXYNOS9810),y)
+ifneq ($(CONFIG_BCMDHD_EXYNOS9810),y)
 	DHDCFLAGS += -DDHD_PCIE_RUNTIMEPM
 endif
 	DHDCFLAGS += -DCHECK_TRAP_ROT
@@ -528,9 +528,9 @@ else
   DHDCFLAGS += -DDHD_CAP_PLATFORM="\"exynos \""
 endif
 
-ifeq ($(filter y,$(CONFIG_SOC_EXYNOS9810) $(CONFIG_SOC_EXYNOS9820) \
+ifeq ($(filter y,$(CONFIG_BCMDHD_EXYNOS9810) $(CONFIG_SOC_EXYNOS9820) \
 		$(CONFIG_SOC_EXYNOS9830) $(CONFIG_SOC_EXYNOS2100) $(CONFIG_SOC_EXYNOS1000)),y)
-ifeq ($(CONFIG_SOC_EXYNOS9810),y)
+ifeq ($(CONFIG_BCMDHD_EXYNOS9810),y)
   DHDCFLAGS := $(filter-out -DDHDTCPACK_SUPPRESS,$(DHDCFLAGS))
 endif
 ifeq ($(filter y,$(CONFIG_SOC_EXYNOS9820) $(CONFIG_SOC_EXYNOS9830) \
@@ -809,9 +809,9 @@ ifeq ($(CONFIG_ARCH_MSM),y)
   DHDCFLAGS := $(filter-out -DDHDTCPACK_SUPPRESS,$(DHDCFLAGS))
 endif
 
-ifeq ($(filter y,$(CONFIG_SOC_EXYNOS9810) $(CONFIG_SOC_EXYNOS9820) \
+ifeq ($(filter y,$(CONFIG_BCMDHD_EXYNOS9810) $(CONFIG_SOC_EXYNOS9820) \
 		$(CONFIG_SOC_EXYNOS9830) $(CONFIG_SOC_EXYNOS2100) $(CONFIG_SOC_EXYNOS1000)),y)
-ifeq ($(CONFIG_SOC_EXYNOS9810),y)
+ifeq ($(CONFIG_BCMDHD_EXYNOS9810),y)
   DHDCFLAGS := $(filter-out -DDHDTCPACK_SUPPRESS,$(DHDCFLAGS))
 endif
 ifeq ($(filter y,$(CONFIG_SOC_EXYNOS9820) $(CONFIG_SOC_EXYNOS9830) \
@@ -1090,7 +1090,7 @@ ifeq ($(CONFIG_ARCH_MSM),y)
   DHDCFLAGS := $(filter-out -DDHDTCPACK_SUPPRESS,$(DHDCFLAGS))
 endif
 
-ifeq ($(CONFIG_SOC_EXYNOS9810),y)
+ifeq ($(CONFIG_BCMDHD_EXYNOS9810),y)
   DHDCFLAGS := $(filter-out -DDHDTCPACK_SUPPRESS,$(DHDCFLAGS))
   DHDCFLAGS += -DUSE_DMA_LOCK
   DHDCFLAGS += -DDHD_MAP_LOGGING
@@ -1160,7 +1160,7 @@ ifeq ($(CONFIG_ARCH_MSM8998),y)
   DHDCFLAGS += -DUSE_SMMU_ARCH_MSM
 endif
 
-ifeq ($(filter y,$(CONFIG_ARCH_MSM8996) $(CONFIG_ARCH_MSM8998) $(CONFIG_SOC_EXYNOS8890) $(CONFIG_SOC_EXYNOS8895) $(CONFIG_ARCH_TEGRA) $(CONFIG_SOC_EXYNOS9810) $(CONFIG_ARCH_SDM845)),y)
+ifeq ($(filter y,$(CONFIG_ARCH_MSM8996) $(CONFIG_ARCH_MSM8998) $(CONFIG_SOC_EXYNOS8890) $(CONFIG_SOC_EXYNOS8895) $(CONFIG_ARCH_TEGRA) $(CONFIG_BCMDHD_EXYNOS9810) $(CONFIG_ARCH_SDM845)),y)
 # Disable SOFTAP_SEND_HANGEVT
   DHDCFLAGS := $(filter-out -DSOFTAP_SEND_HANGEVT,$(DHDCFLAGS))
 # Enable LQCM
@@ -1170,7 +1170,7 @@ endif
 # Generate .softap.info
   DHDCFLAGS += -DGEN_SOFTAP_INFO_FILE
 
-ifeq ($(filter y,$(CONFIG_WLAN_GREAT) $(CONFIG_SEC_GREATQLTE_PROJECT) $(CONFIG_SOC_EXYNOS9810) $(CONFIG_ARCH_SDM845)),y)
+ifeq ($(filter y,$(CONFIG_WLAN_GREAT) $(CONFIG_SEC_GREATQLTE_PROJECT) $(CONFIG_BCMDHD_EXYNOS9810) $(CONFIG_ARCH_SDM845)),y)
 # Debugaility
   DHDCFLAGS += -DDHD_EVENT_LOG_FILTER
   DHDCFLAGS += -DDHD_PKT_LOGGING
@@ -1753,12 +1753,6 @@ endif
 endif
 endif # chipset supported SDIO only
 
-ifeq ($(DRIVER_TYPE),y)
-  # Use kernel strlcpy() implementation instead of one, defined in bcmstdlib_s.c
-  DHDCFLAGS += -DBCM_USE_PLATFORM_STRLCPY
-endif
-
-
 #############################
 # Platform dependent feature
 #############################
@@ -1801,7 +1795,7 @@ endif
 ifeq ($(CONFIG_SOC_EXYNOS8890),y)
   DHDCFLAGS += -Wno-date-time
 endif
-ifeq ($(CONFIG_SOC_EXYNOS9810),y)
+ifeq ($(CONFIG_BCMDHD_EXYNOS9810),y)
   DHDCFLAGS += -Wno-date-time
 endif
 ifeq ($(CONFIG_ARCH_MSM8996),y)
@@ -1869,7 +1863,7 @@ DHDCFLAGS += -DBCMPCIE_OOB_HOST_WAKE
 DHDCFLAGS += -DEXYNOS_PCIE_MODULE_PATCH
 obj-$(CONFIG_MACH_EXSOM7420) += dhd_custom_exynos.o dhd_custom_memprealloc.o
 endif
-ifneq ($(CONFIG_SOC_EXYNOS9810),)
+ifneq ($(CONFIG_BCMDHD_EXYNOS9810),)
 DHDCFLAGS += -DDHD_OF_SUPPORT
 DHDCFLAGS += -DBCMPCIE_OOB_HOST_WAKE
 endif
@@ -1939,23 +1933,17 @@ DHDCFLAGS := $(filter-out -DDHD_STATUS_LOGGING,$(DHDCFLAGS))
 DHD_ANDROID_OFILES := $(filter-out dhd_rtt.o,$(DHD_ANDROID_OFILES))
 endif
 
+ifeq ($(CONFIG_BCMDHD_EXYNOS9810),y)
+DHDCFLAGS := $(filter-out -DSET_PCIE_IRQ_CPU_CORE,$(DHDCFLAGS))
+endif
+
 ifneq ($(filter -DDHD_FILE_DUMP_EVENT,$(DHDCFLAGS)),)
 DHDCFLAGS := $(filter-out -DDHD_DUMP_MNGR ,$(DHDCFLAGS))
 endif
 
-##############################################################
-# dhd_sec_feature.h
-ifeq ($(objtree),.)
-ifeq ($(srctree),.)
-DHDCFLAGS += -include $(src)/"dhd_sec_feature.h"
-else
-DHDCFLAGS += -include $(srctree)/$(src)/"dhd_sec_feature.h"
-endif
-else
-# Jetson uses absolute objtree
-DHDCFLAGS += -include $(src)/"dhd_sec_feature.h"
-endif
-##############################################################
+BCMDHD_SRC := $(srctree)/drivers/net/wireless/broadcom/bcmdhd
+DHDCFLAGS += -include $(BCMDHD_SRC)/dhd_sec_feature.h
+DHDCFLAGS += -include $(BCMDHD_SRC)/include/bcmstdlib_s.h
 
 #########
 # Others
@@ -1963,21 +1951,17 @@ endif
 
 #EXTRA_LDFLAGS += --strip-debug
 
-EXTRA_CFLAGS += $(DHDCFLAGS) -DDHD_DEBUG
-EXTRA_CFLAGS += -DDHD_COMPILED=\"$(src)\"
-ifeq ($(objtree),.)
-ifeq ($(srctree),.)
-EXTRA_CFLAGS += -I$(src)/include/ -I$(src)/
-else
-EXTRA_CFLAGS += -I$(srctree)/$(src)/include/ -I$(srctree)/$(src)/
-endif
-else
-# Jeston use absoulte objtree
-EXTRA_CFLAGS += -I$(src)/include/ -I$(src)/
-endif
-EXTRA_CFLAGS += $(call cc-option, -Wunused-but-set-variable)
-EXTRA_CFLAGS += $(call cc-option, -Wmaybe-uninitialized)
-KBUILD_CFLAGS += -I$(LINUXDIR)/include -I$(CURDIR)
+ccflags-y += $(DHDCFLAGS) -DDHD_DEBUG
+ccflags-y += -DDHD_COMPILED=\"$(src)\"
+ccflags-y += -I$(BCMDHD_SRC)/include -I$(BCMDHD_SRC)
+ccflags-y += $(call cc-option, -Wunused-but-set-variable)
+ccflags-y += $(call cc-option, -Wmaybe-uninitialized)
+ccflags-y += -Wno-array-bounds
+ccflags-y += -Wno-date-time
+ccflags-y += -Wno-implicit-fallthrough
+ccflags-y += -Wno-missing-declarations
+ccflags-y += -Wno-missing-prototypes
+ccflags-y += -Wno-macro-redefined
 
 DHDOFILES := dhd_pno.o dhd_common.o dhd_ip.o dhd_custom_gpio.o dhd_custom_sec.o \
 	dhd_linux.o dhd_linux_sched.o dhd_cfg80211.o dhd_linux_wq.o aiutils.o bcmevent.o \
@@ -1993,7 +1977,7 @@ DHDOFILES := dhd_pno.o dhd_common.o dhd_ip.o dhd_custom_gpio.o dhd_custom_sec.o 
 _dhd_lx_mk_dir := $(dir $(lastword $(MAKEFILE_LIST)))
 -include $(_dhd_lx_mk_dir)bcminternal-android.mk
 
-EXTRA_CFLAGS += $(BCMINTERNAL_DFLAGS)
+ccflags-y += $(BCMINTERNAL_DFLAGS)
 DHDOFILES += $(BCMINTERNAL_DHDOFILES)
 
 ifeq ($(BUS_IFACE_SDIO),y)
@@ -2015,6 +1999,10 @@ DHDOFILES += wb_regon_coordinator.o
 endif
 
 DHDOFILES += $(DHD_ANDROID_OFILES)
+
+ifeq ($(CONFIG_BCMDHD_EXYNOS9810),y)
+DHDOFILES += dhd_custom_exynos.o
+endif
 
 ifeq ($(DRIVER_TYPE),m)
 DHDOFILES += dhd_custom_memprealloc.o

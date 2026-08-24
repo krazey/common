@@ -56,6 +56,7 @@
 #include <linux/kconfig.h>
 #endif
 #include <linux/module.h>
+#include <linux/sched/clock.h>
 
 #if (LINUX_VERSION_CODE < KERNEL_VERSION(2, 3, 0))
 /* __NO_VERSION__ must be defined for all linkables except one in 2.2 */
@@ -190,9 +191,6 @@ typedef irqreturn_t(*FN_ISR) (int irq, void *dev_id, struct pt_regs *ptregs);
 #include <uapi/linux/sched/types.h>
 #endif /* LINUX_VERS >= 4.11.0 */
 
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
-#include <net/lib80211.h>
-#endif
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 29)
 #include <linux/ieee80211.h>
 #else
@@ -387,8 +385,8 @@ extern void timer_cb_compat(struct timer_list *tl);
 #define timer_set_private(timer_compat, priv) (timer_compat)->arg = priv
 #define timer_expires(timer_compat) (timer_compat)->timer.expires
 
-#define del_timer(t) del_timer(&((t)->timer))
-#define del_timer_sync(t) del_timer_sync(&((t)->timer))
+#define del_timer(t) timer_delete(&((t)->timer))
+#define del_timer_sync(t) timer_delete_sync(&((t)->timer))
 #define timer_pending(t) timer_pending(&((t)->timer))
 #define add_timer(t) add_timer(&((t)->timer))
 #define mod_timer(t, j) mod_timer(&((t)->timer), j)
