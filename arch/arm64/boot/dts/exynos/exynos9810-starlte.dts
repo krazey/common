@@ -143,7 +143,6 @@ firmware_class.path=/vendor/firmware bootconfig";
 		gpio = <&gpg0 5 GPIO_ACTIVE_HIGH>;
 		enable-active-high;
 		startup-delay-us = <200000>;
-		regulator-boot-on;
 		pinctrl-0 = <&wlan_reg_on>;
 		pinctrl-names = "default";
 	};
