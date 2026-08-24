@@ -315,7 +315,7 @@
 	fsys1_pcie_bootclk: fsys1-pcie-boot-clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
-		clock-frequency = <26000000>;
+		clock-frequency = <100000000>;
 		clock-output-names = "dout_clkcmu_fsys1_pcie";
 	};
 
