@@ -135,6 +135,19 @@ firmware_class.path=/vendor/firmware bootconfig";
 		regulator-boot-on;
 	};
 
+	vpcie3v3: regulator-wlan {
+		compatible = "regulator-fixed";
+		regulator-name = "wlan-reg-on";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+		gpio = <&gpg0 5 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <200000>;
+		regulator-boot-on;
+		pinctrl-0 = <&wlan_reg_on>;
+		pinctrl-names = "default";
+	};
+
 	s2mps18: pmic {
 		compatible = "samsung,s2mps18-regulator";
 		acpm-ipc-channel = <2>;
@@ -171,6 +184,11 @@ firmware_class.path=/vendor/firmware bootconfig";
 		width-mm = <64>;
 		height-mm = <132>;
 	};
+};
+
+&pcie0 {
+	vpcie3v3-supply = <&vpcie3v3>;
+	status = "okay";
 };
 
 &oscclk {
@@ -286,5 +304,15 @@ firmware_class.path=/vendor/firmware bootconfig";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_EINT>;
 		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
 		samsung,pin-drv = <EXYNOS5420_PIN_DRV_LV1>;
+	};
+};
+
+&pinctrl_peric0 {
+	wlan_reg_on: wlan-reg-on-pins {
+		samsung,pins = "gpg0-5";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_NONE>;
+		samsung,pin-drv = <EXYNOS7_PIN_DRV_LV4>;
+		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_PREV>;
 	};
 };
