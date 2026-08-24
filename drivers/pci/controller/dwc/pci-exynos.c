@@ -70,8 +70,22 @@
 #define EXYNOS9810_SYSREG_PCIE_CTRL	0x1044
 #define EXYNOS9810_SYSREG_PCIE_LANES	0x1050
 
+#define EXYNOS9810_PCIE_AUX_CLK_FREQ	0xb40
+#define EXYNOS9810_PCIE_L1_SUBSTATES	0xb44
+#define EXYNOS9810_PCIE_AUX_CLK_26MHZ	0x1a
+#define EXYNOS9810_PCIE_L1_SUB_VAL	0xea
+#define EXYNOS9810_PCIE_DEVICE_ID	0xecec
+
+#define EXYNOS9810_PCIE_LINK_RETRIES	10
+#define EXYNOS9810_PCIE_LINK_POLLS	2000
+
 struct exynos_pcie_data {
 	bool integrated_phy;
+};
+
+struct exynos_pcie_reg_value {
+	u32 offset;
+	u32 value;
 };
 
 struct exynos_pcie {
@@ -82,6 +96,7 @@ struct exynos_pcie {
 	const struct exynos_pcie_data	*data;
 	void __iomem			*phy_base;
 	void __iomem			*pcs_base;
+	void __iomem			*ia_base;
 	struct regmap			*pmureg;
 	struct regmap			*sysreg;
 	struct gpio_desc		*reset_gpio;
@@ -90,6 +105,8 @@ struct exynos_pcie {
 	bool				vpcie3v3_enabled;
 	bool				supplies_enabled;
 };
+
+static void exynos_pcie_enable_irq_pulse(struct exynos_pcie *ep);
 
 static void exynos_pcie_writel(void __iomem *base, u32 val, u32 reg)
 {
@@ -122,6 +139,66 @@ static const u32 exynos9810_pcie_phy_trsv[] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40,
 	0x05, 0x85, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
+
+static const struct exynos_pcie_reg_value exynos9810_pcie_ia_sequence[] = {
+	{ 0x010, 0x0000000b },
+	{ 0x040, 0x0002ffff },
+	{ 0x100, 0x50000004 },
+	{ 0x104, 0x0000ffff },
+	{ 0x108, 0x20930014 },
+	{ 0x10c, 0x0000000a },
+	{ 0x110, 0x40030044 },
+	{ 0x114, 0x00000001 },
+	{ 0x118, 0x50000004 },
+	{ 0x11c, 0x00000020 },
+	{ 0x120, 0x209101ec },
+	{ 0x124, 0x00000020 },
+	{ 0x128, 0x400200d0 },
+	{ 0x12c, 0x000000c0 },
+	{ 0x130, 0x400200d0 },
+	{ 0x134, 0x00000080 },
+	{ 0x138, 0x400200d0 },
+	{ 0x13c, 0x00000000 },
+	{ 0x140, 0x100101ec },
+	{ 0x144, 0x00000020 },
+	{ 0x148, 0x70000004 },
+	{ 0x14c, 0x00000010 },
+	{ 0x150, 0x40030010 },
+	{ 0x154, 0x0001000b },
+	{ 0x158, 0x80000000 },
+	{ 0x15c, 0x00000000 },
+};
+
+static void exynos9810_pcie_set_rx_elecidle(struct exynos_pcie *ep,
+					    bool ignore)
+{
+	u32 val;
+
+	val = exynos_pcie_readl(ep->pcs_base, 0xec);
+	if (ignore)
+		val |= BIT(3);
+	else
+		val &= ~BIT(3);
+	exynos_pcie_writel(ep->pcs_base, val, 0xec);
+}
+
+static void exynos9810_pcie_config_ia(struct exynos_pcie *ep)
+{
+	unsigned int i;
+
+	exynos_pcie_writel(ep->pci.elbi_base, 0x10, 0x34);
+	exynos_pcie_writel(ep->ia_base, 0x116a0000, 0x30);
+	exynos_pcie_writel(ep->ia_base, 0x116d0000, 0x34);
+	exynos_pcie_writel(ep->ia_base, 0x116c0000, 0x38);
+	exynos_pcie_writel(ep->ia_base, 0x11680000, 0x3c);
+
+	for (i = 0; i < ARRAY_SIZE(exynos9810_pcie_ia_sequence); i++)
+		exynos_pcie_writel(ep->ia_base,
+				   exynos9810_pcie_ia_sequence[i].value,
+				   exynos9810_pcie_ia_sequence[i].offset);
+
+	exynos_pcie_writel(ep->ia_base, 1, 0);
+}
 
 static void exynos9810_pcie_toggle_reset(struct exynos_pcie *ep, u32 reg,
 					 unsigned int final_delay)
@@ -216,6 +293,7 @@ static int exynos9810_pcie_host_init(struct exynos_pcie *ep)
 		return ret;
 
 	exynos9810_pcie_phy_power_on(ep);
+	exynos9810_pcie_set_rx_elecidle(ep, true);
 
 	exynos_pcie_writel(elbi, 0, EXYNOS9810_PCIE_CORE_RESET);
 	fsleep(20);
@@ -238,6 +316,8 @@ static int exynos9810_pcie_host_init(struct exynos_pcie *ep)
 	ret = exynos9810_pcie_phy_init(ep);
 	if (ret)
 		gpiod_set_value_cansleep(ep->reset_gpio, 1);
+	else
+		exynos9810_pcie_config_ia(ep);
 
 	return ret;
 }
@@ -314,9 +394,125 @@ static void exynos_pcie_deassert_core_reset(struct exynos_pcie *ep)
 	exynos_pcie_writel(pci->elbi_base, 0, PCIE_APP_INIT_RESET);
 }
 
+static void exynos9810_pcie_setup_rc(struct exynos_pcie *ep)
+{
+	struct dw_pcie *pci = &ep->pci;
+	u8 pcie_cap;
+	u8 pm_cap;
+	u32 val;
+	u16 val16;
+
+	pcie_cap = dw_pcie_find_capability(pci, PCI_CAP_ID_EXP);
+	pm_cap = dw_pcie_find_capability(pci, PCI_CAP_ID_PM);
+
+	dw_pcie_dbi_ro_wr_en(pci);
+	dw_pcie_writew_dbi(pci, PCI_VENDOR_ID, PCI_VENDOR_ID_SAMSUNG);
+	dw_pcie_writew_dbi(pci, PCI_DEVICE_ID,
+			   EXYNOS9810_PCIE_DEVICE_ID);
+
+	if (pcie_cap) {
+		val = dw_pcie_readl_dbi(pci, pcie_cap + PCI_EXP_LNKCAP);
+		val &= ~(PCI_EXP_LNKCAP_L1EL | PCI_EXP_LNKCAP_MLW |
+			 PCI_EXP_LNKCAP_SLS);
+		val |= (0x7 << 15) | BIT(4);
+		val |= pci->max_link_speed & PCI_EXP_LNKCAP_SLS;
+		dw_pcie_writel_dbi(pci, pcie_cap + PCI_EXP_LNKCAP, val);
+	}
+
+	dw_pcie_writel_dbi(pci, EXYNOS9810_PCIE_AUX_CLK_FREQ,
+			   EXYNOS9810_PCIE_AUX_CLK_26MHZ);
+	dw_pcie_writel_dbi(pci, EXYNOS9810_PCIE_L1_SUBSTATES,
+			   EXYNOS9810_PCIE_L1_SUB_VAL);
+
+	if (pm_cap)
+		dw_pcie_writew_dbi(pci, pm_cap + PCI_PM_CTRL, 0);
+
+	if (pcie_cap) {
+		val16 = dw_pcie_readw_dbi(pci,
+					  pcie_cap + PCI_EXP_LNKCTL);
+		val16 |= PCI_EXP_LNKCTL_RL;
+		dw_pcie_writew_dbi(pci, pcie_cap + PCI_EXP_LNKCTL,
+				   val16);
+
+		val16 = dw_pcie_readw_dbi(pci,
+					  pcie_cap + PCI_EXP_LNKCTL2);
+		val16 &= ~PCI_EXP_LNKCTL2_TLS;
+		val16 |= pci->max_link_speed & PCI_EXP_LNKCTL2_TLS;
+		dw_pcie_writew_dbi(pci, pcie_cap + PCI_EXP_LNKCTL2,
+				   val16);
+	}
+
+	dw_pcie_dbi_ro_wr_dis(pci);
+}
+
+static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
+{
+	struct dw_pcie *pci = &ep->pci;
+	unsigned int attempt;
+	unsigned int count;
+	u32 val;
+	int ret;
+
+	for (attempt = 0; attempt < EXYNOS9810_PCIE_LINK_RETRIES;
+	     attempt++) {
+		if (attempt) {
+			gpiod_set_value_cansleep(ep->reset_gpio, 1);
+			exynos_pcie_writel(pci->elbi_base, 0,
+					   PCIE_APP_LTSSM_ENABLE);
+
+			ret = exynos9810_pcie_host_init(ep);
+			if (ret)
+				return ret;
+
+			ret = dw_pcie_setup_rc(&pci->pp);
+			if (ret)
+				return ret;
+		}
+
+		exynos9810_pcie_setup_rc(ep);
+		exynos9810_pcie_set_rx_elecidle(ep, false);
+
+		val = exynos_pcie_readl(pci->elbi_base, PCIE_SW_WAKE);
+		val &= ~PCIE_BUS_EN;
+		exynos_pcie_writel(pci->elbi_base, val, PCIE_SW_WAKE);
+		exynos_pcie_writel(pci->elbi_base,
+				   PCIE_ELBI_LTSSM_ENABLE,
+				   PCIE_APP_LTSSM_ENABLE);
+
+		for (count = 0; count < EXYNOS9810_PCIE_LINK_POLLS;
+		     count++) {
+			val = exynos_pcie_readl(pci->elbi_base,
+						PCIE_ELBI_RDLH_LINKUP);
+			val &= GENMASK(4, 0);
+			if (val >= 0x0d && val <= 0x14) {
+				exynos_pcie_enable_irq_pulse(ep);
+				dev_info(pci->dev,
+					 "link trained on attempt %u\n",
+					 attempt + 1);
+				return 0;
+			}
+			fsleep(10);
+		}
+
+		dev_warn(pci->dev,
+			 "link attempt %u failed, LTSSM=0x%x\n",
+			 attempt + 1, val);
+	}
+
+	/*
+	 * Leave the final LTSSM attempt active. The common DWC code will
+	 * classify and report the terminal link state.
+	 */
+	return 0;
+}
+
 static int exynos_pcie_start_link(struct dw_pcie *pci)
 {
+	struct exynos_pcie *ep = to_exynos_pcie(pci);
 	u32 val;
+
+	if (ep->data->integrated_phy)
+		return exynos9810_pcie_start_link(ep);
 
 	val = exynos_pcie_readl(pci->elbi_base, PCIE_SW_WAKE);
 	val &= ~PCIE_BUS_EN;
@@ -516,6 +712,10 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 	phy = devm_platform_ioremap_resource_byname(pdev, "phy");
 	if (IS_ERR(phy))
 		return PTR_ERR(phy);
+
+	ep->ia_base = devm_platform_ioremap_resource_byname(pdev, "ia");
+	if (IS_ERR(ep->ia_base))
+		return PTR_ERR(ep->ia_base);
 
 	ep->pcs_base = phy;
 	ep->phy_base = phy + SZ_4K;
