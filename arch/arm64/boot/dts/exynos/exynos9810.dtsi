@@ -584,6 +584,12 @@
 			compatible = "samsung,exynos9810-pmu",
 				     "samsung,exynos7-pmu", "syscon";
 			reg = <0x14060000 0x10000>;
+			samsung,core-cmu-syscon = <&core_cmu>;
+			samsung,core-sysreg-syscon = <&core_sysreg>;
+			samsung,cpucl0-cmu-syscon = <&cpucl0_cmu>;
+			samsung,cpucl0-sysreg-syscon = <&cpucl0_sysreg>;
+			samsung,cpucl1-cmu-syscon = <&cpucl1_cmu>;
+			samsung,cpucl1-sysreg-syscon = <&cpucl1_sysreg>;
 			samsung,pmu-intr-gen-syscon = <&pmu_intr_gen>;
 
 			reboot-mode {
@@ -712,6 +718,36 @@
 		pinctrl_aud: pinctrl@17c60000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x17c60000 0x1000>;
+		};
+
+		core_sysreg: system-controller@1a010000 {
+			compatible = "samsung,exynos9810-core-sysreg", "syscon";
+			reg = <0x1a010000 0x1000>;
+		};
+
+		core_cmu: system-controller@1a020000 {
+			compatible = "samsung,exynos9810-core-cmu", "syscon";
+			reg = <0x1a020000 0x1000>;
+		};
+
+		cpucl0_cmu: system-controller@1d000000 {
+			compatible = "samsung,exynos9810-cpucl0-cmu", "syscon";
+			reg = <0x1d000000 0x1000>;
+		};
+
+		cpucl0_sysreg: system-controller@1d010000 {
+			compatible = "samsung,exynos9810-cpucl0-sysreg", "syscon";
+			reg = <0x1d010000 0x1000>;
+		};
+
+		cpucl1_cmu: system-controller@1d100000 {
+			compatible = "samsung,exynos9810-cpucl1-cmu", "syscon";
+			reg = <0x1d100000 0x1000>;
+		};
+
+		cpucl1_sysreg: system-controller@1d110000 {
+			compatible = "samsung,exynos9810-cpucl1-sysreg", "syscon";
+			reg = <0x1d110000 0x1000>;
 		};
 	};
 
