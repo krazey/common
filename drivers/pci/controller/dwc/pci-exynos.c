@@ -109,6 +109,14 @@
 #define EXYNOS9810_CMU_FSYS1_PHY_QCH	0x303c
 #define EXYNOS9810_CMU_FSYS1_IA_QCH	0x3054
 
+#define EXYNOS9810_CMU_TOP_BASE		0x1a240000
+#define EXYNOS9810_CMU_TOP_SHARED2_LOCK	0x000c
+#define EXYNOS9810_CMU_TOP_SHARED2_CON0	0x0220
+#define EXYNOS9810_CMU_TOP_PCIE_MUX	0x1070
+#define EXYNOS9810_CMU_TOP_PCIE_DIV	0x1868
+#define EXYNOS9810_CMU_TOP_SHARED2_DIV2	0x18ec
+#define EXYNOS9810_CMU_TOP_PCIE_GATE	0x2074
+
 struct exynos_pcie_data {
 	bool integrated_phy;
 	bool preserve_boot_clocks;
@@ -129,6 +137,7 @@ struct exynos_pcie {
 	void __iomem			*pcs_base;
 	void __iomem			*ia_base;
 	void __iomem			*cmu_base;
+	void __iomem			*top_cmu_base;
 	struct regmap			*pmureg;
 	struct regmap			*sysreg;
 	struct gpio_desc		*reset_gpio;
@@ -346,6 +355,7 @@ static void exynos9810_pcie_log_link_state(struct exynos_pcie *ep,
 {
 	struct dw_pcie *pci = &ep->pci;
 	void __iomem *cmu = ep->cmu_base;
+	void __iomem *top = ep->top_cmu_base;
 	void __iomem *elbi = pci->elbi_base;
 	u32 pmu_phy = 0;
 	u32 pmu_wake = 0;
@@ -363,6 +373,18 @@ static void exynos9810_pcie_log_link_state(struct exynos_pcie *ep,
 	dev_info(pci->dev,
 		 "E981D: WLAN PCIe %s PMU=%#x/%#x SYSREG=%#x/%#x/%#x\n",
 		 stage, pmu_phy, pmu_wake, sys_share, sys_ctrl, sys_lanes);
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s TOP pll=%#x/%#x div2=%#x\n",
+		 stage,
+		 readl(top + EXYNOS9810_CMU_TOP_SHARED2_LOCK),
+		 readl(top + EXYNOS9810_CMU_TOP_SHARED2_CON0),
+		 readl(top + EXYNOS9810_CMU_TOP_SHARED2_DIV2));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s TOP mux=%#x div=%#x gate=%#x\n",
+		 stage,
+		 readl(top + EXYNOS9810_CMU_TOP_PCIE_MUX),
+		 readl(top + EXYNOS9810_CMU_TOP_PCIE_DIV),
+		 readl(top + EXYNOS9810_CMU_TOP_PCIE_GATE));
 	dev_info(pci->dev,
 		 "E981D: WLAN PCIe %s CMU mux=%#x/%#x leaf=%#x/%#x/%#x\n",
 		 stage, readl(cmu + EXYNOS9810_CMU_FSYS1_BUS_MUX),
@@ -1125,6 +1147,12 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 	if (!ep->cmu_base)
 		return dev_err_probe(dev, -ENOMEM,
 				     "failed to map FSYS1 CMU\n");
+
+	ep->top_cmu_base = devm_ioremap(dev, EXYNOS9810_CMU_TOP_BASE,
+					SZ_32K);
+	if (!ep->top_cmu_base)
+		return dev_err_probe(dev, -ENOMEM,
+				     "failed to map TOP CMU\n");
 
 	ep->pcs_base = phy;
 	ep->phy_base = phy + SZ_4K;
