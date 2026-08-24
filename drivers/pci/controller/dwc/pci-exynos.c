@@ -465,6 +465,7 @@ static int exynos9810_pcie_phy_init(struct exynos_pcie *ep)
 	val |= GENMASK(7, 6);
 	exynos_pcie_writel(ep->pcs_base, val, 0xd0);
 	fsleep(20);
+	val = exynos_pcie_readl(ep->pcs_base, 0xd0);
 
 	val &= ~GENMASK(7, 6);
 	val |= BIT(7);
