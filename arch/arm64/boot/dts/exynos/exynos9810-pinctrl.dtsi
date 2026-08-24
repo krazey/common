@@ -407,6 +407,16 @@
 		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_UP>;
 	};
 
+	pcie0_clkreq_idle: pcie0-clkreq-idle-pins {
+		samsung,pins = "gpf2-0";
+		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;
+		samsung,pin-pud = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-drv = <3>;
+		samsung,pin-con-pdn = <EXYNOS_PIN_PDN_PREV>;
+		samsung,pin-pud-pdn = <EXYNOS_PIN_PULL_UP>;
+		samsung,pin-val = <1>;
+	};
+
 	pcie0_perst: pcie0-perst-pins {
 		samsung,pins = "gpf2-2";
 		samsung,pin-function = <EXYNOS_PIN_FUNC_OUTPUT>;

@@ -193,7 +193,9 @@ firmware_class.path=/vendor/firmware bootconfig";
 };
 
 &pcie0 {
+	pinctrl-names = "default", "idle";
 	pinctrl-0 = <&pcie0_clkreq &pcie0_perst &pcie_wake>;
+	pinctrl-1 = <&pcie0_clkreq_idle &pcie0_perst &pcie_wake>;
 	vpcie3v3-supply = <&vpcie3v3>;
 	status = "okay";
 };
