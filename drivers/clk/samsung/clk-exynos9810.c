@@ -17,6 +17,7 @@
 
 #define CLKS_NR_TOP		(CLK_GOUT_TOP_DPU_BUS + 1)
 #define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
+#define CLKS_NR_FSYS1		(CLK_GOUT_FSYS1_PCIE_SLV + 1)
 #define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI3_PCLK + 1)
 #define CLKS_NR_CMGP		(CLK_GOUT_CMGP_USI3_PCLK + 1)
 #define CLKS_NR_DPU		(CLK_GOUT_DPU_SYSMMU_DPUD1_QCH + 1)
@@ -124,6 +125,151 @@ static const struct samsung_cmu_info fsys0_cmu_info __initconst = {
 	.clk_regs		= fsys0_clk_regs,
 	.nr_clk_regs		= ARRAY_SIZE(fsys0_clk_regs),
 	.clk_name		= "dout_clkcmu_fsys0_bus",
+};
+
+/* ---- CMU_FSYS1 -------------------------------------------------------- */
+
+#define PLL_CON0_MUX_CLKCMU_FSYS1_BUS_USER		0x0100
+#define PLL_CON0_MUX_CLKCMU_FSYS1_PCIE_USER		0x0180
+#define CLK_CON_GAT_FSYS1_PCIE_PHY_REF			0x2000
+#define CLK_CON_GAT_FSYS1_PCIE_DBI			0x2038
+#define CLK_CON_GAT_FSYS1_PCIE_PHY_APB			0x203c
+#define CLK_CON_GAT_FSYS1_PCIE_MSTR			0x2040
+#define CLK_CON_GAT_FSYS1_PCIE_SUBCTRL			0x2044
+#define CLK_CON_GAT_FSYS1_PCIE_PCS			0x2048
+#define CLK_CON_GAT_FSYS1_PCIE_SLV			0x204c
+#define DMYQCH_CON_FSYS1_PCIE_SOCPLL			0x3000
+#define QCH_CON_FSYS1_PCIE_APB				0x302c
+#define QCH_CON_FSYS1_PCIE_DBI				0x3030
+#define QCH_CON_FSYS1_PCIE_MSTR				0x3034
+#define QCH_CON_FSYS1_PCIE_PCS				0x3038
+#define QCH_CON_FSYS1_PCIE_PHY				0x303c
+
+static const unsigned long fsys1_clk_regs[] __initconst = {
+	PLL_CON0_MUX_CLKCMU_FSYS1_BUS_USER,
+	PLL_CON0_MUX_CLKCMU_FSYS1_PCIE_USER,
+	CLK_CON_GAT_FSYS1_PCIE_PHY_REF,
+	CLK_CON_GAT_FSYS1_PCIE_DBI,
+	CLK_CON_GAT_FSYS1_PCIE_PHY_APB,
+	CLK_CON_GAT_FSYS1_PCIE_MSTR,
+	CLK_CON_GAT_FSYS1_PCIE_SUBCTRL,
+	CLK_CON_GAT_FSYS1_PCIE_PCS,
+	CLK_CON_GAT_FSYS1_PCIE_SLV,
+	DMYQCH_CON_FSYS1_PCIE_SOCPLL,
+	QCH_CON_FSYS1_PCIE_APB,
+	QCH_CON_FSYS1_PCIE_DBI,
+	QCH_CON_FSYS1_PCIE_MSTR,
+	QCH_CON_FSYS1_PCIE_PCS,
+	QCH_CON_FSYS1_PCIE_PHY,
+};
+
+PNAME(mout_fsys1_bus_user_p) = {
+	"oscclk", "dout_clkcmu_fsys1_bus"
+};
+
+PNAME(mout_fsys1_pcie_user_p) = {
+	"oscclk", "dout_clkcmu_fsys1_pcie"
+};
+
+static const struct samsung_mux_clock fsys1_mux_clks[] __initconst = {
+	MUX(CLK_MOUT_FSYS1_BUS_USER, "mout_fsys1_bus_user",
+	    mout_fsys1_bus_user_p, PLL_CON0_MUX_CLKCMU_FSYS1_BUS_USER,
+	    4, 1),
+	MUX(CLK_MOUT_FSYS1_PCIE_USER, "mout_fsys1_pcie_user",
+	    mout_fsys1_pcie_user_p, PLL_CON0_MUX_CLKCMU_FSYS1_PCIE_USER,
+	    4, 1),
+};
+
+static const struct samsung_gate_clock fsys1_gate_clks[] __initconst = {
+	/* Match CAL's software-controlled Q-channel state. */
+	GATE(0, "gout_fsys1_pcie_socpll_qch_ignore",
+	     "mout_fsys1_pcie_user", DMYQCH_CON_FSYS1_PCIE_SOCPLL,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_fsys1_pcie_socpll_qch_mode",
+	     "gout_fsys1_pcie_socpll_qch_ignore",
+	     DMYQCH_CON_FSYS1_PCIE_SOCPLL, 0, CLK_IS_CRITICAL,
+	     CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_fsys1_pcie_socpll_qch",
+	     "gout_fsys1_pcie_socpll_qch_mode",
+	     DMYQCH_CON_FSYS1_PCIE_SOCPLL, 1, 0, 0),
+	GATE(0, "gout_fsys1_pcie_apb_qch_ignore",
+	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_APB,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_fsys1_pcie_apb_qch_mode",
+	     "gout_fsys1_pcie_apb_qch_ignore", QCH_CON_FSYS1_PCIE_APB,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_fsys1_pcie_apb_qch",
+	     "gout_fsys1_pcie_apb_qch_mode", QCH_CON_FSYS1_PCIE_APB,
+	     1, 0, 0),
+	GATE(0, "gout_fsys1_pcie_dbi_qch_ignore",
+	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_DBI,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_fsys1_pcie_dbi_qch_mode",
+	     "gout_fsys1_pcie_dbi_qch_ignore", QCH_CON_FSYS1_PCIE_DBI,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_fsys1_pcie_dbi_qch",
+	     "gout_fsys1_pcie_dbi_qch_mode", QCH_CON_FSYS1_PCIE_DBI,
+	     1, 0, 0),
+	GATE(0, "gout_fsys1_pcie_mstr_qch_ignore",
+	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_MSTR,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_fsys1_pcie_mstr_qch_mode",
+	     "gout_fsys1_pcie_mstr_qch_ignore", QCH_CON_FSYS1_PCIE_MSTR,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_fsys1_pcie_mstr_qch",
+	     "gout_fsys1_pcie_mstr_qch_mode", QCH_CON_FSYS1_PCIE_MSTR,
+	     1, 0, 0),
+	GATE(0, "gout_fsys1_pcie_pcs_qch_ignore",
+	     "mout_fsys1_bus_user", QCH_CON_FSYS1_PCIE_PCS,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_fsys1_pcie_pcs_qch_mode",
+	     "gout_fsys1_pcie_pcs_qch_ignore", QCH_CON_FSYS1_PCIE_PCS,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_fsys1_pcie_pcs_qch",
+	     "gout_fsys1_pcie_pcs_qch_mode", QCH_CON_FSYS1_PCIE_PCS,
+	     1, 0, 0),
+	GATE(0, "gout_fsys1_pcie_phy_qch_ignore",
+	     "gout_fsys1_pcie_socpll_qch", QCH_CON_FSYS1_PCIE_PHY,
+	     2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_fsys1_pcie_phy_qch_mode",
+	     "gout_fsys1_pcie_phy_qch_ignore", QCH_CON_FSYS1_PCIE_PHY,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(0, "gout_fsys1_pcie_phy_qch",
+	     "gout_fsys1_pcie_phy_qch_mode", QCH_CON_FSYS1_PCIE_PHY,
+	     1, 0, 0),
+
+	GATE(CLK_GOUT_FSYS1_PCIE_PHY_REF,
+	     "gout_fsys1_pcie_phy_ref", "gout_fsys1_pcie_phy_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_PHY_REF, 21, 0, 0),
+	GATE(CLK_GOUT_FSYS1_PCIE_DBI,
+	     "gout_fsys1_pcie_dbi", "gout_fsys1_pcie_dbi_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_DBI, 21, 0, 0),
+	GATE(CLK_GOUT_FSYS1_PCIE_PHY_APB,
+	     "gout_fsys1_pcie_phy_apb", "gout_fsys1_pcie_apb_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_PHY_APB, 21, 0, 0),
+	GATE(CLK_GOUT_FSYS1_PCIE_MSTR,
+	     "gout_fsys1_pcie_mstr", "gout_fsys1_pcie_mstr_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_MSTR, 21, 0, 0),
+	GATE(CLK_GOUT_FSYS1_PCIE_SUBCTRL,
+	     "gout_fsys1_pcie_subctrl", "gout_fsys1_pcie_apb_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_SUBCTRL, 21, 0, 0),
+	GATE(CLK_GOUT_FSYS1_PCIE_PCS,
+	     "gout_fsys1_pcie_pcs", "gout_fsys1_pcie_pcs_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_PCS, 21, 0, 0),
+	GATE(CLK_GOUT_FSYS1_PCIE_SLV,
+	     "gout_fsys1_pcie_slv", "gout_fsys1_pcie_dbi_qch",
+	     CLK_CON_GAT_FSYS1_PCIE_SLV, 21, 0, 0),
+};
+
+static const struct samsung_cmu_info fsys1_cmu_info __initconst = {
+	.mux_clks		= fsys1_mux_clks,
+	.nr_mux_clks		= ARRAY_SIZE(fsys1_mux_clks),
+	.gate_clks		= fsys1_gate_clks,
+	.nr_gate_clks		= ARRAY_SIZE(fsys1_gate_clks),
+	.nr_clk_ids		= CLKS_NR_FSYS1,
+	.clk_regs		= fsys1_clk_regs,
+	.nr_clk_regs		= ARRAY_SIZE(fsys1_clk_regs),
+	.clk_name		= "dout_clkcmu_fsys1_bus",
 };
 
 /* ---- CMU_DPU ---------------------------------------------------------- */
@@ -422,6 +568,9 @@ static const struct of_device_id exynos9810_cmu_of_match[] = {
 	}, {
 		.compatible = "samsung,exynos9810-cmu-fsys0",
 		.data = &fsys0_cmu_info,
+	}, {
+		.compatible = "samsung,exynos9810-cmu-fsys1",
+		.data = &fsys1_cmu_info,
 	}, {
 		.compatible = "samsung,exynos9810-cmu-peric0",
 		.data = &peric0_cmu_info,
