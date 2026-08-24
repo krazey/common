@@ -9,5 +9,9 @@ config TRUSTONIC_TEE
 	  firmware on Samsung Exynos9810 devices.
 
 config TRUSTONIC_TEE_LPAE
-	bool
+	bool "Use 64-bit Trustonic physical addresses"
 	depends on TRUSTONIC_TEE
+	default y if ARM64
+	help
+	  Enable the long physical address format used by the Exynos9810
+	  secure-world firmware.

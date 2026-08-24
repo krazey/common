@@ -723,10 +723,15 @@ static int mobicore_probe(struct platform_device *pdev)
 		goto err_start;
 
 	/*
-	 * Keep the secure OS and fastcall worker on the boot CPU.  The initial
-	 * migration is an optional performance optimization which depends on
-	 * the vendor CPU topology and hotplug implementation.
+	 * Match the downstream topology after synchronous startup. CPU1 is the
+	 * non-booting little core selected by the Exynos9810 firmware.
 	 */
+	if (cpu_online(NONBOOT_LITTLE_CORE)) {
+		err = mc_switch_core(NONBOOT_LITTLE_CORE);
+		if (err)
+			mc_dev_err("cannot move secure OS to CPU%d: %d",
+				   NONBOOT_LITTLE_CORE, err);
+	}
 
 	return 0;
 
