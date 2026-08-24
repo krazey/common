@@ -41,6 +41,7 @@
 #include <pcicfg.h>
 
 #include <linux/fs.h>
+#include <linux/interrupt.h>
 
 #ifdef BCM_OBJECT_TRACE
 #include <bcmutils.h>
@@ -763,9 +764,9 @@ osl_dma_free_consistent(osl_t *osh, void *va, uint size, dmaaddr_t pa)
 #else
 #ifdef BCMDMA64OSL
 	PHYSADDRTOULONG(pa, paddr);
-	pci_free_consistent(osh->pdev, size, va, paddr);
+	dma_free_coherent(&((struct pci_dev *)osh->pdev)->dev, size, va, paddr);
 #else
-	pci_free_consistent(osh->pdev, size, va, (dma_addr_t)pa);
+	dma_free_coherent(&((struct pci_dev *)osh->pdev)->dev, size, va, (dma_addr_t)pa);
 #endif /* BCMDMA64OSL */
 #endif /* __ARM_ARCH_7A__ && !DHD_USE_COHERENT_MEM_FOR_RING */
 }
@@ -796,11 +797,11 @@ BCMFASTPATH(osl_dma_map)(osl_t *osh, void *va, uint size, int direction, void *p
 	DMA_LOCK(osh);
 
 	ASSERT((osh && (osh->magic == OS_HANDLE_MAGIC)));
-	dir = (direction == DMA_TX)? PCI_DMA_TODEVICE: PCI_DMA_FROMDEVICE;
+	dir = (direction == DMA_TX) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 
-	map_addr = pci_map_single(osh->pdev, va, size, dir);
+	map_addr = dma_map_single(&((struct pci_dev *)osh->pdev)->dev, va, size, dir);
 
-	ret = pci_dma_mapping_error(osh->pdev, map_addr);
+	ret = dma_mapping_error(&((struct pci_dev *)osh->pdev)->dev, map_addr);
 
 	if (ret) {
 		printk("%s: Failed to map memory\n", __FUNCTION__);
@@ -832,7 +833,7 @@ BCMFASTPATH(osl_dma_unmap)(osl_t *osh, dmaaddr_t pa, uint size, int direction)
 
 	DMA_LOCK(osh);
 
-	dir = (direction == DMA_TX)? PCI_DMA_TODEVICE: PCI_DMA_FROMDEVICE;
+	dir = (direction == DMA_TX) ? DMA_TO_DEVICE : DMA_FROM_DEVICE;
 
 #ifdef DHD_MAP_LOGGING
 	osl_dma_map_logging(osh, osh->dhd_unmap_log, pa, size);
@@ -840,9 +841,9 @@ BCMFASTPATH(osl_dma_unmap)(osl_t *osh, dmaaddr_t pa, uint size, int direction)
 
 #ifdef BCMDMA64OSL
 	PHYSADDRTOULONG(pa, paddr);
-	pci_unmap_single(osh->pdev, paddr, size, dir);
+	dma_unmap_single(&((struct pci_dev *)osh->pdev)->dev, paddr, size, dir);
 #else /* BCMDMA64OSL */
-	pci_unmap_single(osh->pdev, (uint32)pa, size, dir);
+	dma_unmap_single(&((struct pci_dev *)osh->pdev)->dev, (uint32)pa, size, dir);
 #endif /* BCMDMA64OSL */
 
 	DMA_UNLOCK(osh);
@@ -930,13 +931,11 @@ osl_sleep(uint ms)
 uint64
 osl_sysuptime_us(void)
 {
-	struct timeval tv;
-	uint64 usec;
+	struct timespec64 ts;
 
-	do_gettimeofday(&tv);
-	/* tv_usec content is fraction of a second */
-	usec = (uint64)tv.tv_sec * 1000000ul + tv.tv_usec;
-	return usec;
+	ktime_get_real_ts64(&ts);
+	return (uint64)ts.tv_sec * USEC_PER_SEC +
+		(uint64)ts.tv_nsec / NSEC_PER_USEC;
 }
 
 uint64
@@ -973,14 +972,14 @@ osl_get_localtime(uint64 *sec, uint64 *usec)
 uint64
 osl_systztime_us(void)
 {
-	struct timeval tv;
+	struct timespec64 ts;
 	uint64 tzusec;
 
-	do_gettimeofday(&tv);
+	ktime_get_real_ts64(&ts);
 	/* apply timezone */
-	tzusec = (uint64)((tv.tv_sec - (sys_tz.tz_minuteswest * 60)) *
+	tzusec = (uint64)((ts.tv_sec - (sys_tz.tz_minuteswest * 60)) *
 		USEC_PER_SEC);
-	tzusec += tv.tv_usec;
+	tzusec += ts.tv_nsec / NSEC_PER_USEC;
 
 	return tzusec;
 }
@@ -1118,6 +1117,14 @@ timer_cb_compat(struct timer_list *tl)
 }
 #endif /* LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0) */
 
+static void
+osl_timer_callback(ulong data)
+{
+	osl_timer_t *t = (osl_timer_t *)data;
+
+	t->callback(t->arg);
+}
+
 /* timer apis */
 /* Note: All timer api's are thread unsafe and should be protected with locks by caller */
 
@@ -1138,9 +1145,11 @@ osl_timer_init(osl_t *osh, const char *name, void (*fn)(void *arg), void *arg)
 		return (NULL);
 	}
 
+	t->callback = fn;
+	t->arg = arg;
 	t->set = TRUE;
 
-	init_timer_compat(t->timer, (linux_timer_fn)fn, arg);
+	init_timer_compat(t->timer, osl_timer_callback, t);
 
 	return (t);
 }
@@ -1197,7 +1206,7 @@ osl_timer_del(osl_t *osh, osl_timer_t *t)
 		t->set = FALSE;
 		if (t->timer) {
 			del_timer(t->timer);
-			MFREE(NULL, t->timer, sizeof(struct timer_list));
+			MFREE(NULL, t->timer, sizeof(timer_list_compat_t));
 		}
 		MFREE(NULL, t, sizeof(osl_timer_t));
 	}
@@ -1243,7 +1252,7 @@ osl_spin_lock(void *lock)
 	if (lock) {
 #ifdef DHD_USE_SPIN_LOCK_BH
 		/* Calling spin_lock_bh with both irq and non-irq context will lead to deadlock */
-		ASSERT(!in_irq());
+		ASSERT(!in_hardirq());
 		spin_lock_bh((spinlock_t *)lock);
 #else
 		spin_lock_irqsave((spinlock_t *)lock, flags);
@@ -1259,7 +1268,7 @@ osl_spin_unlock(void *lock, unsigned long flags)
 	if (lock) {
 #ifdef DHD_USE_SPIN_LOCK_BH
 		/* Calling spin_lock_bh with both irq and non-irq context will lead to deadlock */
-		ASSERT(!in_irq());
+		ASSERT(!in_hardirq());
 		spin_unlock_bh((spinlock_t *)lock);
 #else
 		spin_unlock_irqrestore((spinlock_t *)lock, flags);
@@ -1292,7 +1301,7 @@ osl_spin_lock_bh(void *lock)
 
 	if (lock) {
 		/* Calling spin_lock_bh with both irq and non-irq context will lead to deadlock */
-		ASSERT(!in_irq());
+		ASSERT(!in_hardirq());
 		spin_lock_bh((spinlock_t *)lock);
 	}
 
@@ -1304,7 +1313,7 @@ osl_spin_unlock_bh(void *lock, unsigned long flags)
 {
 	if (lock) {
 		/* Calling spin_lock_bh with both irq and non-irq context will lead to deadlock */
-		ASSERT(!in_irq());
+		ASSERT(!in_hardirq());
 		spin_unlock_bh((spinlock_t *)lock);
 	}
 }
@@ -1363,7 +1372,7 @@ osl_dma_lock(osl_t *osh)
 	 * Please refer to the __local_bh_enable_ip() function
 	 * in kernel/softirq.c to understand the condtion.
 	 */
-	if (likely(in_irq() || irqs_disabled())) {
+	if (likely(in_hardirq() || irqs_disabled())) {
 		spin_lock(&osh->dma_lock);
 	} else {
 		spin_lock_bh(&osh->dma_lock);

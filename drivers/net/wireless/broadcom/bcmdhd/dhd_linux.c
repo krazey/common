@@ -56,12 +56,14 @@
 #include <linux/net_stat_tizen.h>
 #endif /* CONFIG_TIZEN */
 #include <net/addrconf.h>
+#include <net/ndisc.h>
+#include <net/sock.h>
 #ifdef ENABLE_ADAPTIVE_SCHED
 #include <linux/cpufreq.h>
 #endif /* ENABLE_ADAPTIVE_SCHED */
 #include <linux/rtc.h>
 #include <asm/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <dhd_linux_priv.h>
 
 #include <epivers.h>
@@ -112,11 +114,11 @@
 #include <linux/compat.h>
 #endif
 
-#ifdef CONFIG_ARCH_EXYNOS
+#ifdef DHD_EXYNOS_LEGACY_PCIE
 #ifndef SUPPORT_EXYNOS7420
 #include <linux/exynos-pci-ctrl.h>
 #endif /* SUPPORT_EXYNOS7420 */
-#endif /* CONFIG_ARCH_EXYNOS */
+#endif /* DHD_EXYNOS_LEGACY_PCIE */
 
 #ifdef DHD_L2_FILTER
 #include <bcmicmp.h>
@@ -1606,8 +1608,8 @@ static inline void* dhd_rxf_dequeue(dhd_pub_t *dhdp)
 	dhdp->skbbuf[sent_idx] = NULL;
 	dhdp->sent_idx = (sent_idx + 1) & (MAXSKBPEND - 1);
 
-	DHD_TRACE(("dhd_rxf_dequeue: netif_rx_ni(%p), sent idx %d\n",
-		skb, sent_idx));
+	DHD_TRACE(("%s: netif_rx(%p), sent idx %d\n", __func__, skb,
+		   sent_idx));
 
 	dhd_os_rxfunlock(dhdp);
 
@@ -2499,7 +2501,7 @@ _dhd_set_mac_address(dhd_info_t *dhd, int ifidx, uint8 *addr)
 	if (ret < 0) {
 		DHD_ERROR(("%s: set cur_etheraddr failed\n", dhd_ifname(&dhd->pub, ifidx)));
 	} else {
-		memcpy(dhd->iflist[ifidx]->net->dev_addr, addr, ETHER_ADDR_LEN);
+		eth_hw_addr_set(dhd->iflist[ifidx]->net, addr);
 		if (ifidx == 0)
 			memcpy(dhd->pub.mac.octet, addr, ETHER_ADDR_LEN);
 	}
@@ -2910,7 +2912,7 @@ dhd_set_mac_address(struct net_device *dev, void *addr)
 			 * available). Store the address and return. macaddr will be applied
 			 * from interface create context.
 			 */
-			(void)memcpy_s(dev->dev_addr, ETH_ALEN, dhdif->mac_addr, ETH_ALEN);
+			eth_hw_addr_set(dev, dhdif->mac_addr);
 			return ret;
 		}
 #endif /* WL_STATIC_IF */
@@ -3003,12 +3005,12 @@ int dhd_sendup(dhd_pub_t *dhdp, int ifidx, void *p)
 			/* If the receive is not processed inside an ISR,
 			 * the softirqd must be woken explicitly to service
 			 * the NET_RX_SOFTIRQ.	In 2.6 kernels, this is handled
-			 * by netif_rx_ni(), but in earlier kernels, we need
+			 * by netif_rx(), but in earlier kernels, we need
 			 * to do it manually.
 			 */
 			bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
 				__FUNCTION__, __LINE__);
-			netif_rx_ni(skb);
+			netif_rx(skb);
 		}
 	}
 
@@ -3300,7 +3302,7 @@ dhd_netif_rx_ni(struct sk_buff * skb)
 	 * does netif_rx, disables irq, raise NET_IF_RX softirq and
 	 * enables interrupts back
 	 */
-	netif_rx_ni(skb);
+	netif_rx(skb);
 }
 
 static int
@@ -3505,7 +3507,7 @@ dhd_logtrace_thread(void *data)
 		}
 	}
 exit:
-	complete_and_exit(&tsk->completed, 0);
+	kthread_complete_and_exit(&tsk->completed, 0);
 	dhdp->logtrace_thr_ts.complete_time = OSL_LOCALTIME_NS();
 }
 #else
@@ -3898,14 +3900,7 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 				qdisc = dev_ingress_queue(ifp->net)->qdisc_sleeping;
 				if (qdisc != NULL && (qdisc->flags & TCQ_F_INGRESS)) {
 #ifdef CONFIG_NET_CLS_ACT
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 15, 0))
-					if (ifp->net->miniq_ingress != NULL) {
-#elif (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 2, 0))
-					if (ifp->net->ingress_cl_list != NULL) {
-#else
 					{
-#endif /* LINUX_VERSION >= 4.2.0 */
-
 						dhd_gro_enable = FALSE;
 						DHD_TRACE(("%s: disable sw gro because of"
 						" qdisc rx traffic control\n", __FUNCTION__));
@@ -4494,7 +4489,7 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 				/* If the receive is not processed inside an ISR,
 				 * the softirqd must be woken explicitly to service
 				 * the NET_RX_SOFTIRQ.	In 2.6 kernels, this is handled
-				 * by netif_rx_ni(), but in earlier kernels, we need
+				 * by netif_rx(), but in earlier kernels, we need
 				 * to do it manually.
 				 */
 				bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
@@ -4515,7 +4510,7 @@ dhd_rx_frame(dhd_pub_t *dhdp, int ifidx, void *pktbuf, int numpkt, uint8 chan)
 				netif_receive_skb(skb);
 #endif /* ENABLE_DHD_GRO */
 #else /* !defined(DHD_LB_RXP) */
-				netif_rx_ni(skb);
+				netif_rx(skb);
 #endif /* !defined(DHD_LB_RXP) */
 			}
 		}
@@ -4655,7 +4650,7 @@ dhd_watchdog_thread(void *data)
 		}
 	}
 
-	complete_and_exit(&tsk->completed, 0);
+	kthread_complete_and_exit(&tsk->completed, 0);
 }
 
 static void dhd_watchdog(ulong data)
@@ -4740,7 +4735,7 @@ dhd_rpm_state_thread(void *data)
 		}
 	}
 
-	complete_and_exit(&tsk->completed, 0);
+	kthread_complete_and_exit(&tsk->completed, 0);
 }
 
 static void dhd_runtimepm(ulong data)
@@ -4874,7 +4869,7 @@ dhd_dpc_thread(void *data)
 			break;
 		}
 	}
-	complete_and_exit(&tsk->completed, 0);
+	kthread_complete_and_exit(&tsk->completed, 0);
 }
 
 static int
@@ -4925,7 +4920,7 @@ dhd_rxf_thread(void *data)
 				PKTSETNEXT(pub->osh, skb, NULL);
 				bcm_object_trace_opr(skb, BCM_OBJDBG_REMOVE,
 					__FUNCTION__, __LINE__);
-				netif_rx_ni(skb);
+				netif_rx(skb);
 				skb = skbnext;
 			}
 #if defined(WAIT_DEQUEUE)
@@ -4940,7 +4935,7 @@ dhd_rxf_thread(void *data)
 			break;
 		}
 	}
-	complete_and_exit(&tsk->completed, 0);
+	kthread_complete_and_exit(&tsk->completed, 0);
 }
 
 #ifdef BCMPCIE
@@ -5433,13 +5428,13 @@ dhd_rx_mon_pkt(dhd_pub_t *dhdp, host_rxbuf_cmpl_t* msg, void *pkt, int ifidx)
 		/* If the receive is not processed inside an ISR,
 		 * the softirqd must be woken explicitly to service
 		 * the NET_RX_SOFTIRQ.	In 2.6 kernels, this is handled
-		 * by netif_rx_ni(), but in earlier kernels, we need
+		 * by netif_rx(), but in earlier kernels, we need
 		 * to do it manually.
 		 */
 		bcm_object_trace_opr(dhd->monitor_skb, BCM_OBJDBG_REMOVE,
 			__FUNCTION__, __LINE__);
 
-		netif_rx_ni(dhd->monitor_skb);
+		netif_rx(dhd->monitor_skb);
 	}
 
 	dhd->monitor_skb = NULL;
@@ -6809,7 +6804,7 @@ dhd_open(struct net_device *net)
 #endif
 
 		/* dhd_sync_with_dongle has been called in dhd_bus_start or wl_android_wifi_on */
-		memcpy(net->dev_addr, dhd->pub.mac.octet, ETHER_ADDR_LEN);
+		eth_hw_addr_set(net, dhd->pub.mac.octet);
 
 #ifdef TOE
 		/* Get current TOE mode from dongle */
@@ -6834,8 +6829,9 @@ dhd_open(struct net_device *net)
 		if (dhd->rx_napi_netdev == NULL) {
 			dhd->rx_napi_netdev = dhd->iflist[ifidx]->net;
 			memset(&dhd->rx_napi_struct, 0, sizeof(struct napi_struct));
-			netif_napi_add(dhd->rx_napi_netdev, &dhd->rx_napi_struct,
-				dhd_napi_poll, dhd_napi_weight);
+			netif_napi_add_weight(dhd->rx_napi_netdev,
+					      &dhd->rx_napi_struct,
+					      dhd_napi_poll, dhd_napi_weight);
 			DHD_INFO(("%s napi<%p> enabled ifp->net<%p,%s> dhd_napi_weight: %d\n",
 				__FUNCTION__, &dhd->rx_napi_struct, net,
 				net->name, dhd_napi_weight));
@@ -7992,7 +7988,6 @@ dhd_init_logstrs_array(osl_t *osh, dhd_event_log_t *temp)
 {
 	struct file *filep = NULL;
 	struct kstat stat;
-	mm_segment_t fs;
 	char *raw_fmts =  NULL;
 	int logstrs_size = 0;
 	int error = 0;
@@ -8001,9 +7996,6 @@ dhd_init_logstrs_array(osl_t *osh, dhd_event_log_t *temp)
 		DHD_ERROR_NO_HW4(("%s : turned off logstr parsing\n", __FUNCTION__));
 		return BCME_ERROR;
 	}
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	filep = dhd_filp_open(logstrs_path, O_RDONLY, 0);
 
@@ -8042,7 +8034,6 @@ dhd_init_logstrs_array(osl_t *osh, dhd_event_log_t *temp)
 	if (dhd_parse_logstrs_file(osh, raw_fmts, logstrs_size, temp)
 			== BCME_OK) {
 		dhd_filp_close(filep, NULL);
-		set_fs(fs);
 		return BCME_OK;
 	}
 
@@ -8057,8 +8048,6 @@ dhd_init_logstrs_array(osl_t *osh, dhd_event_log_t *temp)
 	fail1:
 	if (!IS_ERR(filep))
 		dhd_filp_close(filep, NULL);
-
-	set_fs(fs);
 	temp->fmts = NULL;
 	temp->raw_fmts = NULL;
 
@@ -8070,16 +8059,12 @@ dhd_read_map(osl_t *osh, char *fname, uint32 *ramstart, uint32 *rodata_start,
 		uint32 *rodata_end)
 {
 	struct file *filep = NULL;
-	mm_segment_t fs;
 	int err = BCME_ERROR;
 
 	if (fname == NULL) {
 		DHD_ERROR(("%s: ERROR fname is NULL \n", __FUNCTION__));
 		return BCME_ERROR;
 	}
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	filep = dhd_filp_open(fname, O_RDONLY, 0);
 	if (IS_ERR(filep) || (filep == NULL)) {
@@ -8095,8 +8080,6 @@ fail:
 	if (!IS_ERR(filep))
 		dhd_filp_close(filep, NULL);
 
-	set_fs(fs);
-
 	return err;
 }
 
@@ -8104,7 +8087,6 @@ static int
 dhd_init_static_strs_array(osl_t *osh, dhd_event_log_t *temp, char *str_file, char *map_file)
 {
 	struct file *filep = NULL;
-	mm_segment_t fs;
 	char *raw_fmts =  NULL;
 	uint32 logstrs_size = 0;
 	int error = 0;
@@ -8126,9 +8108,6 @@ dhd_init_static_strs_array(osl_t *osh, dhd_event_log_t *temp, char *str_file, ch
 	}
 	DHD_ERROR(("ramstart: 0x%x, rodata_start: 0x%x, rodata_end:0x%x\n",
 		ramstart, rodata_start, rodata_end));
-
-	fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	filep = dhd_filp_open(str_file, O_RDONLY, 0);
 	if (IS_ERR(filep) || (filep == NULL)) {
@@ -8187,7 +8166,6 @@ dhd_init_static_strs_array(osl_t *osh, dhd_event_log_t *temp, char *str_file, ch
 	}
 
 	dhd_filp_close(filep, NULL);
-	set_fs(fs);
 
 	return BCME_OK;
 
@@ -8199,8 +8177,6 @@ fail:
 fail1:
 	if (!IS_ERR(filep))
 		dhd_filp_close(filep, NULL);
-
-	set_fs(fs);
 
 	if (strstr(str_file, ram_file_str) != NULL) {
 		temp->raw_sstr = NULL;
@@ -9332,7 +9308,7 @@ dhd_bus_start(dhd_pub_t *dhdp)
 		return ret;
 	}
 
-#if defined(CONFIG_ARCH_EXYNOS) && defined(BCMPCIE)
+#if defined(DHD_EXYNOS_LEGACY_PCIE) && defined(BCMPCIE)
 #if !defined(CONFIG_SOC_EXYNOS8890) && !defined(SUPPORT_EXYNOS7420)
 	/* XXX: JIRA SWWLAN-139454: Added L1ss enable
 	 * after firmware download completion due to link down issue
@@ -9341,7 +9317,7 @@ dhd_bus_start(dhd_pub_t *dhdp)
 	DHD_ERROR(("%s: Enable L1ss EP side\n", __FUNCTION__));
 	exynos_pcie_l1ss_ctrl(1, PCIE_L1SS_CTRL_WIFI);
 #endif /* !CONFIG_SOC_EXYNOS8890 && !SUPPORT_EXYNOS7420 */
-#endif /* CONFIG_ARCH_EXYNOS && BCMPCIE */
+#endif /* DHD_EXYNOS_LEGACY_PCIE && BCMPCIE */
 #if defined(DHD_DEBUG) && defined(BCMSDIO)
 	f2_sync_end = OSL_SYSUPTIME();
 	DHD_ERROR(("Time taken for FW download and F2 ready is: %d msec\n",
@@ -12811,7 +12787,7 @@ dhd_register_if(dhd_pub_t *dhdp, int ifidx, bool need_rtnl_lock)
 	 * XXX Linux 2.6.25 does not like a blank MAC address, so use a
 	 * dummy address until the interface is brought up.
 	 */
-	memcpy(net->dev_addr, temp_addr, ETHER_ADDR_LEN);
+	eth_hw_addr_set(net, temp_addr);
 
 	if (ifidx == 0)
 		printf("%s\n", dhd_version);
@@ -13577,11 +13553,11 @@ dhd_reboot_callback(struct notifier_block *this, unsigned long code, void *unuse
  * deferred_module_init() definition to include/linux/init.h in Linux Kernel.
  * #define deferred_module_init(fn)	module_init(fn)
  */
-#if defined(CONFIG_ARCH_MSM) || defined(CONFIG_ARCH_EXYNOS)
+#if defined(CONFIG_ARCH_MSM) || defined(DHD_EXYNOS_LEGACY_PCIE)
 deferred_module_init_sync(dhd_module_init);
 #else
 deferred_module_init(dhd_module_init);
-#endif /* CONFIG_ARCH_MSM || CONFIG_ARCH_EXYNOS */
+#endif /* CONFIG_ARCH_MSM || DHD_EXYNOS_LEGACY_PCIE */
 #elif defined(USE_LATE_INITCALL_SYNC)
 late_initcall_sync(dhd_module_init);
 #else
@@ -14332,7 +14308,7 @@ dhd_sendup_log(dhd_pub_t *dhdp, void *data, int data_len)
 		if (in_interrupt()) {
 			netif_rx(skb);
 		} else {
-			netif_rx_ni(skb);
+			netif_rx(skb);
 		}
 	} else {
 		/* Could not allocate a sk_buf */
@@ -14429,7 +14405,7 @@ dhd_net_bus_devreset(struct net_device *dev, uint8 flag)
 			dhd->fw_path, dhd->nv_path);
 	}
 #endif /* BCMSDIO */
-#if defined(CONFIG_ARCH_EXYNOS) && defined(BCMPCIE)
+#if defined(DHD_EXYNOS_LEGACY_PCIE) && defined(BCMPCIE)
 #if !defined(CONFIG_SOC_EXYNOS8890) && !defined(SUPPORT_EXYNOS7420)
 	/* XXX: JIRA SWWLAN-139454: Added L1ss enable
 	 * after firmware download completion due to link down issue
@@ -14439,7 +14415,7 @@ dhd_net_bus_devreset(struct net_device *dev, uint8 flag)
 	if (flag == FALSE && dhd->pub.busstate == DHD_BUS_DOWN)
 		exynos_pcie_l1ss_ctrl(0, PCIE_L1SS_CTRL_WIFI);
 #endif /* !CONFIG_SOC_EXYNOS8890 && !defined(SUPPORT_EXYNOS7420)  */
-#endif /* CONFIG_ARCH_EXYNOS && BCMPCIE */
+#endif /* DHD_EXYNOS_LEGACY_PCIE && BCMPCIE */
 
 	ret = dhd_bus_devreset(&dhd->pub, flag);
 
@@ -16148,7 +16124,7 @@ static void dhd_hang_process(struct work_struct *work_data)
 #endif /* IFACE_HANG_FORCE_DEV_CLOSE */
 }
 
-#if defined(CONFIG_ARCH_EXYNOS) && defined(BCMPCIE)
+#if defined(DHD_EXYNOS_LEGACY_PCIE) && defined(BCMPCIE)
 extern dhd_pub_t *link_recovery;
 void dhd_host_recover_link(void)
 {
@@ -16158,7 +16134,7 @@ void dhd_host_recover_link(void)
 	dhd_os_send_hang_message(link_recovery);
 }
 EXPORT_SYMBOL(dhd_host_recover_link);
-#endif /* CONFIG_ARCH_EXYNOS && BCMPCIE */
+#endif /* DHD_EXYNOS_LEGACY_PCIE && BCMPCIE */
 
 #ifdef DHD_DETECT_CONSECUTIVE_MFG_HANG
 #define MAX_CONSECUTIVE_MFG_HANG_COUNT 2
@@ -16545,12 +16521,9 @@ int write_file(const char * file_name, uint32 flags, uint8 *buf, int size)
 {
 	int ret = 0;
 	struct file *fp = NULL;
-	mm_segment_t old_fs;
 	loff_t pos = 0;
 
 	/* change to KERNEL_DS address limit */
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	/* open file to write */
 	fp = dhd_filp_open(file_name, flags, 0664);
@@ -16580,7 +16553,6 @@ exit:
 		dhd_filp_close(fp, current->files);
 
 	/* restore previous address limit */
-	set_fs(old_fs);
 
 	return ret;
 }
@@ -19650,7 +19622,6 @@ do_dhd_log_dump(dhd_pub_t *dhdp, log_dump_type_t *type)
 {
 	int ret = 0, i = 0;
 	struct file *fp = NULL;
-	mm_segment_t old_fs;
 	loff_t pos = 0;
 	char dump_path[128];
 	uint32 file_mode;
@@ -19677,8 +19648,6 @@ do_dhd_log_dump(dhd_pub_t *dhdp, log_dump_type_t *type)
 		goto exit1;
 	}
 	/* change to KERNEL_DS address limit */
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	dhd_get_debug_dump_file_name(NULL, dhdp, dump_path, sizeof(dump_path));
 
@@ -19889,7 +19858,6 @@ exit2:
 		DHD_ERROR(("%s: Finished writing log dump to file - '%s' \n",
 				__FUNCTION__, dump_path));
 	}
-	set_fs(old_fs);
 exit1:
 	if (type) {
 		MFREE(dhdp->osh, type, sizeof(*type));
@@ -21134,12 +21102,9 @@ int
 dhd_write_file(const char *filepath, char *buf, int buf_len)
 {
 	struct file *fp = NULL;
-	mm_segment_t old_fs;
 	int ret = 0;
 
 	/* change to KERNEL_DS address limit */
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	/* File is always created. */
 	fp = dhd_filp_open(filepath, O_RDWR | O_CREAT, 0664);
@@ -21162,7 +21127,6 @@ dhd_write_file(const char *filepath, char *buf, int buf_len)
 	}
 
 	/* restore previous address limit */
-	set_fs(old_fs);
 
 	return ret;
 }
@@ -21171,16 +21135,12 @@ int
 dhd_read_file(const char *filepath, char *buf, int buf_len)
 {
 	struct file *fp = NULL;
-	mm_segment_t old_fs;
 	int ret;
 
 	/* change to KERNEL_DS address limit */
-	old_fs = get_fs();
-	set_fs(KERNEL_DS);
 
 	fp = dhd_filp_open(filepath, O_RDONLY, 0);
 	if (IS_ERR(fp) || (fp == NULL)) {
-		set_fs(old_fs);
 		DHD_ERROR(("%s: File %s doesn't exist\n", __FUNCTION__, filepath));
 		return BCME_ERROR;
 	}
@@ -21189,7 +21149,6 @@ dhd_read_file(const char *filepath, char *buf, int buf_len)
 	dhd_filp_close(fp, NULL);
 
 	/* restore previous address limit */
-	set_fs(old_fs);
 
 	/* Return the number of bytes read */
 	if (ret > 0) {
@@ -21765,8 +21724,7 @@ dhd_print_kirqstats(dhd_pub_t *dhd, unsigned int irq_num)
 	raw_spin_lock_irqsave(&desc->lock, flags);
 	bcm_bprintf(&strbuf, "dhd irq %u:", irq_num);
 	for_each_online_cpu(i)
-		bcm_bprintf(&strbuf, "%10u ",
-			desc->kstat_irqs ? *per_cpu_ptr(desc->kstat_irqs, i) : 0);
+		bcm_bprintf(&strbuf, "%10u ", irq_desc_kstat_cpu(desc, i));
 	if (desc->irq_data.chip) {
 		if (desc->irq_data.chip->name)
 			bcm_bprintf(&strbuf, " %8s", desc->irq_data.chip->name);
@@ -22171,18 +22129,18 @@ void dhd_schedule_gather_ap_stadata(void *bcm_cfg, void *ndev, const wl_event_ms
 void
 get_debug_dump_time(char *str)
 {
-	struct timeval curtime;
+	struct timespec64 curtime;
 	unsigned long local_time;
 	struct rtc_time tm;
 
 	if (!strlen(str)) {
-		do_gettimeofday(&curtime);
+		ktime_get_real_ts64(&curtime);
 		local_time = (u32)(curtime.tv_sec -
 				(sys_tz.tz_minuteswest * DHD_LOG_DUMP_TS_MULTIPLIER_VALUE));
-		rtc_time_to_tm(local_time, &tm);
+		rtc_time64_to_tm(local_time, &tm);
 		snprintf(str, DEBUG_DUMP_TIME_BUF_LEN, DHD_LOG_DUMP_TS_FMT_YYMMDDHHMMSSMSMS,
 				tm.tm_year - 100, tm.tm_mon + 1, tm.tm_mday, tm.tm_hour, tm.tm_min,
-				tm.tm_sec, (int)(curtime.tv_usec/NSEC_PER_USEC));
+				tm.tm_sec, (int)(curtime.tv_nsec / NSEC_PER_MSEC));
 	}
 }
 
@@ -23412,7 +23370,7 @@ dhd_set_tid_based_on_uid(dhd_pub_t *dhdp, void *pkt)
 	sk = ((struct sk_buff*)(pkt))->sk;
 
 	if ((dhdp->tid_mode == SET_TID_ALL_UDP) ||
-		(sk && (uid == __kuid_val(sock_i_uid(sk))))) {
+		(sk && (uid == __kuid_val(sk_uid(sk))))) {
 		PKTSETPRIO(pkt, prio);
 	}
 }
@@ -23571,7 +23529,7 @@ dhd_rx_pktpool_thread(void *data)
 	}
 exit:
 	DHD_TRACE(("%s: EXITED...\n", __FUNCTION__));
-	complete_and_exit(&tsk->completed, 0);
+	kthread_complete_and_exit(&tsk->completed, 0);
 }
 
 void

@@ -63,7 +63,7 @@
 #include <linux/rtc.h>
 #include <linux/namei.h>
 #include <asm/uaccess.h>
-#include <asm/unaligned.h>
+#include <linux/unaligned.h>
 #include <dhd_linux_priv.h>
 
 #include <epivers.h>
@@ -113,11 +113,11 @@
 #include <linux/compat.h>
 #endif
 
-#ifdef CONFIG_ARCH_EXYNOS
+#ifdef DHD_EXYNOS_LEGACY_PCIE
 #ifndef SUPPORT_EXYNOS7420
 #include <linux/exynos-pci-ctrl.h>
 #endif /* SUPPORT_EXYNOS7420 */
-#endif /* CONFIG_ARCH_EXYNOS */
+#endif /* DHD_EXYNOS_LEGACY_PCIE */
 
 #ifdef DHD_L2_FILTER
 #include <bcmicmp.h>

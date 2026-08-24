@@ -42,10 +42,10 @@ extern dhd_pub_t* g_dhd_pub;
 static int dhd_ring_proc_open(struct inode *inode, struct file *file);
 ssize_t dhd_ring_proc_read(struct file *file, char *buffer, size_t tt, loff_t *loff);
 
-static const struct file_operations dhd_ring_proc_fops = {
-	.open = dhd_ring_proc_open,
-	.read = dhd_ring_proc_read,
-	.release = single_release,
+static const struct proc_ops dhd_ring_proc_fops = {
+	.proc_open = dhd_ring_proc_open,
+	.proc_read = dhd_ring_proc_read,
+	.proc_release = single_release,
 };
 
 static int
@@ -54,7 +54,7 @@ dhd_ring_proc_open(struct inode *inode, struct file *file)
 	int ret = BCME_ERROR;
 	if (inode) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(3, 10, 0))
-		ret = single_open(file, 0, PDE_DATA(inode));
+		ret = single_open(file, 0, pde_data(inode));
 #else
 		/* This feature is not supported for lower kernel versions */
 		ret = single_open(file, 0, NULL);
@@ -1696,9 +1696,18 @@ static struct sysfs_ops dhd_sysfs_ops = {
 	.store = dhd_store,
 };
 
+static const struct attribute_group dhd_default_group = {
+	.attrs = default_file_attrs,
+};
+
+static const struct attribute_group *dhd_default_groups[] = {
+	&dhd_default_group,
+	NULL,
+};
+
 static struct kobj_type dhd_ktype = {
 	.sysfs_ops = &dhd_sysfs_ops,
-	.default_attrs = default_file_attrs,
+	.default_groups = dhd_default_groups,
 };
 
 /*
@@ -2155,9 +2164,18 @@ static struct sysfs_ops dhd_sysfs_lb_ops = {
 	.store = dhd_lb_store,
 };
 
+static const struct attribute_group dhd_lb_group = {
+	.attrs = debug_lb_attrs,
+};
+
+static const struct attribute_group *dhd_lb_groups[] = {
+	&dhd_lb_group,
+	NULL,
+};
+
 static struct kobj_type dhd_lb_ktype = {
 	.sysfs_ops = &dhd_sysfs_lb_ops,
-	.default_attrs = debug_lb_attrs,
+	.default_groups = dhd_lb_groups,
 };
 #endif /* DHD_LB */
 

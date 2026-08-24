@@ -403,8 +403,9 @@ s32 wl_inform_single_bss(struct bcm_cfg80211 *cfg, wl_bss_info_t *bi, bool updat
 	signal = notif_bss_info->rssi * 100;
 	if (!mgmt->u.probe_resp.timestamp) {
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 39))
-		struct timespec ts;
-		get_monotonic_boottime(&ts);
+		struct timespec64 ts;
+
+		ktime_get_boottime_ts64(&ts);
 		mgmt->u.probe_resp.timestamp = ((u64)ts.tv_sec*1000000)
 				+ ts.tv_nsec / 1000;
 #else
@@ -631,7 +632,7 @@ wl_bcnrecv_result_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 	s32 err = BCME_OK;
 	struct wiphy *wiphy = NULL;
 	wl_bcnrecv_result_t *bcn_recv = NULL;
-	struct timespec ts;
+	struct timespec64 ts;
 	if (!bi) {
 		WL_ERR(("%s: bi is NULL\n", __func__));
 		err = BCME_NORESOURCE;
@@ -664,7 +665,7 @@ wl_bcnrecv_result_handler(struct bcm_cfg80211 *cfg, bcm_struct_cfgdev *cfgdev,
 		bcn_recv->beacon_interval = bi->beacon_period;
 
 		/* kernal timestamp */
-		get_monotonic_boottime(&ts);
+		ktime_get_boottime_ts64(&ts);
 		bcn_recv->system_time = ((u64)ts.tv_sec*1000000)
 				+ ts.tv_nsec / 1000;
 		bcn_recv->timestamp[0] = bi->timestamp[0];
@@ -3668,7 +3669,7 @@ wl_cfgscan_sched_scan_stop_work(struct work_struct *work)
 		 * can do a full scan incase found match is empty.
 		 */
 #if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 12, 0))
-		cfg80211_sched_scan_stopped_rtnl(wiphy, cfg->sched_scan_req->reqid);
+		cfg80211_sched_scan_stopped(wiphy, cfg->sched_scan_req->reqid);
 #else
 		cfg80211_sched_scan_stopped_rtnl(wiphy);
 #endif /* KERNEL > 4.12.0 */

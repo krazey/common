@@ -205,7 +205,7 @@ dhd_is_legacy_pno_enabled(dhd_pub_t *dhd)
 
 #ifdef GSCAN_SUPPORT
 static uint64
-convert_fw_rel_time_to_systime(struct timespec *ts, uint32 fw_ts_ms)
+convert_fw_rel_time_to_systime(struct timespec64 *ts, uint32 fw_ts_ms)
 {
 	return ((uint64)(TIMESPEC_TO_US(*ts)) - (uint64)(fw_ts_ms * 1000));
 }
@@ -2539,7 +2539,7 @@ _dhd_pno_get_gscan_batch_from_fw(dhd_pub_t *dhd)
 	uint16 count;
 	uint16 fwcount;
 	uint16 fwstatus = PFN_INCOMPLETE;
-	struct timespec tm_spec;
+	struct timespec64 tm_spec;
 
 	/* Static asserts in _dhd_pno_get_for_batch() below guarantee the v1 and v2
 	 * net_info and subnet_info structures are compatible in size and SSID offset,
@@ -2604,7 +2604,7 @@ _dhd_pno_get_gscan_batch_from_fw(dhd_pub_t *dhd)
 				__FUNCTION__, err));
 			goto exit_mutex_unlock;
 		}
-		get_monotonic_boottime(&tm_spec);
+		ktime_get_boottime_ts64(&tm_spec);
 
 		if (plbestnet_v1->version == PFN_LBEST_SCAN_RESULT_VERSION_V1) {
 			fwstatus = plbestnet_v1->status;
@@ -3452,7 +3452,7 @@ exit:
 	}
 	mutex_unlock(&_pno_state->pno_mutex);
 exit_no_unlock:
-	if (waitqueue_active(&_pno_state->get_batch_done.wait))
+	if (swait_active(&_pno_state->get_batch_done.wait))
 		complete(&_pno_state->get_batch_done);
 	return err;
 }
@@ -3952,7 +3952,7 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int 
 	u32 bi_length = 0;
 	uint8 channel;
 	uint32 mem_needed;
-	struct timespec ts;
+	struct timespec64 ts;
 	u32 bi_ie_length = 0;
 	u32 bi_ie_offset = 0;
 
@@ -4009,7 +4009,7 @@ dhd_process_full_gscan_result(dhd_pub_t *dhd, const void *data, uint32 len, int 
 	result->fixed.rssi = (int32) bi->RSSI;
 	result->fixed.rtt = 0;
 	result->fixed.rtt_sd = 0;
-	get_monotonic_boottime(&ts);
+	ktime_get_boottime_ts64(&ts);
 	result->fixed.ts = (uint64) TIMESPEC_TO_US(ts);
 	result->fixed.beacon_period = dtoh16(bi->beacon_period);
 	result->fixed.capability = dtoh16(bi->capability);
@@ -4201,7 +4201,7 @@ dhd_pno_update_hotlist_v3_results(dhd_pub_t *dhd, wl_pfn_scanresults_v3_t *pfn_r
 	int *send_evt_bytes, hotlist_type_t type,  u32 *buf_len)
 {
 	u32 malloc_size = 0, i;
-	struct timespec tm_spec;
+	struct timespec64 tm_spec;
 	struct dhd_pno_gscan_params *gscan_params;
 	gscan_results_cache_t *gscan_hotlist_cache;
 	wifi_gscan_result_t *hotlist_found_array;
@@ -4216,7 +4216,7 @@ dhd_pno_update_hotlist_v3_results(dhd_pub_t *dhd, wl_pfn_scanresults_v3_t *pfn_r
 		return NULL;
 	}
 
-	get_monotonic_boottime(&tm_spec);
+	ktime_get_boottime_ts64(&tm_spec);
 	malloc_size = sizeof(gscan_results_cache_t) +
 		((pfn_result->count - 1) * sizeof(wifi_gscan_result_t));
 	gscan_hotlist_cache =
@@ -4288,7 +4288,7 @@ dhd_handle_hotlist_scan_evt(dhd_pub_t *dhd, const void *event_data,
 	wl_pfn_net_info_v2_t *pnetinfo_v2;
 	gscan_results_cache_t *gscan_hotlist_cache;
 	u32 malloc_size = 0, i, total = 0;
-	struct timespec tm_spec;
+	struct timespec64 tm_spec;
 	uint16 fwstatus;
 	uint16 fwcount;
 
@@ -4312,7 +4312,7 @@ dhd_handle_hotlist_scan_evt(dhd_pub_t *dhd, const void *event_data,
 			return ptr;
 		}
 
-		get_monotonic_boottime(&tm_spec);
+		ktime_get_boottime_ts64(&tm_spec);
 		malloc_size = sizeof(gscan_results_cache_t) +
 			((fwcount - 1) * sizeof(wifi_gscan_result_t));
 		gscan_hotlist_cache = (gscan_results_cache_t *)MALLOC(dhd->osh, malloc_size);
@@ -4376,7 +4376,7 @@ dhd_handle_hotlist_scan_evt(dhd_pub_t *dhd, const void *event_data,
 			return ptr;
 		}
 
-		get_monotonic_boottime(&tm_spec);
+		ktime_get_boottime_ts64(&tm_spec);
 		malloc_size = sizeof(gscan_results_cache_t) +
 			((fwcount - 1) * sizeof(wifi_gscan_result_t));
 		gscan_hotlist_cache =
@@ -4479,7 +4479,7 @@ dhd_pno_event_handler(dhd_pub_t *dhd, wl_event_msg_t *event, void *event_data)
 	{
 		struct dhd_pno_batch_params *params_batch;
 		params_batch = &_pno_state->pno_params_arr[INDEX_OF_BATCH_PARAMS].params_batch;
-		if (!waitqueue_active(&_pno_state->get_batch_done.wait)) {
+		if (!swait_active(&_pno_state->get_batch_done.wait)) {
 			DHD_PNO(("%s : WLC_E_PFN_BEST_BATCHING\n", __FUNCTION__));
 			params_batch->get_batch.buf = NULL;
 			params_batch->get_batch.bufsize = 0;
