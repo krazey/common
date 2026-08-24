@@ -11,6 +11,7 @@
 #include <linux/cpu_pm.h>
 #include <linux/of.h>
 #include <linux/of_address.h>
+#include <linux/init.h>
 #include <linux/mfd/core.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mutex.h>
@@ -34,6 +35,10 @@
 #define EXYNOS9810_PMU_INFORM2			0x0808
 #define EXYNOS9810_POWER_OFF			0x00000000
 #define EXYNOS9810_POWER_RESET			0x12345678
+
+#define EXYNOS9810_PMU_CPU_INFORM_BASE		0x0860
+#define EXYNOS9810_PMU_CPU_INFORM_STRIDE	0x0004
+#define EXYNOS9810_CPU_INFORM_C2		0x00000001
 
 #define EXYNOS9810_PMU_EVENT_ENABLE_GRP2		0x7f08
 #define EXYNOS9810_GRP1_INTR_BID_UPEND		0x0108
@@ -242,26 +247,206 @@ struct regmap *exynos_get_pmu_regmap_by_phandle(struct device_node *np,
 }
 EXPORT_SYMBOL_GPL(exynos_get_pmu_regmap_by_phandle);
 
-#ifdef CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+struct exynos9810_cpu_reg_update {
+	unsigned int reg;
+	unsigned int mask;
+	unsigned int value;
+};
+
+static const struct exynos9810_cpu_reg_update
+exynos9810_pmu_cpu_defaults[] = {
+	{ 0x1088, GENMASK(31, 24), 0x8d << 24 },
+	{ 0x2114, GENMASK(1, 0), 2 },
+	{ 0x2180, GENMASK(1, 0), 2 },
+	{ 0x21ec, GENMASK(1, 0), 2 },
+	{ 0x2258, GENMASK(1, 0), 2 },
+	{ 0x2384, GENMASK(1, 0), 2 },
+	{ 0x23c8, GENMASK(1, 0), 2 },
+	{ 0x2418, GENMASK(1, 0), 2 },
+	{ 0x2468, GENMASK(1, 0), 2 },
+	{ 0x24b8, GENMASK(1, 0), 2 },
+	{ 0x25a0, GENMASK(1, 0), 2 },
+};
+
+static const struct exynos9810_cpu_reg_update
+exynos9810_core_cmu_defaults[] = {
+	{ 0x0850, BIT(0), BIT(0) },
+	{ 0x0820, U32_MAX, 1 },
+};
+
+static const struct exynos9810_cpu_reg_update
+exynos9810_cpucl0_cmu_defaults[] = {
+	{ 0x0850, GENMASK(6, 0), 1 },
+	{ 0x0840, BIT(0), BIT(0) },
+	{ 0x0834, U32_MAX, 1 },
+	{ 0x0820, U32_MAX, U32_MAX },
+};
+
+static const struct exynos9810_cpu_reg_update
+exynos9810_cpucl1_cmu_defaults[] = {
+	{ 0x0850, GENMASK(6, 0), 0 },
+	{ 0x0838, GENMASK(9, 0), 0x201 },
+	{ 0x0820, U32_MAX, U32_MAX },
+};
+
+static const struct exynos9810_cpu_reg_update
+exynos9810_core_sysreg_defaults[] = {
+	{ 0x0104, U32_MAX, 0xfffffff0 },
+};
+
+static const struct exynos9810_cpu_reg_update
+exynos9810_cluster_sysreg_defaults[] = {
+	{ 0x0104, U32_MAX, U32_MAX },
+};
+
+static bool exynos9810_cpu_system_initialized;
+
+static int __init
+exynos9810_apply_cpu_defaults(struct regmap *map,
+			     const struct exynos9810_cpu_reg_update *updates,
+			     size_t count)
+{
+	size_t i;
+	int ret;
+
+	for (i = 0; i < count; i++) {
+		ret = regmap_update_bits(map, updates[i].reg,
+					 updates[i].mask, updates[i].value);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+int __init exynos9810_cpu_system_init(void)
+{
+	struct regmap *cpucl0_cmu;
+	struct regmap *cpucl0_sysreg;
+	struct regmap *cpucl1_cmu;
+	struct regmap *cpucl1_sysreg;
+	struct regmap *core_cmu;
+	struct regmap *core_sysreg;
+	struct device_node *pmu_np;
+	struct regmap *pmu;
+	unsigned int value;
+	int ret;
+
+	if (!of_machine_is_compatible("samsung,exynos9810"))
+		return 0;
+	if (READ_ONCE(exynos9810_cpu_system_initialized))
+		return 0;
+
+	pmu_np = of_find_compatible_node(NULL, NULL,
+					 "samsung,exynos9810-pmu");
+	if (!pmu_np)
+		return -ENODEV;
+
+	pmu = syscon_node_to_regmap(pmu_np);
+	core_cmu = syscon_regmap_lookup_by_phandle(
+		pmu_np, "samsung,core-cmu-syscon");
+	core_sysreg = syscon_regmap_lookup_by_phandle(
+		pmu_np, "samsung,core-sysreg-syscon");
+	cpucl0_cmu = syscon_regmap_lookup_by_phandle(
+		pmu_np, "samsung,cpucl0-cmu-syscon");
+	cpucl0_sysreg = syscon_regmap_lookup_by_phandle(
+		pmu_np, "samsung,cpucl0-sysreg-syscon");
+	cpucl1_cmu = syscon_regmap_lookup_by_phandle(
+		pmu_np, "samsung,cpucl1-cmu-syscon");
+	cpucl1_sysreg = syscon_regmap_lookup_by_phandle(
+		pmu_np, "samsung,cpucl1-sysreg-syscon");
+
+	if (IS_ERR(pmu) || IS_ERR(core_cmu) || IS_ERR(core_sysreg) ||
+	    IS_ERR(cpucl0_cmu) || IS_ERR(cpucl0_sysreg) ||
+	    IS_ERR(cpucl1_cmu) || IS_ERR(cpucl1_sysreg)) {
+		ret = -ENODEV;
+		goto out_put;
+	}
+
+	ret = exynos9810_apply_cpu_defaults(
+		pmu, exynos9810_pmu_cpu_defaults,
+		ARRAY_SIZE(exynos9810_pmu_cpu_defaults));
+	if (ret)
+		goto out_put;
+	ret = exynos9810_apply_cpu_defaults(
+		core_cmu, exynos9810_core_cmu_defaults,
+		ARRAY_SIZE(exynos9810_core_cmu_defaults));
+	if (ret)
+		goto out_put;
+	ret = exynos9810_apply_cpu_defaults(
+		cpucl0_cmu, exynos9810_cpucl0_cmu_defaults,
+		ARRAY_SIZE(exynos9810_cpucl0_cmu_defaults));
+	if (ret)
+		goto out_put;
+	ret = exynos9810_apply_cpu_defaults(
+		cpucl1_cmu, exynos9810_cpucl1_cmu_defaults,
+		ARRAY_SIZE(exynos9810_cpucl1_cmu_defaults));
+	if (ret)
+		goto out_put;
+	ret = exynos9810_apply_cpu_defaults(
+		core_sysreg, exynos9810_core_sysreg_defaults,
+		ARRAY_SIZE(exynos9810_core_sysreg_defaults));
+	if (ret)
+		goto out_put;
+	ret = exynos9810_apply_cpu_defaults(
+		cpucl0_sysreg, exynos9810_cluster_sysreg_defaults,
+		ARRAY_SIZE(exynos9810_cluster_sysreg_defaults));
+	if (ret)
+		goto out_put;
+	ret = exynos9810_apply_cpu_defaults(
+		cpucl1_sysreg, exynos9810_cluster_sysreg_defaults,
+		ARRAY_SIZE(exynos9810_cluster_sysreg_defaults));
+	if (ret)
+		goto out_put;
+
+	ret = regmap_read(cpucl1_cmu, 0x0820, &value);
+	if (!ret) {
+		WRITE_ONCE(exynos9810_cpu_system_initialized, true);
+		pr_info("Exynos9810 CPU system defaults initialized\n");
+	}
+
+out_put:
+	of_node_put(pmu_np);
+	return ret;
+}
+
 static bool exynos9810_is_mongoose_cpu(unsigned int cpu)
 {
 	return MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
 }
 
-static u32 exynos9810_cpu_power_mask(unsigned int cpu)
+static int exynos9810_cpu_power_ids(unsigned int cpu, unsigned int *inform,
+				    u32 *mask)
 {
-	return BIT(MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 0));
+	u64 mpidr = cpu_logical_map(cpu);
+	unsigned int cluster = MPIDR_AFFINITY_LEVEL(mpidr, 1);
+	unsigned int core = MPIDR_AFFINITY_LEVEL(mpidr, 0);
+
+	if (cluster > 1 || core > 3)
+		return -EINVAL;
+
+	/*
+	 * CAL numbers CPUCL0 as cores 0-3 and CPUCL1 as cores 4-7,
+	 * while the BID registers use bits 4-7 and 0-3 respectively.
+	 */
+	*inform = (cluster << 2) | core;
+	*mask = BIT(core + (cluster ? 0 : 4));
+
+	return 0;
 }
 
 bool exynos9810_cpu_power_ready(unsigned int cpu)
 {
 	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
 
-	if (!context || !context->exynos9810_cpu_ready ||
-	    !exynos9810_is_mongoose_cpu(cpu))
-		return false;
+	if (!exynos9810_is_mongoose_cpu(cpu))
+		return true;
 
-	return test_bit(cpu, context->exynos9810_cpu_ready);
+	if (context && context->exynos9810_cpu_ready)
+		return test_bit(cpu, context->exynos9810_cpu_ready);
+
+	return READ_ONCE(exynos9810_cpu_system_initialized);
 }
 
 static int __exynos9810_cpu_power_on(struct exynos_pmu_context *context,
@@ -269,9 +454,20 @@ static int __exynos9810_cpu_power_on(struct exynos_pmu_context *context,
 {
 	u32 enable;
 	u32 event;
-	u32 mask = exynos9810_cpu_power_mask(cpu);
+	unsigned int inform;
+	u32 mask;
 	u32 pending;
 	int ret;
+
+	ret = exynos9810_cpu_power_ids(cpu, &inform, &mask);
+	if (ret)
+		return ret;
+
+	ret = regmap_write(context->pmureg,
+			   EXYNOS9810_PMU_CPU_INFORM_BASE +
+			   inform * EXYNOS9810_PMU_CPU_INFORM_STRIDE, 0);
+	if (ret)
+		return ret;
 
 	ret = regmap_update_bits(context->pmuintrgen,
 				 EXYNOS9810_GRP2_INTR_BID_ENABLE, mask, 0);
@@ -321,9 +517,21 @@ static int __exynos9810_cpu_power_off(struct exynos_pmu_context *context,
 {
 	u32 enable;
 	u32 event;
-	u32 mask = exynos9810_cpu_power_mask(cpu);
+	unsigned int inform;
+	u32 mask;
 	u32 pending;
 	int ret;
+
+	ret = exynos9810_cpu_power_ids(cpu, &inform, &mask);
+	if (ret)
+		return ret;
+
+	ret = regmap_write(context->pmureg,
+			   EXYNOS9810_PMU_CPU_INFORM_BASE +
+			   inform * EXYNOS9810_PMU_CPU_INFORM_STRIDE,
+			   EXYNOS9810_CPU_INFORM_C2);
+	if (ret)
+		return ret;
 
 	ret = regmap_update_bits(context->pmuintrgen,
 				 EXYNOS9810_GRP2_INTR_BID_ENABLE, mask, mask);
@@ -374,8 +582,6 @@ static int exynos9810_cpuhp_prepare(unsigned int cpu)
 	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
 	int ret;
 
-	if (!exynos9810_is_mongoose_cpu(cpu))
-		return 0;
 	if (!context || !context->pmuintrgen ||
 	    !context->exynos9810_cpu_ready)
 		return -ENODEV;
@@ -392,8 +598,13 @@ static int exynos9810_cpuhp_prepare(unsigned int cpu)
 
 static int exynos9810_cpuhp_online(unsigned int cpu)
 {
-	if (!exynos9810_is_mongoose_cpu(cpu) ||
-	    exynos9810_cpu_power_ready(cpu))
+	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
+
+	if (!context || !context->pmuintrgen ||
+	    !context->exynos9810_cpu_ready)
+		return -ENODEV;
+
+	if (test_bit(cpu, context->exynos9810_cpu_ready))
 		return 0;
 
 	return exynos9810_cpuhp_prepare(cpu);
@@ -404,8 +615,6 @@ static int exynos9810_cpuhp_offline(unsigned int cpu)
 	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
 	int ret;
 
-	if (!exynos9810_is_mongoose_cpu(cpu))
-		return 0;
 	if (!context || !context->pmuintrgen ||
 	    !context->exynos9810_cpu_ready)
 		return -ENODEV;
@@ -424,8 +633,7 @@ static int exynos9810_cpuhp_unprepare(unsigned int cpu)
 {
 	struct exynos_pmu_context *context = READ_ONCE(pmu_context);
 
-	if (context && context->exynos9810_cpu_ready &&
-	    exynos9810_is_mongoose_cpu(cpu))
+	if (context && context->exynos9810_cpu_ready)
 		clear_bit(cpu, context->exynos9810_cpu_ready);
 
 	return 0;
@@ -466,10 +674,10 @@ static int exynos9810_setup_cpuhp(struct device *dev)
 		return ret;
 	context->exynos9810_prepare_state = ret;
 
-	ret = cpuhp_setup_state_nocalls(CPUHP_AP_ONLINE_DYN,
-					"soc/exynos9810:online",
-					exynos9810_cpuhp_online,
-					exynos9810_cpuhp_offline);
+	ret = cpuhp_setup_state(CPUHP_AP_ONLINE_DYN,
+				"soc/exynos9810:online",
+				exynos9810_cpuhp_online,
+				exynos9810_cpuhp_offline);
 	if (ret < 0) {
 		cpuhp_remove_state_nocalls(context->exynos9810_prepare_state);
 		return ret;
@@ -834,7 +1042,7 @@ static int exynos_pmu_probe(struct platform_device *pdev)
 			return dev_err_probe(dev, ret,
 					     "failed to register Exynos9810 reboot notifier\n");
 
-#ifdef CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
 		ret = exynos9810_setup_cpuhp(dev);
 		if (ret)
 			return dev_err_probe(dev, ret,

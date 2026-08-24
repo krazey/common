@@ -39,9 +39,15 @@ static inline struct regmap *exynos_get_pmu_regmap_by_phandle(struct device_node
 }
 #endif
 
-#ifdef CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+int exynos9810_cpu_system_init(void);
 bool exynos9810_cpu_power_ready(unsigned int cpu);
 #else
+static inline int exynos9810_cpu_system_init(void)
+{
+	return 0;
+}
+
 static inline bool exynos9810_cpu_power_ready(unsigned int cpu)
 {
 	return true;
