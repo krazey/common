@@ -11,44 +11,140 @@ maintainers:
   - Jaehoon Chung <jh80.chung@samsung.com>
 
 description: |+
-  Exynos5433 SoC PCIe host controller is based on the Synopsys DesignWare
-  PCIe IP and thus inherits all the common properties defined in
-  snps,dw-pcie.yaml.
+  Samsung Exynos PCIe host controllers are based on the Synopsys DesignWare
+  PCIe IP and inherit all common properties defined in snps,dw-pcie.yaml.
 
 allOf:
   - $ref: /schemas/pci/snps,dw-pcie.yaml#
 
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos5433-pcie
+
+    then:
+      properties:
+        reg:
+          items:
+            - description: Data Bus Interface (DBI) registers
+            - description: External Local Bus interface (ELBI) registers
+            - description: PCIe configuration space region
+
+        reg-names:
+          items:
+            - const: dbi
+            - const: elbi
+            - const: config
+
+        clocks:
+          items:
+            - description: PCIe bridge clock
+            - description: PCIe bus clock
+
+        clock-names:
+          items:
+            - const: pcie
+            - const: pcie_bus
+
+      required:
+        - phys
+        - vdd10-supply
+        - vdd18-supply
+
+  - if:
+      properties:
+        compatible:
+          contains:
+            const: samsung,exynos9810-pcie
+
+    then:
+      properties:
+        reg:
+          items:
+            - description: Data Bus Interface (DBI) registers
+            - description: External Local Bus interface (ELBI) registers
+            - description: PCIe configuration space region
+            - description: Integrated PHY and PCS registers
+
+        reg-names:
+          items:
+            - const: dbi
+            - const: elbi
+            - const: config
+            - const: phy
+
+        clocks:
+          items:
+            - description: PCIe PHY reference clock
+            - description: PCIe DBI bus clock
+            - description: PCIe PHY APB clock
+            - description: PCIe master bus clock
+            - description: PCIe sub-controller APB clock
+            - description: PCIe PCS APB clock
+            - description: PCIe slave bus clock
+
+        clock-names:
+          items:
+            - const: phy_ref
+            - const: dbi
+            - const: phy_apb
+            - const: mstr
+            - const: subctrl
+            - const: pcs
+            - const: slv
+
+        phys: false
+        vdd10-supply: false
+        vdd18-supply: false
+        max-link-speed:
+          const: 2
+
+      required:
+        - max-link-speed
+        - reset-gpios
+        - samsung,fsys-sysreg
+        - samsung,pmu-syscon
+        - vpcie3v3-supply
+
 properties:
   compatible:
-    const: samsung,exynos5433-pcie
+    enum:
+      - samsung,exynos5433-pcie
+      - samsung,exynos9810-pcie
 
   reg:
-    items:
-      - description: Data Bus Interface (DBI) registers.
-      - description: External Local Bus interface (ELBI) registers.
-      - description: PCIe configuration space region.
+    minItems: 3
+    maxItems: 4
 
   reg-names:
-    items:
-      - const: dbi
-      - const: elbi
-      - const: config
+    minItems: 3
+    maxItems: 4
 
   interrupts:
     maxItems: 1
 
   clocks:
-    items:
-      - description: PCIe bridge clock
-      - description: PCIe bus clock
+    minItems: 2
+    maxItems: 7
 
   clock-names:
-    items:
-      - const: pcie
-      - const: pcie_bus
+    minItems: 2
+    maxItems: 7
 
   phys:
     maxItems: 1
+
+  samsung,fsys-sysreg:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the FSYS1 system register controller used by the
+      integrated PCIe PHY.
+
+  samsung,pmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the PMU system controller used to power the PCIe PHY.
 
   vdd10-supply:
     description:
@@ -57,6 +153,10 @@ properties:
   vdd18-supply:
     description:
       Phandle to a regulator that provides 1.8V power to the PCIe block.
+
+  vpcie3v3-supply:
+    description:
+      Phandle to the regulator that controls power to the PCIe endpoint.
 
   num-lanes:
     const: 1
@@ -80,9 +180,6 @@ required:
   - num-viewport
   - clocks
   - clock-names
-  - phys
-  - vdd10-supply
-  - vdd18-supply
 
 unevaluatedProperties: false
 
