@@ -35,9 +35,11 @@
 #include <linux/kgdb.h>
 #include <linux/kvm_host.h>
 #include <linux/nmi.h>
+#include <linux/soc/samsung/exynos-pmu.h>
 
 #include <asm/alternative.h>
 #include <asm/atomic.h>
+#include <asm/barrier.h>
 #include <asm/cacheflush.h>
 #include <asm/cpu.h>
 #include <asm/cputype.h>
@@ -75,6 +77,13 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(ipi_exit);
  * where to place its SVC stack
  */
 struct secondary_data secondary_data;
+static bool is_exynos9810_mongoose_cpu(unsigned int cpu)
+{
+	return IS_ENABLED(CONFIG_EXYNOS9810_MONGOOSE_CPUS) &&
+	       of_machine_is_compatible("samsung,exynos9810") &&
+	       MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
+}
+
 /* Number of CPUs which aren't online, but looping in kernel text. */
 static int cpus_stuck_in_kernel;
 
@@ -125,6 +134,7 @@ static DECLARE_COMPLETION(cpu_running);
 int __cpu_up(unsigned int cpu, struct task_struct *idle)
 {
 	int ret;
+	bool mongoose = is_exynos9810_mongoose_cpu(cpu);
 	long status;
 
 	exynos9810_cpu_up_marker('0');
@@ -133,7 +143,22 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 	 * page tables.
 	 */
 	secondary_data.task = idle;
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+	secondary_data.stack = task_stack_page(idle);
+#endif
 	update_cpu_boot_status(CPU_MMU_OFF);
+
+	if (mongoose) {
+		/*
+		 * CPUCL1 does not initially snoop dirty CPUCL0 cache lines.
+		 * Publish the task fields and explicit secondary hand-off.
+		 */
+		dcache_clean_poc((unsigned long)idle,
+				 (unsigned long)idle + sizeof(*idle));
+		dcache_clean_poc((unsigned long)&secondary_data,
+				 (unsigned long)(&secondary_data + 1));
+		dsb(sy);
+	}
 	exynos9810_cpu_up_marker('1');
 
 	/* Now bring the CPU into our world */
@@ -159,6 +184,9 @@ int __cpu_up(unsigned int cpu, struct task_struct *idle)
 
 	exynos9810_cpu_up_marker('F');
 	pr_crit("CPU%u: failed to come online\n", cpu);
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+	secondary_data.stack = NULL;
+#endif
 	secondary_data.task = NULL;
 	status = READ_ONCE(secondary_data.status);
 	if (status == CPU_MMU_OFF)
@@ -818,6 +846,12 @@ void __init smp_prepare_cpus(unsigned int max_cpus)
 	 */
 	if (max_cpus == 0)
 		return;
+
+	if (IS_ENABLED(CONFIG_EXYNOS9810_MONGOOSE_CPUS)) {
+		err = exynos9810_cpu_system_init();
+		if (err)
+			pr_err("Exynos9810 CPU system setup failed: %d\n", err);
+	}
 
 	/*
 	 * Initialise the present map (which describes the set of CPUs

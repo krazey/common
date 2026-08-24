@@ -176,7 +176,7 @@
 	 */
 	efi_signature_nop			// special NOP to identity as PE/COFF executable
 	b	primary_entry			// branch to kernel start, magic
-	.quad	0				// Image load offset from start of RAM, little-endian
+	le64sym	_kernel_offset_le		// Image load offset, little-endian
 	le64sym	_kernel_size_le			// Effective size of kernel image, little-endian
 	le64sym	_kernel_flags_le		// Informative flags, little-endian
 	.quad	0				// reserved
@@ -484,11 +484,10 @@ SYM_CODE_END(exynos9810_store_boot_snapshot)
 	 * its location in the task stack. We reserve the entire pt_regs space
 	 * for consistency with user tasks and kthreads.
 	 */
-	.macro	init_cpu_task tsk, tmp1, tmp2
+	.macro	init_cpu_task_from_stack tsk, stack, tmp1, tmp2
 	msr	sp_el0, \tsk
 
-	ldr	\tmp1, [\tsk, #TSK_STACK]
-	add	sp, \tmp1, #THREAD_SIZE
+	add	sp, \stack, #THREAD_SIZE
 	sub	sp, sp, #PT_REGS_SIZE
 
 	stp	xzr, xzr, [sp, #S_STACKFRAME]
@@ -502,6 +501,11 @@ SYM_CODE_END(exynos9810_store_boot_snapshot)
 	ldr	w\tmp2, [\tsk, #TSK_TI_CPU]
 	ldr	\tmp1, [\tmp1, \tmp2, lsl #3]
 	set_this_cpu_offset \tmp1
+	.endm
+
+	.macro	init_cpu_task tsk, tmp1, tmp2
+	ldr	\tmp1, [\tsk, #TSK_STACK]
+	init_cpu_task_from_stack \tsk, \tmp1, \tmp1, \tmp2
 	.endm
 
 /*
@@ -776,6 +780,30 @@ SYM_FUNC_START(secondary_entry)
 	b	secondary_startup
 SYM_FUNC_END(secondary_entry)
 
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+/*
+ * Samsung's firmware enters CPUCL1 at EL1 on production Exynos9810
+ * devices. Preserve the direct EL1 setup used by the downstream entry,
+ * while retaining the generic EL2 initializer for alternate firmware.
+ */
+SYM_CODE_START(exynos9810_secondary_entry)
+	msr	spsel, #1
+	mrs	x0, CurrentEL
+	cmp	x0, #CurrentEL_EL2
+	b.eq	.Lexynos9810_m3_init_el2
+	mov_q	x0, INIT_SCTLR_EL1_MMU_OFF
+	msr	sctlr_el1, x0
+	mov	w0, #BOOT_CPU_MODE_EL1
+	isb
+	b	.Lexynos9810_m3_el_ready
+.Lexynos9810_m3_init_el2:
+	mov	x0, xzr
+	bl	init_kernel_el
+.Lexynos9810_m3_el_ready:
+	b	secondary_startup
+SYM_CODE_END(exynos9810_secondary_entry)
+#endif
+
 SYM_FUNC_START_LOCAL(secondary_startup)
 	/*
 	 * Common entry point for secondary CPUs.
@@ -813,7 +841,12 @@ SYM_FUNC_START_LOCAL(__secondary_switched)
 	ldr	x2, [x0, #CPU_BOOT_TASK]
 	cbz	x2, __secondary_too_slow
 
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+	ldr	x1, [x0, #CPU_BOOT_STACK]
+	init_cpu_task_from_stack x2, x1, x1, x3
+#else
 	init_cpu_task x2, x1, x3
+#endif
 
 #ifdef CONFIG_ARM64_PTR_AUTH
 	ptrauth_keys_init_cpu x2, x3, x4, x5

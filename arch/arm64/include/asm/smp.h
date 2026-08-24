@@ -84,17 +84,24 @@ asmlinkage void secondary_start_kernel(void);
 
 /*
  * Initial data for bringing up a secondary CPU.
+ * @stack  - Explicit stack base for a non-coherent secondary hand-off.
  * @status - Result passed back from the secondary CPU to
  *           indicate failure.
  */
 struct secondary_data {
 	struct task_struct *task;
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+	void *stack;
+#endif
 	long status;
 };
 
 extern struct secondary_data secondary_data;
 extern long __early_cpu_boot_status;
 extern void secondary_entry(void);
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+extern void exynos9810_secondary_entry(void);
+#endif
 
 extern void arch_send_call_function_single_ipi(int cpu);
 extern void arch_send_call_function_ipi_mask(const struct cpumask *mask);

@@ -55,12 +55,19 @@
 				 __HEAD_FLAG(PAGE_SIZE) | \
 				 __HEAD_FLAG(PHYS_BASE))
 
+#ifdef CONFIG_EXYNOS9810_UNALIGNED_IMAGE
+#define __HEAD_TEXT_OFFSET	0x80000
+#else
+#define __HEAD_TEXT_OFFSET	0
+#endif
+
 /*
  * These will output as part of the Image header, which should be little-endian
  * regardless of the endianness of the kernel. While constant values could be
  * endian swapped in head.S, all are done here for consistency.
  */
 #define HEAD_SYMBOLS						\
+	DEFINE_IMAGE_LE64(_kernel_offset_le, __HEAD_TEXT_OFFSET); \
 	DEFINE_IMAGE_LE64(_kernel_size_le, _end - _text);	\
 	DEFINE_IMAGE_LE64(_kernel_flags_le, __HEAD_FLAGS);
 

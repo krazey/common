@@ -166,23 +166,26 @@ config EXYNOS9810_SINGLE_CPU_BRINGUP
 	  CPUs online after device probes so early firmware clients initialize
 	  before PSCI starts the secondary cores.
 
-config EXYNOS9810_DEFER_MONGOOSE_CPUS
-	bool "Defer Exynos9810 Mongoose CPU bring-up"
+config EXYNOS9810_MONGOOSE_CPUS
+	bool "Enable Exynos9810 Mongoose CPUs"
 	depends on ARCH_EXYNOS
 	help
-	  Keep the Mongoose cluster out of the arm64 CPU present mask while the
-	  required power, reset, and clock sequencing is being ported. PSCI
-	  CPU_ON does not return for the first Mongoose M3 without that support.
-	  The Cortex-A55 cluster remains available for four-core SMP operation.
+	  Initialize the CPU cluster clock, fabric, and memory controls used by
+	  Samsung's CAL implementation before the first SMP pass. This also
+	  provides the low-memory reset vector and non-coherent hand-off needed
+	  to start CPUCL1 through the normal PSCI path.
+
+	  The generic arm64 SMP and feature negotiation paths remain in use.
+	  Disable this option to keep the Mongoose cluster unavailable.
 
 config EXYNOS9810_UNALIGNED_IMAGE
 	bool "Support unaligned Exynos9810 kernel placement"
 	depends on ARCH_EXYNOS
 	help
-	  Reserve alignment slack for the initial task stack and realign it
-	  after applying the kernel image relocation. This supports legacy
-	  firmware which does not provide the 2 MiB placement required by the
-	  arm64 boot protocol.
+	  Advertise the legacy 512 KiB Image load offset, reserve alignment
+	  slack for the initial task stack, and realign it after applying the
+	  kernel image relocation. This supports legacy firmware which does not
+	  provide the 2 MiB placement required by the arm64 boot protocol.
 
 config ARCH_K3
 	bool "Texas Instruments Inc. K3 multicore SoC architecture"
