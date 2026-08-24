@@ -444,12 +444,18 @@ static int exynos9810_pcie_host_init(struct exynos_pcie *ep)
 	exynos_pcie_writel(elbi, val, EXYNOS9810_PCIE_QCH_SELECT);
 
 	ret = exynos9810_pcie_phy_init(ep);
-	if (ret)
+	if (ret) {
 		gpiod_set_value_cansleep(ep->reset_gpio, 1);
-	else
-		exynos9810_pcie_config_ia(ep);
+		return ret;
+	}
 
-	return ret;
+	exynos9810_pcie_config_ia(ep);
+
+	val = exynos_pcie_readl(elbi, PCIE_SW_WAKE);
+	val &= ~PCIE_BUS_EN;
+	exynos_pcie_writel(elbi, val, PCIE_SW_WAKE);
+
+	return 0;
 }
 
 static void exynos9810_pcie_link_power_down(struct exynos_pcie *ep)
@@ -562,6 +568,18 @@ static void exynos9810_pcie_setup_rc(struct exynos_pcie *ep)
 	pm_cap = dw_pcie_find_capability(pci, PCI_CAP_ID_PM);
 
 	dw_pcie_dbi_ro_wr_en(pci);
+
+	val = dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL);
+	val &= ~(PORT_LINK_MODE_MASK | PORT_LINK_DLL_LINK_EN |
+		 PORT_LINK_FAST_LINK_MODE);
+	val |= PORT_LINK_MODE_1_LANES;
+	dw_pcie_writel_dbi(pci, PCIE_PORT_LINK_CONTROL, val);
+
+	val = dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL);
+	val &= ~PORT_LOGIC_LINK_WIDTH_MASK;
+	val |= PORT_LOGIC_LINK_WIDTH_1_LANES;
+	dw_pcie_writel_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL, val);
+
 	dw_pcie_writew_dbi(pci, PCI_VENDOR_ID, PCI_VENDOR_ID_SAMSUNG);
 	dw_pcie_writew_dbi(pci, PCI_DEVICE_ID,
 			   EXYNOS9810_PCIE_DEVICE_ID);
@@ -598,7 +616,6 @@ static void exynos9810_pcie_setup_rc(struct exynos_pcie *ep)
 				   val16);
 	}
 
-	dw_pcie_dbi_ro_wr_dis(pci);
 }
 
 static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
@@ -628,9 +645,6 @@ static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
 		exynos9810_pcie_setup_rc(ep);
 		exynos9810_pcie_set_rx_elecidle(ep, false);
 
-		val = exynos_pcie_readl(pci->elbi_base, PCIE_SW_WAKE);
-		val &= ~PCIE_BUS_EN;
-		exynos_pcie_writel(pci->elbi_base, val, PCIE_SW_WAKE);
 		exynos_pcie_writel(pci->elbi_base,
 				   PCIE_ELBI_LTSSM_ENABLE,
 				   PCIE_APP_LTSSM_ENABLE);
