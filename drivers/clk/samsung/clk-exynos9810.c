@@ -6,8 +6,10 @@
  */
 
 #include <linux/clk-provider.h>
+#include <linux/iopoll.h>
 #include <linux/mod_devicetable.h>
 #include <linux/of.h>
+#include <linux/of_address.h>
 #include <linux/platform_device.h>
 
 #include <dt-bindings/clock/samsung,exynos9810.h>
@@ -15,7 +17,7 @@
 #include "clk.h"
 #include "clk-exynos-arm64.h"
 
-#define CLKS_NR_TOP		(CLK_GOUT_TOP_DPU_BUS + 1)
+#define CLKS_NR_TOP		(CLK_DOUT_TOP_FSYS1_PCIE + 1)
 #define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
 #define CLKS_NR_FSYS1		(CLK_GOUT_FSYS1_PCIE_SLV + 1)
 #define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI3_PCLK + 1)
@@ -24,15 +26,42 @@
 
 /* ---- CMU_TOP ---------------------------------------------------------- */
 
+#define CLK_CON_MUX_MUX_CLKCMU_FSYS1_PCIE	0x1070
 #define CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS		0x2028
 #define CLK_CON_GAT_GATE_CLKCMU_DPU_BUS		0x204c
+#define CLK_CON_GAT_GATE_CLKCMU_FSYS1_PCIE	0x2074
 
 static const unsigned long top_clk_regs[] __initconst = {
+	CLK_CON_MUX_MUX_CLKCMU_FSYS1_PCIE,
 	CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS,
 	CLK_CON_GAT_GATE_CLKCMU_DPU_BUS,
+	CLK_CON_GAT_GATE_CLKCMU_FSYS1_PCIE,
+};
+
+static const struct samsung_fixed_rate_clock top_fixed_clks[] __initconst = {
+	FRATE(0, "fout_shared2_pll_boot", NULL, 0, 800 * MHZ),
+};
+
+PNAME(mout_top_fsys1_pcie_p) = {
+	"oscclk", "fout_shared2_pll_boot"
+};
+
+static const struct samsung_mux_clock top_mux_clks[] __initconst = {
+	MUX(CLK_MOUT_TOP_FSYS1_PCIE, "mout_clkcmu_fsys1_pcie",
+	    mout_top_fsys1_pcie_p, CLK_CON_MUX_MUX_CLKCMU_FSYS1_PCIE,
+	    0, 1),
+};
+
+static const struct samsung_fixed_factor_clock top_fixed_factor_clks[] __initconst = {
+	FFACTOR(CLK_DOUT_TOP_FSYS1_PCIE, "dout_clkcmu_fsys1_pcie",
+		"gout_clkcmu_fsys1_pcie", 1, 8, 0),
 };
 
 static const struct samsung_gate_clock top_gate_clks[] __initconst = {
+	GATE(CLK_GOUT_TOP_FSYS1_PCIE, "gout_clkcmu_fsys1_pcie",
+	     "mout_clkcmu_fsys1_pcie",
+	     CLK_CON_GAT_GATE_CLKCMU_FSYS1_PCIE,
+	     21, CLK_IS_CRITICAL, 0),
 	GATE(CLK_GOUT_TOP_CMGP_BUS, "dout_clkcmu_cmgp_bus",
 	     "cmgp_bus_bootclk", CLK_CON_GAT_GATE_CLKCMU_CMGP_BUS,
 	     21, CLK_IS_CRITICAL, 0),
@@ -42,6 +71,12 @@ static const struct samsung_gate_clock top_gate_clks[] __initconst = {
 };
 
 static const struct samsung_cmu_info top_cmu_info __initconst = {
+	.mux_clks		= top_mux_clks,
+	.nr_mux_clks		= ARRAY_SIZE(top_mux_clks),
+	.fixed_clks		= top_fixed_clks,
+	.nr_fixed_clks		= ARRAY_SIZE(top_fixed_clks),
+	.fixed_factor_clks	= top_fixed_factor_clks,
+	.nr_fixed_factor_clks	= ARRAY_SIZE(top_fixed_factor_clks),
 	.gate_clks		= top_gate_clks,
 	.nr_gate_clks		= ARRAY_SIZE(top_gate_clks),
 	.nr_clk_ids		= CLKS_NR_TOP,
@@ -478,12 +513,41 @@ static const struct samsung_cmu_info cmgp_cmu_info __initconst = {
 	.clk_name		= "dout_clkcmu_cmgp_bus",
 };
 
+static void __init exynos9810_cmu_top_init(struct device_node *np)
+{
+	void __iomem *base;
+	u32 val;
+	int ret;
+
+	base = of_iomap(np, 0);
+	if (!base) {
+		pr_err("exynos9810-cmu-top: failed to map registers\n");
+		return;
+	}
+
+	val = readl(base + CLK_CON_MUX_MUX_CLKCMU_FSYS1_PCIE);
+	if (!(val & BIT(0))) {
+		writel(val | BIT(0),
+		       base + CLK_CON_MUX_MUX_CLKCMU_FSYS1_PCIE);
+		ret = readl_poll_timeout_atomic(
+			base + CLK_CON_MUX_MUX_CLKCMU_FSYS1_PCIE,
+			val, !(val & BIT(16)), 1, 100);
+		if (ret)
+			pr_warn("exynos9810-cmu-top: PCIe mux timed out\n");
+	}
+
+	iounmap(base);
+}
+
 static int __init exynos9810_cmu_probe(struct platform_device *pdev)
 {
 	const struct samsung_cmu_info *info;
 	struct device *dev = &pdev->dev;
 
 	info = of_device_get_match_data(dev);
+	if (info == &top_cmu_info)
+		exynos9810_cmu_top_init(dev->of_node);
+
 	exynos_arm64_register_cmu(dev, dev->of_node, info);
 
 	return 0;
