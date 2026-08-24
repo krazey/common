@@ -97,6 +97,9 @@ int main(void)
   BLANK();
 #endif
   DEFINE(CPU_BOOT_TASK,		offsetof(struct secondary_data, task));
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+	DEFINE(CPU_BOOT_STACK,	offsetof(struct secondary_data, stack));
+#endif
   BLANK();
   DEFINE(FTR_OVR_VAL_OFFSET,	offsetof(struct arm64_ftr_override, val));
   DEFINE(FTR_OVR_MASK_OFFSET,	offsetof(struct arm64_ftr_override, mask));

@@ -13,15 +13,22 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 #include <linux/psci.h>
-#include <linux/mm.h>
+#include <linux/soc/samsung/exynos-pmu.h>
 
 #include <uapi/linux/psci.h>
 
 #include <asm/cpu_ops.h>
 #include <asm/cputype.h>
 #include <asm/errno.h>
+#include <asm/memory.h>
 #include <asm/setup.h>
 #include <asm/smp_plat.h>
+
+static bool cpu_psci_is_exynos9810_mongoose(unsigned int cpu)
+{
+	return of_machine_is_compatible("samsung,exynos9810") &&
+	       MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
+}
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 #define exynos9810_psci_marker(first, cpu) \
@@ -31,23 +38,21 @@
 	do { (void)(first); (void)(cpu); } while (0)
 #endif
 
-static bool cpu_psci_is_exynos9810_mongoose(unsigned int cpu)
-{
-	return IS_ENABLED(CONFIG_EXYNOS9810_DEFER_MONGOOSE_CPUS) &&
-	       of_machine_is_compatible("samsung,exynos9810") &&
-	       MPIDR_AFFINITY_LEVEL(cpu_logical_map(cpu), 1) == 1;
-}
-
 static int __init cpu_psci_cpu_init(unsigned int cpu)
 {
-	if (cpu_psci_is_exynos9810_mongoose(cpu))
-		return -EOPNOTSUPP;
-
 	return 0;
 }
 
 static int __init cpu_psci_cpu_prepare(unsigned int cpu)
 {
+	if (cpu_psci_is_exynos9810_mongoose(cpu)) {
+		if (!IS_ENABLED(CONFIG_EXYNOS9810_MONGOOSE_CPUS))
+			return -EOPNOTSUPP;
+
+		if (!exynos9810_cpu_power_ready(cpu))
+			return -EAGAIN;
+	}
+
 	if (!psci_ops.cpu_on) {
 		pr_err("no cpu_on method, not booting CPU%d\n", cpu);
 		return -ENODEV;
@@ -60,6 +65,11 @@ static int cpu_psci_cpu_boot(unsigned int cpu)
 {
 	phys_addr_t pa_secondary_entry = __pa_symbol(secondary_entry);
 	int err;
+
+#ifdef CONFIG_EXYNOS9810_MONGOOSE_CPUS
+	if (cpu_psci_is_exynos9810_mongoose(cpu))
+		pa_secondary_entry = __pa_symbol(exynos9810_secondary_entry);
+#endif
 
 	exynos9810_psci_marker('P', cpu);
 	err = psci_ops.cpu_on(cpu_logical_map(cpu), pa_secondary_entry);
