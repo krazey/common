@@ -121,6 +121,12 @@ select:
           - rockchip,rk3576-qos
           - rockchip,rk3588-qos
           - rockchip,rv1126-qos
+          - samsung,exynos9810-core-cmu
+          - samsung,exynos9810-core-sysreg
+          - samsung,exynos9810-cpucl0-cmu
+          - samsung,exynos9810-cpucl0-sysreg
+          - samsung,exynos9810-cpucl1-cmu
+          - samsung,exynos9810-cpucl1-sysreg
           - st,spear1340-misc
           - stericsson,nomadik-pmu
           - starfive,jh7100-sysmain
@@ -235,6 +241,12 @@ properties:
               - rockchip,rk3576-qos
               - rockchip,rk3588-qos
               - rockchip,rv1126-qos
+              - samsung,exynos9810-core-cmu
+              - samsung,exynos9810-core-sysreg
+              - samsung,exynos9810-cpucl0-cmu
+              - samsung,exynos9810-cpucl0-sysreg
+              - samsung,exynos9810-cpucl1-cmu
+              - samsung,exynos9810-cpucl1-sysreg
               - st,spear1340-misc
               - stericsson,nomadik-pmu
               - starfive,jh7100-sysmain

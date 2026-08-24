@@ -120,6 +120,36 @@ properties:
     description:
       Phandle to the Exynos PMU interrupt generation interface.
 
+  samsung,core-cmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos9810 CORE clock management registers.
+
+  samsung,core-sysreg-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos9810 CORE system registers.
+
+  samsung,cpucl0-cmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos9810 CPUCL0 clock management registers.
+
+  samsung,cpucl0-sysreg-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos9810 CPUCL0 system registers.
+
+  samsung,cpucl1-cmu-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos9810 CPUCL1 clock management registers.
+
+  samsung,cpucl1-sysreg-syscon:
+    $ref: /schemas/types.yaml#/definitions/phandle
+    description:
+      Phandle to the Exynos9810 CPUCL1 system registers.
+
 required:
   - compatible
   - reg
@@ -201,9 +231,21 @@ allOf:
             const: samsung,exynos9810-pmu
     then:
       required:
+        - samsung,core-cmu-syscon
+        - samsung,core-sysreg-syscon
+        - samsung,cpucl0-cmu-syscon
+        - samsung,cpucl0-sysreg-syscon
+        - samsung,cpucl1-cmu-syscon
+        - samsung,cpucl1-sysreg-syscon
         - samsung,pmu-intr-gen-syscon
     else:
       properties:
+        samsung,core-cmu-syscon: false
+        samsung,core-sysreg-syscon: false
+        samsung,cpucl0-cmu-syscon: false
+        samsung,cpucl0-sysreg-syscon: false
+        samsung,cpucl1-cmu-syscon: false
+        samsung,cpucl1-sysreg-syscon: false
         samsung,pmu-intr-gen-syscon: false
 
 examples:
