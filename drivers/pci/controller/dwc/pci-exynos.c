@@ -13,6 +13,7 @@
 #include <linux/delay.h>
 #include <linux/gpio/consumer.h>
 #include <linux/interrupt.h>
+#include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/mfd/syscon.h>
@@ -90,6 +91,24 @@
 #define EXYNOS9810_PCIE_LINK_RETRIES	10
 #define EXYNOS9810_PCIE_LINK_POLLS	2000
 
+#define EXYNOS9810_CMU_FSYS1_BASE	0x11400000
+#define EXYNOS9810_CMU_FSYS1_BUS_MUX	0x0100
+#define EXYNOS9810_CMU_FSYS1_PCIE_MUX	0x0180
+#define EXYNOS9810_CMU_FSYS1_REF_GATE	0x2000
+#define EXYNOS9810_CMU_FSYS1_DBI_GATE	0x2038
+#define EXYNOS9810_CMU_FSYS1_PHY_GATE	0x203c
+#define EXYNOS9810_CMU_FSYS1_MSTR_GATE	0x2040
+#define EXYNOS9810_CMU_FSYS1_SUB_GATE	0x2044
+#define EXYNOS9810_CMU_FSYS1_PCS_GATE	0x2048
+#define EXYNOS9810_CMU_FSYS1_SLV_GATE	0x204c
+#define EXYNOS9810_CMU_FSYS1_SOCPLL_QCH	0x3000
+#define EXYNOS9810_CMU_FSYS1_APB_QCH	0x302c
+#define EXYNOS9810_CMU_FSYS1_DBI_QCH	0x3030
+#define EXYNOS9810_CMU_FSYS1_MSTR_QCH	0x3034
+#define EXYNOS9810_CMU_FSYS1_PCS_QCH	0x3038
+#define EXYNOS9810_CMU_FSYS1_PHY_QCH	0x303c
+#define EXYNOS9810_CMU_FSYS1_IA_QCH	0x3054
+
 struct exynos_pcie_data {
 	bool integrated_phy;
 	bool preserve_boot_clocks;
@@ -109,6 +128,7 @@ struct exynos_pcie {
 	void __iomem			*phy_base;
 	void __iomem			*pcs_base;
 	void __iomem			*ia_base;
+	void __iomem			*cmu_base;
 	struct regmap			*pmureg;
 	struct regmap			*sysreg;
 	struct gpio_desc		*reset_gpio;
@@ -319,6 +339,86 @@ static void exynos9810_pcie_log_power_state(struct exynos_pcie *ep)
 		 exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_HISTORY),
 		 exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_POWER_S),
 		 exynos_pcie_readl(elbi, EXYNOS9810_PCIE_STATE_POWER_M));
+}
+
+static void exynos9810_pcie_log_link_state(struct exynos_pcie *ep,
+					   const char *stage)
+{
+	struct dw_pcie *pci = &ep->pci;
+	void __iomem *cmu = ep->cmu_base;
+	void __iomem *elbi = pci->elbi_base;
+	u32 pmu_phy = 0;
+	u32 pmu_wake = 0;
+	u32 sys_share = 0;
+	u32 sys_ctrl = 0;
+	u32 sys_lanes = 0;
+
+	regmap_read(ep->pmureg, EXYNOS9810_PMU_PCIE_PHY, &pmu_phy);
+	regmap_read(ep->pmureg, EXYNOS9810_PMU_WAKEUP_MASK, &pmu_wake);
+	regmap_read(ep->sysreg, EXYNOS9810_SYSREG_PCIE_SHARABILITY,
+		    &sys_share);
+	regmap_read(ep->sysreg, EXYNOS9810_SYSREG_PCIE_CTRL, &sys_ctrl);
+	regmap_read(ep->sysreg, EXYNOS9810_SYSREG_PCIE_LANES, &sys_lanes);
+
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s PMU=%#x/%#x SYSREG=%#x/%#x/%#x\n",
+		 stage, pmu_phy, pmu_wake, sys_share, sys_ctrl, sys_lanes);
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s CMU mux=%#x/%#x leaf=%#x/%#x/%#x\n",
+		 stage, readl(cmu + EXYNOS9810_CMU_FSYS1_BUS_MUX),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_PCIE_MUX),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_REF_GATE),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_DBI_GATE),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_PHY_GATE));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s CMU leaf=%#x/%#x/%#x/%#x\n",
+		 stage, readl(cmu + EXYNOS9810_CMU_FSYS1_MSTR_GATE),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_SUB_GATE),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_PCS_GATE),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_SLV_GATE));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s QCH=%#x/%#x/%#x/%#x\n",
+		 stage, readl(cmu + EXYNOS9810_CMU_FSYS1_SOCPLL_QCH),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_APB_QCH),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_DBI_QCH),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_MSTR_QCH));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s QCH=%#x/%#x/%#x\n",
+		 stage, readl(cmu + EXYNOS9810_CMU_FSYS1_PCS_QCH),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_PHY_QCH),
+		 readl(cmu + EXYNOS9810_CMU_FSYS1_IA_QCH));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s ELBI=%#x/%#x/%#x/%#x\n",
+		 stage, readl(elbi + PCIE_SW_WAKE),
+		 readl(elbi + PCIE_APP_LTSSM_ENABLE),
+		 readl(elbi + PCIE_ELBI_RDLH_LINKUP),
+		 readl(elbi + EXYNOS9810_PCIE_CORE_RESET));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s ELBI reset=%#x/%#x/%#x\n",
+		 stage, readl(elbi + EXYNOS9810_PCIE_PCS_RESET),
+		 readl(elbi + EXYNOS9810_PCIE_PHY_RESET),
+		 readl(elbi + EXYNOS9810_PCIE_MAC_RESET));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s PCS=%#x/%#x/%#x/%#x/%#x/%#x\n",
+		 stage, readl(ep->pcs_base + 0x0c),
+		 readl(ep->pcs_base + 0xd0),
+		 readl(ep->pcs_base + 0xec),
+		 readl(ep->pcs_base + 0xf8),
+		 readl(ep->pcs_base + 0x100),
+		 readl(ep->pcs_base + 0x104));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s PMA=%#x/%#x/%#x DBI=%#x/%#x\n",
+		 stage, readl(ep->phy_base + 0x80),
+		 readl(ep->phy_base + 0xbc),
+		 readl(ep->phy_base + 0x15c),
+		 dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL),
+		 dw_pcie_readl_dbi(pci, PCIE_LINK_WIDTH_SPEED_CONTROL));
+	dev_info(pci->dev,
+		 "E981D: WLAN PCIe %s DBI=%#x/%#x/%#x/%#x\n",
+		 stage, dw_pcie_readl_dbi(pci, PCI_VENDOR_ID),
+		 dw_pcie_readl_dbi(pci, PCIE_MISC_CONTROL_1_OFF),
+		 dw_pcie_readl_dbi(pci, EXYNOS9810_PCIE_AUX_CLK_FREQ),
+		 dw_pcie_readl_dbi(pci, EXYNOS9810_PCIE_L1_SUBSTATES));
 }
 
 static int exynos9810_pcie_phy_init(struct exynos_pcie *ep)
@@ -645,6 +745,9 @@ static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
 		exynos9810_pcie_setup_rc(ep);
 		exynos9810_pcie_set_rx_elecidle(ep, false);
 
+		if (!attempt)
+			exynos9810_pcie_log_link_state(ep, "pre-LTSSM");
+
 		exynos_pcie_writel(pci->elbi_base,
 				   PCIE_ELBI_LTSSM_ENABLE,
 				   PCIE_APP_LTSSM_ENABLE);
@@ -655,6 +758,7 @@ static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
 						PCIE_ELBI_RDLH_LINKUP);
 			val &= GENMASK(4, 0);
 			if (val >= 0x0d && val <= 0x14) {
+				exynos9810_pcie_log_link_state(ep, "linked");
 				exynos_pcie_enable_irq_pulse(ep);
 				dev_info(pci->dev,
 					 "link trained on attempt %u\n",
@@ -667,6 +771,8 @@ static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
 		dev_warn(pci->dev,
 			 "link attempt %u failed, LTSSM=0x%x\n",
 			 attempt + 1, val);
+		if (!attempt)
+			exynos9810_pcie_log_link_state(ep, "failed");
 	}
 
 	return -ETIMEDOUT;
@@ -1012,6 +1118,12 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 	ep->ia_base = devm_platform_ioremap_resource_byname(pdev, "ia");
 	if (IS_ERR(ep->ia_base))
 		return PTR_ERR(ep->ia_base);
+
+	ep->cmu_base = devm_ioremap(dev, EXYNOS9810_CMU_FSYS1_BASE,
+				    SZ_32K);
+	if (!ep->cmu_base)
+		return dev_err_probe(dev, -ENOMEM,
+				     "failed to map FSYS1 CMU\n");
 
 	ep->pcs_base = phy;
 	ep->phy_base = phy + SZ_4K;
