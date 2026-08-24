@@ -104,7 +104,7 @@ config BCM4361
 
 config BCMDHD_EXYNOS9810
 	bool
-	depends on BCM4361 && ARCH_EXYNOS
+	depends on BCM4361 && ARCH_EXYNOS && PCI_EXYNOS
 	default y
 
 config BCM4375

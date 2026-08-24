@@ -16,7 +16,10 @@
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/mfd/syscon.h>
+#include <linux/mutex.h>
 #include <linux/pci.h>
+#include <linux/pci-exynos9810.h>
+#include <linux/pinctrl/consumer.h>
 #include <linux/platform_device.h>
 #include <linux/phy/phy.h>
 #include <linux/regmap.h>
@@ -67,8 +70,12 @@
 #define EXYNOS9810_PCIE_QCH_SELECT	0x2c8
 
 #define EXYNOS9810_PMU_PCIE_PHY		0x71c
+#define EXYNOS9810_PMU_WAKEUP_MASK	0x610
+#define EXYNOS9810_PMU_WAKEUP_PCIE_WIFI	BIT(5)
+#define EXYNOS9810_SYSREG_PCIE_SHARABILITY	0x700
 #define EXYNOS9810_SYSREG_PCIE_CTRL	0x1044
 #define EXYNOS9810_SYSREG_PCIE_LANES	0x1050
+#define EXYNOS9810_SYSREG_PCIE_SHARABLE	GENMASK(9, 8)
 
 #define EXYNOS9810_PCIE_AUX_CLK_FREQ	0xb40
 #define EXYNOS9810_PCIE_L1_SUBSTATES	0xb44
@@ -101,13 +108,21 @@ struct exynos_pcie {
 	struct regmap			*pmureg;
 	struct regmap			*sysreg;
 	struct gpio_desc		*reset_gpio;
+	struct pinctrl			*pinctrl;
+	struct pinctrl_state		*pins_default;
+	struct pinctrl_state		*pins_idle;
 	struct regulator		*vpcie3v3;
 	bool				phy_initialized;
 	bool				vpcie3v3_enabled;
 	bool				supplies_enabled;
+	bool				link_deferred;
+	bool				link_active;
+	bool				irq_enabled;
 };
 
 static void exynos_pcie_enable_irq_pulse(struct exynos_pcie *ep);
+static DEFINE_MUTEX(exynos9810_wlan_pcie_lock);
+static struct exynos_pcie *exynos9810_wlan_pcie;
 
 static void exynos_pcie_writel(void __iomem *base, u32 val, u32 reg)
 {
@@ -228,6 +243,20 @@ static void exynos9810_pcie_phy_power_on(struct exynos_pcie *ep)
 	exynos_pcie_writel(ep->phy_base, 0x7e, 0x57 * 4);
 }
 
+static void exynos9810_pcie_phy_power_down(struct exynos_pcie *ep)
+{
+	u32 val;
+
+	exynos_pcie_writel(ep->phy_base, 0xfe, 0x57 * 4);
+	exynos_pcie_writel(ep->phy_base, 0xc1, 0x20 * 4);
+
+	val = exynos_pcie_readl(ep->pcs_base, 0x100);
+	exynos_pcie_writel(ep->pcs_base, val | BIT(6), 0x100);
+
+	val = exynos_pcie_readl(ep->pcs_base, 0x104);
+	exynos_pcie_writel(ep->pcs_base, val | BIT(7), 0x104);
+}
+
 static int exynos9810_pcie_phy_init(struct exynos_pcie *ep)
 {
 	u32 val;
@@ -282,6 +311,48 @@ static int exynos9810_pcie_phy_init(struct exynos_pcie *ep)
 	return 0;
 }
 
+static int exynos9810_pcie_initial_powerdown(struct exynos_pcie *ep)
+{
+	struct device *dev = ep->pci.dev;
+	int ret;
+
+	gpiod_set_value_cansleep(ep->reset_gpio, 1);
+	exynos_pcie_writel(ep->pci.elbi_base, 0, PCIE_APP_LTSSM_ENABLE);
+
+	ret = pinctrl_select_state(ep->pinctrl, ep->pins_idle);
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_PCIE_PHY,
+				 BIT(0), BIT(0));
+	if (ret)
+		return ret;
+
+	ret = regmap_update_bits(ep->sysreg,
+				 EXYNOS9810_SYSREG_PCIE_SHARABILITY,
+				 EXYNOS9810_SYSREG_PCIE_SHARABLE,
+				 EXYNOS9810_SYSREG_PCIE_SHARABLE);
+	if (ret)
+		return ret;
+
+	ret = exynos9810_pcie_phy_init(ep);
+	if (ret)
+		return ret;
+
+	exynos9810_pcie_config_ia(ep);
+	exynos9810_pcie_phy_power_down(ep);
+
+	ret = regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_WAKEUP_MASK,
+				 EXYNOS9810_PMU_WAKEUP_PCIE_WIFI,
+				 EXYNOS9810_PMU_WAKEUP_PCIE_WIFI);
+	if (ret)
+		return ret;
+
+	dev_info(dev, "WLAN link held in initial power-down state\n");
+
+	return 0;
+}
+
 static int exynos9810_pcie_host_init(struct exynos_pcie *ep)
 {
 	void __iomem *elbi = ep->pci.elbi_base;
@@ -323,10 +394,40 @@ static int exynos9810_pcie_host_init(struct exynos_pcie *ep)
 	return ret;
 }
 
+static void exynos9810_pcie_link_power_down(struct exynos_pcie *ep)
+{
+	bool was_powered = ep->link_active || ep->vpcie3v3_enabled;
+
+	if (ep->irq_enabled) {
+		disable_irq(ep->pci.pp.irq);
+		ep->irq_enabled = false;
+	}
+
+	gpiod_set_value_cansleep(ep->reset_gpio, 1);
+	exynos_pcie_writel(ep->pci.elbi_base, 0, PCIE_APP_LTSSM_ENABLE);
+	exynos9810_pcie_phy_power_down(ep);
+	regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_WAKEUP_MASK,
+			   EXYNOS9810_PMU_WAKEUP_PCIE_WIFI,
+			   EXYNOS9810_PMU_WAKEUP_PCIE_WIFI);
+	pinctrl_select_state(ep->pinctrl, ep->pins_idle);
+
+	if (ep->vpcie3v3_enabled) {
+		regulator_disable(ep->vpcie3v3);
+		ep->vpcie3v3_enabled = false;
+	}
+
+	ep->link_active = false;
+	ep->link_deferred = true;
+
+	if (was_powered)
+		dev_info(ep->pci.dev, "WLAN PCIe link powered down\n");
+}
+
 static void exynos9810_pcie_host_deinit(struct exynos_pcie *ep)
 {
 	void __iomem *elbi = ep->pci.elbi_base;
 
+	exynos9810_pcie_link_power_down(ep);
 	gpiod_set_value_cansleep(ep->reset_gpio, 1);
 
 	if (elbi) {
@@ -335,11 +436,6 @@ static void exynos9810_pcie_host_deinit(struct exynos_pcie *ep)
 	}
 
 	regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_PCIE_PHY, BIT(0), 0);
-
-	if (ep->vpcie3v3_enabled) {
-		regulator_disable(ep->vpcie3v3);
-		ep->vpcie3v3_enabled = false;
-	}
 }
 
 static void exynos_pcie_sideband_dbi_w_mode(struct exynos_pcie *ep, bool on)
@@ -500,20 +596,107 @@ static int exynos9810_pcie_start_link(struct exynos_pcie *ep)
 			 attempt + 1, val);
 	}
 
-	/*
-	 * Leave the final LTSSM attempt active. The common DWC code will
-	 * classify and report the terminal link state.
-	 */
-	return 0;
+	return -ETIMEDOUT;
 }
+
+static int exynos9810_pcie_wlan_power_on(struct exynos_pcie *ep)
+{
+	struct dw_pcie *pci = &ep->pci;
+	struct dw_pcie_rp *pp = &pci->pp;
+	int ret;
+
+	if (ep->link_active && dw_pcie_link_up(pci))
+		return 0;
+
+	dev_info(pci->dev, "WLAN PCIe power-on begin\n");
+
+	if (!ep->vpcie3v3_enabled) {
+		ret = regulator_enable(ep->vpcie3v3);
+		if (ret)
+			return ret;
+		ep->vpcie3v3_enabled = true;
+	}
+
+	ret = pinctrl_select_state(ep->pinctrl, ep->pins_default);
+	if (ret)
+		goto err_power_down;
+
+	ret = regmap_update_bits(ep->pmureg, EXYNOS9810_PMU_WAKEUP_MASK,
+				 EXYNOS9810_PMU_WAKEUP_PCIE_WIFI, 0);
+	if (ret)
+		goto err_power_down;
+
+	if (!ep->irq_enabled) {
+		enable_irq(pp->irq);
+		ep->irq_enabled = true;
+	}
+
+	ep->link_deferred = false;
+
+	ret = exynos9810_pcie_host_init(ep);
+	if (ret)
+		goto err_power_down;
+
+	ret = dw_pcie_setup_rc(pp);
+	if (ret)
+		goto err_power_down;
+
+	ret = exynos9810_pcie_start_link(ep);
+	if (ret)
+		goto err_power_down;
+
+	ret = dw_pcie_wait_for_link(pci);
+	if (ret)
+		goto err_power_down;
+
+	ep->link_active = true;
+
+	pci_lock_rescan_remove();
+	pci_rescan_bus(pp->bridge->bus);
+	pci_unlock_rescan_remove();
+
+	dev_info(pci->dev, "WLAN PCIe link active and bus rescanned\n");
+
+	return 0;
+
+err_power_down:
+	dev_err(pci->dev, "WLAN PCIe power-on failed: %d\n", ret);
+	exynos9810_pcie_link_power_down(ep);
+	return ret;
+}
+
+int exynos9810_pcie_wlan_power(bool on)
+{
+	struct exynos_pcie *ep;
+	int ret;
+
+	mutex_lock(&exynos9810_wlan_pcie_lock);
+	ep = exynos9810_wlan_pcie;
+	if (!ep)
+		ret = -EPROBE_DEFER;
+	else if (on)
+		ret = exynos9810_pcie_wlan_power_on(ep);
+	else {
+		exynos9810_pcie_link_power_down(ep);
+		ret = 0;
+	}
+	mutex_unlock(&exynos9810_wlan_pcie_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(exynos9810_pcie_wlan_power);
 
 static int exynos_pcie_start_link(struct dw_pcie *pci)
 {
 	struct exynos_pcie *ep = to_exynos_pcie(pci);
 	u32 val;
 
-	if (ep->data->integrated_phy)
+	if (ep->data->integrated_phy) {
+		if (ep->link_deferred)
+			return 0;
+
 		return exynos9810_pcie_start_link(ep);
+	}
 
 	val = exynos_pcie_readl(pci->elbi_base, PCIE_SW_WAKE);
 	val &= ~PCIE_BUS_EN;
@@ -605,12 +788,33 @@ static struct pci_ops exynos_pci_ops = {
 	.write = exynos_pcie_wr_own_conf,
 };
 
+static enum dw_pcie_ltssm exynos_pcie_get_ltssm(struct dw_pcie *pci)
+{
+	struct exynos_pcie *ep = to_exynos_pcie(pci);
+	u32 val;
+
+	if (ep->data->integrated_phy) {
+		if (ep->link_deferred)
+			return DW_PCIE_LTSSM_DETECT_QUIET;
+
+		val = exynos_pcie_readl(pci->elbi_base,
+					PCIE_ELBI_RDLH_LINKUP);
+		return val & GENMASK(4, 0);
+	}
+
+	val = dw_pcie_readl_dbi(pci, PCIE_PORT_DEBUG0);
+	return FIELD_GET(PORT_LOGIC_LTSSM_STATE_MASK, val);
+}
+
 static bool exynos_pcie_link_up(struct dw_pcie *pci)
 {
 	struct exynos_pcie *ep = to_exynos_pcie(pci);
 	u32 val = exynos_pcie_readl(pci->elbi_base, PCIE_ELBI_RDLH_LINKUP);
 
 	if (ep->data->integrated_phy) {
+		if (ep->link_deferred)
+			return false;
+
 		val &= GENMASK(4, 0);
 		return val >= 0x0d && val <= 0x14;
 	}
@@ -627,7 +831,10 @@ static int exynos_pcie_host_init(struct dw_pcie_rp *pp)
 	pp->bridge->ops = &exynos_pci_ops;
 
 	if (ep->data->integrated_phy) {
-		ret = exynos9810_pcie_host_init(ep);
+		if (ep->link_deferred)
+			ret = exynos9810_pcie_initial_powerdown(ep);
+		else
+			ret = exynos9810_pcie_host_init(ep);
 		if (ret)
 			return ret;
 
@@ -676,6 +883,7 @@ static int exynos_add_pcie_port(struct exynos_pcie *ep,
 		dev_err(dev, "failed to request irq\n");
 		return ret;
 	}
+	ep->irq_enabled = true;
 
 	pp->ops = &exynos_pcie_host_ops;
 	pp->msi_irq[0] = -ENODEV;
@@ -686,6 +894,11 @@ static int exynos_add_pcie_port(struct exynos_pcie *ep,
 		return ret;
 	}
 
+	if (ep->data->integrated_phy) {
+		disable_irq(pp->irq);
+		ep->irq_enabled = false;
+	}
+
 	return 0;
 }
 
@@ -693,6 +906,7 @@ static const struct dw_pcie_ops dw_pcie_ops = {
 	.read_dbi = exynos_pcie_read_dbi,
 	.write_dbi = exynos_pcie_write_dbi,
 	.link_up = exynos_pcie_link_up,
+	.get_ltssm = exynos_pcie_get_ltssm,
 	.start_link = exynos_pcie_start_link,
 };
 
@@ -709,7 +923,6 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
 	void __iomem *phy;
-	int ret;
 
 	phy = devm_platform_ioremap_resource_byname(pdev, "phy");
 	if (IS_ERR(phy))
@@ -737,16 +950,27 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 		return dev_err_probe(dev, PTR_ERR(ep->reset_gpio),
 				     "failed to get endpoint reset GPIO\n");
 
+	ep->pinctrl = devm_pinctrl_get(dev);
+	if (IS_ERR(ep->pinctrl))
+		return dev_err_probe(dev, PTR_ERR(ep->pinctrl),
+				     "failed to get PCIe pinctrl\n");
+
+	ep->pins_default = pinctrl_lookup_state(ep->pinctrl,
+						PINCTRL_STATE_DEFAULT);
+	if (IS_ERR(ep->pins_default))
+		return dev_err_probe(dev, PTR_ERR(ep->pins_default),
+				     "failed to get PCIe default pins\n");
+
+	ep->pins_idle = pinctrl_lookup_state(ep->pinctrl, PINCTRL_STATE_IDLE);
+	if (IS_ERR(ep->pins_idle))
+		return dev_err_probe(dev, PTR_ERR(ep->pins_idle),
+				     "failed to get PCIe idle pins\n");
+
 	ep->vpcie3v3 = devm_regulator_get(dev, "vpcie3v3");
 	if (IS_ERR(ep->vpcie3v3))
 		return dev_err_probe(dev, PTR_ERR(ep->vpcie3v3),
 				     "failed to get endpoint supply\n");
 
-	ret = regulator_enable(ep->vpcie3v3);
-	if (ret)
-		return ret;
-
-	ep->vpcie3v3_enabled = true;
 	return 0;
 }
 
@@ -780,6 +1004,8 @@ static int exynos_pcie_probe(struct platform_device *pdev)
 	ep->pci.dev = dev;
 	ep->pci.ops = &dw_pcie_ops;
 	platform_set_drvdata(pdev, ep);
+	if (ep->data->integrated_phy)
+		ep->link_deferred = true;
 
 	if (!ep->data->preserve_boot_clocks) {
 		ret = devm_clk_bulk_get_all_enabled(dev, &ep->clks);
@@ -806,6 +1032,12 @@ static int exynos_pcie_probe(struct platform_device *pdev)
 	if (ret < 0)
 		goto fail_probe;
 
+	if (ep->data->integrated_phy) {
+		mutex_lock(&exynos9810_wlan_pcie_lock);
+		exynos9810_wlan_pcie = ep;
+		mutex_unlock(&exynos9810_wlan_pcie_lock);
+	}
+
 	return 0;
 
 fail_probe:
@@ -827,6 +1059,12 @@ fail_probe:
 static void exynos_pcie_remove(struct platform_device *pdev)
 {
 	struct exynos_pcie *ep = platform_get_drvdata(pdev);
+
+	if (ep->data->integrated_phy) {
+		mutex_lock(&exynos9810_wlan_pcie_lock);
+		exynos9810_wlan_pcie = NULL;
+		mutex_unlock(&exynos9810_wlan_pcie_lock);
+	}
 
 	dw_pcie_host_deinit(&ep->pci.pp);
 

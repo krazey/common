@@ -13,6 +13,7 @@
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_gpio.h>
+#include <linux/pci-exynos9810.h>
 #include <linux/printk.h>
 
 #include "dhd_linux.h"
@@ -22,10 +23,7 @@ static int wlan_host_wake_irq;
 
 static int dhd_wlan_power(int on)
 {
-	/* WLAN_REG_ON is held by the PCIe host's vpcie3v3 supply. */
-	pr_debug("bcmdhd: WLAN power request %d\n", on);
-
-	return 0;
+	return exynos9810_pcie_wlan_power(on);
 }
 
 static int dhd_wlan_reset(int on)
@@ -35,10 +33,7 @@ static int dhd_wlan_reset(int on)
 
 static int dhd_wlan_set_carddetect(int present)
 {
-	/* The endpoint is enumerated with the built-in PCIe host. */
-	pr_debug("bcmdhd: card-detect request %d\n", present);
-
-	return 0;
+	return exynos9810_pcie_wlan_power(present);
 }
 
 static int dhd_wlan_init_gpio(void)
@@ -120,11 +115,21 @@ int dhd_wlan_init(void)
 	pr_info("bcmdhd: host wake GPIO %d IRQ %d\n",
 		wlan_host_wake_gpio, wlan_host_wake_irq);
 
+	ret = exynos9810_pcie_wlan_power(true);
+	if (ret) {
+		pr_err("bcmdhd: failed to activate WLAN PCIe: %d\n", ret);
+		gpio_free(wlan_host_wake_gpio);
+		wlan_host_wake_gpio = -EINVAL;
+		return ret;
+	}
+
 	return 0;
 }
 
 int dhd_wlan_deinit(void)
 {
+	exynos9810_pcie_wlan_power(false);
+
 	if (gpio_is_valid(wlan_host_wake_gpio)) {
 		gpio_free(wlan_host_wake_gpio);
 		wlan_host_wake_gpio = -EINVAL;
