@@ -8,6 +8,7 @@
 
 #include <dt-bindings/interrupt-controller/arm-gic.h>
 #include <dt-bindings/clock/samsung,exynos9810.h>
+#include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/soc/samsung,exynos-usi.h>
 
 / {
@@ -577,10 +578,57 @@
 				      "dout_clkcmu_fsys1_pcie";
 		};
 
+		sysreg_fsys1: system-controller@11410000 {
+			compatible = "samsung,exynos9810-fsys1-sysreg", "syscon";
+			reg = <0x11410000 0x2000>;
+		};
+
 		pinctrl_fsys1: pinctrl@11430000 {
 			compatible = "samsung,exynos9810-pinctrl";
 			reg = <0x11430000 0x1000>;
 			interrupts = <GIC_SPI 250 IRQ_TYPE_LEVEL_HIGH>;
+		};
+
+		pcie0: pcie@11700000 {
+			compatible = "samsung,exynos9810-pcie";
+			reg = <0x11700000 0x1000>,
+			      <0x116a0000 0x1000>,
+			      <0x12800000 0x2000>,
+			      <0x116c0000 0x2000>;
+			reg-names = "dbi", "elbi", "config", "phy";
+			interrupts = <GIC_SPI 253 IRQ_TYPE_LEVEL_HIGH>;
+
+			clocks = <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PHY_REF>,
+				 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_DBI>,
+				 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PHY_APB>,
+				 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_MSTR>,
+				 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_SUBCTRL>,
+				 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PCS>,
+				 <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_SLV>;
+			clock-names = "phy_ref", "dbi", "phy_apb", "mstr",
+				      "subctrl", "pcs", "slv";
+
+			#address-cells = <3>;
+			#size-cells = <2>;
+			#interrupt-cells = <1>;
+			device_type = "pci";
+			bus-range = <0x00 0xff>;
+			ranges = <0x82000000 0 0x11800000
+				  0x11800000 0 0x00ff0000>;
+			interrupt-map-mask = <0 0 0 0>;
+			interrupt-map = <0 0 0 0 &gic GIC_SPI 253
+					 IRQ_TYPE_LEVEL_HIGH>;
+
+			num-lanes = <1>;
+			num-viewport = <3>;
+			max-link-speed = <2>;
+			reset-gpios = <&gpf2 2 GPIO_ACTIVE_LOW>;
+			pinctrl-0 = <&pcie0_clkreq &pcie0_perst>;
+			pinctrl-names = "default";
+			samsung,fsys-sysreg = <&sysreg_fsys1>;
+			samsung,pmu-syscon = <&pmu_system_controller>;
+			dma-coherent;
+			status = "disabled";
 		};
 
 		pinctrl_vts: pinctrl@13880000 {
