@@ -56,6 +56,7 @@ struct max17042_chip {
 	struct device *dev;
 	struct regmap *regmap;
 	struct power_supply *battery;
+	struct power_supply_desc psy_desc;
 	enum max170xx_chip_type chip_type;
 	struct max17042_platform_data *pdata;
 	struct work_struct work;
@@ -1103,6 +1104,7 @@ static const struct power_supply_desc max17042_no_current_sense_psy_desc = {
 	.get_property	= max17042_get_property,
 	.set_property	= max17042_set_property,
 	.property_is_writeable	= max17042_property_is_writeable,
+	.external_power_changed	= power_supply_changed,
 	.properties	= max17042_battery_props,
 	.num_properties	= ARRAY_SIZE(max17042_battery_props) - 2,
 };
@@ -1111,7 +1113,7 @@ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq
 			  enum max170xx_chip_type chip_type)
 {
 	struct i2c_adapter *adapter = client->adapter;
-	const struct power_supply_desc *max17042_desc = &max17042_psy_desc;
+	const struct power_supply_desc *desc = &max17042_psy_desc;
 	const struct regmap_config *regmap_config;
 	struct power_supply_config psy_cfg = {};
 	struct max17042_chip *chip;
@@ -1150,7 +1152,12 @@ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq
 	/* When current is not measured,
 	 * CURRENT_NOW and CURRENT_AVG properties should be invisible. */
 	if (!chip->pdata->enable_current_sense)
-		max17042_desc = &max17042_no_current_sense_psy_desc;
+		desc = &max17042_no_current_sense_psy_desc;
+
+	chip->psy_desc = *desc;
+	if (of_device_is_compatible(dev->of_node,
+				    "maxim,max77705-battery"))
+		chip->psy_desc.name = "battery";
 
 	if (chip->pdata->r_sns == 0)
 		chip->pdata->r_sns = MAX17042_DEFAULT_SNS_RESISTOR;
@@ -1178,7 +1185,7 @@ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq
 	dev_dbg(dev, "task period: %#.4x (%d)\n", chip->task_period,
 		chip->task_period);
 
-	chip->battery = devm_power_supply_register(dev, max17042_desc,
+	chip->battery = devm_power_supply_register(dev, &chip->psy_desc,
 						   &psy_cfg);
 	if (IS_ERR(chip->battery))
 		return dev_err_probe(dev, PTR_ERR(chip->battery),
@@ -1225,20 +1232,9 @@ static int max17042_probe(struct i2c_client *client, struct device *dev, int irq
 
 static int max17042_i2c_probe(struct i2c_client *client)
 {
-	const struct i2c_device_id *id = i2c_client_get_device_id(client);
-	const struct acpi_device_id *acpi_id = NULL;
 	struct device *dev = &client->dev;
-	enum max170xx_chip_type chip_type;
-
-	if (id) {
-		chip_type = id->driver_data;
-	} else {
-		acpi_id = acpi_match_device(dev->driver->acpi_match_table, dev);
-		if (!acpi_id)
-			return -ENODEV;
-
-		chip_type = acpi_id->driver_data;
-	}
+	enum max170xx_chip_type chip_type =
+		(uintptr_t)i2c_get_match_data(client);
 
 	return max17042_probe(client, dev, client->irq, chip_type);
 }
@@ -1339,6 +1335,7 @@ static const struct i2c_device_id max17042_id[] = {
 	{ "max17047", MAXIM_DEVICE_TYPE_MAX17047 },
 	{ "max17050", MAXIM_DEVICE_TYPE_MAX17050 },
 	{ "max17055", MAXIM_DEVICE_TYPE_MAX17055 },
+	{ "max77705-battery", MAXIM_DEVICE_TYPE_MAX17047 },
 	{ "max77759-fg", MAXIM_DEVICE_TYPE_MAX77759 },
 	{ "max77849-battery", MAXIM_DEVICE_TYPE_MAX17047 },
 	{ }
