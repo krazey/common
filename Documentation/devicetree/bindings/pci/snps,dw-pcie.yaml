@@ -96,7 +96,7 @@ properties:
             region, but mainly these registers are indirectly accessible
             either by means of the embedded PHY viewport schema or by some
             platform-specific method.
-          const: phy
+          enum: [ phy, pcs ]
         - description:
             Outbound iATU-capable memory-region which will be used to access
             the peripheral PCIe devices configuration space.
@@ -117,6 +117,8 @@ properties:
               enum: [ ecam ]
             - description: AMD MDB PCIe SLCR region
               const: slcr
+            - description: Vendor-specific internal automation registers
+              const: ia
     allOf:
       - contains:
           enum: [ dbi, ctrl ]
