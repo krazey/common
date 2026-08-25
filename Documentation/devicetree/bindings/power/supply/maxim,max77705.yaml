@@ -4,13 +4,13 @@
 $id: http://devicetree.org/schemas/power/supply/maxim,max77705.yaml#
 $schema: http://devicetree.org/meta-schemas/core.yaml#
 
-title: Maxim MAX777705 charger
+title: Maxim MAX77705 charger
 
 maintainers:
   - Dzmitry Sankouski <dsankouski@gmail.com>
 
 description: |
-  This is a device tree bindings for charger found in Maxim MAX77705 chip.
+  Battery charger block in the Maxim MAX77705 power-management IC.
 
 allOf:
   - $ref: power-supply.yaml#
@@ -25,6 +25,54 @@ properties:
   reg:
     maxItems: 1
 
+  maxim,enable-watchdog:
+    type: boolean
+    description:
+      Enable and periodically service the charger watchdog while charging.
+
+  maxim,default-input-current-microamp:
+    minimum: 100000
+    maximum: 3200000
+    description:
+      Input current limit used for cable types absent from the current table.
+
+  maxim,default-charge-current-microamp:
+    minimum: 100000
+    maximum: 3150000
+    description:
+      Charge current used for cable types absent from the current table.
+
+  maxim,input-current-max-microamp:
+    minimum: 100000
+    maximum: 3200000
+    description:
+      Board limit applied to every programmed input current.
+
+  maxim,b2s-overcurrent-microamp:
+    description:
+      Battery-to-system overcurrent threshold. Zero disables protection.
+    enum: [0, 4600000, 4800000, 5000000, 5200000, 5400000, 5600000,
+           5800000, 6000000, 6200000]
+
+  maxim,charging-current-table:
+    $ref: /schemas/types.yaml#/definitions/uint32-matrix
+    minItems: 1
+    maxItems: 64
+    description:
+      Board charging policy indexed by the platform cable-type identifier.
+      Each row contains the cable type, input current limit in microamps and
+      charge current in microamps.
+    items:
+      items:
+        - description: Platform cable-type identifier
+          maximum: 255
+        - description: Input current limit in microamps
+          minimum: 100000
+          maximum: 3200000
+        - description: Charge current in microamps
+          minimum: 100000
+          maximum: 3150000
+
 required:
   - compatible
   - reg
@@ -34,8 +82,6 @@ unevaluatedProperties: false
 
 examples:
   - |
-    #include <dt-bindings/interrupt-controller/irq.h>
-
     i2c {
         #address-cells = <1>;
         #size-cells = <0>;
@@ -44,7 +90,12 @@ examples:
             compatible = "maxim,max77705-charger";
             reg = <0x69>;
             monitored-battery = <&battery>;
-            interrupt-parent = <&pm8998_gpios>;
-            interrupts = <11 IRQ_TYPE_LEVEL_LOW>;
+            interrupt-parent = <&max77705>;
+            interrupts = <0>;
+            maxim,enable-watchdog;
+            maxim,b2s-overcurrent-microamp = <5600000>;
+            maxim,input-current-max-microamp = <3000000>;
+            maxim,default-input-current-microamp = <1800000>;
+            maxim,default-charge-current-microamp = <2100000>;
         };
     };
