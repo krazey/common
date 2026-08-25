@@ -701,7 +701,6 @@ int sec_get_param_wfa_cert(dhd_pub_t *dhd, int mode, uint* read_val)
 #define NV_PREFIX "Nv_info:"
 #define CLM_PREFIX "CLM_ver:"
 #define max_len(a, b) ((sizeof(a)/(2)) - (strlen(b)) - (3))
-#define tstr_len(a, b) ((strlen(a)) + (strlen(b)) + (3))
 
 char version_info[MAX_VERSION_LEN];
 char version_old_info[MAX_VERSION_LEN];
@@ -714,13 +713,25 @@ int write_filesystem(struct file *file, unsigned long long offset,
 	return kernel_write(file, data, size, &pos);
 }
 
-uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_ver)
+static size_t sec_append_wlinfo(size_t offset, const char *prefix,
+	const char *value, size_t value_len)
+{
+	if (offset >= sizeof(version_info))
+		return offset;
+
+	return offset + scnprintf(version_info + offset,
+		sizeof(version_info) - offset, "%s %.*s\n", prefix,
+		(int)value_len, value);
+}
+
+uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p,
+	uint nvram_len, char *clm_ver)
 {
 #ifndef DHD_EXPORT_CNTL_FILE
 	struct file *fp = NULL;
 	char *filepath = WIFIVERINFO;
 #endif /* DHD_EXPORT_CNTL_FILE */
-	int min_len, str_len = 0;
+	size_t value_len, str_len = 0;
 	int ret = 0;
 	char* nvram_buf;
 	char temp_buf[256];
@@ -737,26 +748,24 @@ uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_v
 	memset(version_info, 0, sizeof(version_info));
 
 	if (strlen(dhd_ver)) {
-		min_len = min(strlen(dhd_ver), max_len(temp_buf, DHD_PREFIX));
-		min_len += strlen(DHD_PREFIX) + 3;
-		DHD_INFO(("[WIFI_SEC] DHD ver length : %d\n", min_len));
-		snprintf(version_info+str_len, min_len, DHD_PREFIX " %s\n", dhd_ver);
-		str_len = strlen(version_info);
+		value_len = min(strlen(dhd_ver), max_len(temp_buf, DHD_PREFIX));
+		DHD_INFO(("[WIFI_SEC] DHD ver length : %zu\n", value_len));
+		str_len = sec_append_wlinfo(str_len, DHD_PREFIX, dhd_ver,
+			value_len);
 
-		DHD_INFO(("[WIFI_SEC] Driver version_info len : %d\n", str_len));
+		DHD_INFO(("[WIFI_SEC] Driver version_info len : %zu\n", str_len));
 		DHD_INFO(("[WIFI_SEC] Driver version_info : %s\n", version_info));
 	} else {
 		DHD_ERROR(("[WIFI_SEC] Driver version is missing.\n"));
 	}
 
 	if (strlen(firm_ver)) {
-		min_len = min(strlen(firm_ver), max_len(temp_buf, FIRM_PREFIX));
-		min_len += strlen(FIRM_PREFIX) + 3;
-		DHD_INFO(("[WIFI_SEC] firmware ver length : %d\n", min_len));
-		snprintf(version_info+str_len, min_len, FIRM_PREFIX " %s\n", firm_ver);
-		str_len = strlen(version_info);
+		value_len = min(strlen(firm_ver), max_len(temp_buf, FIRM_PREFIX));
+		DHD_INFO(("[WIFI_SEC] firmware ver length : %zu\n", value_len));
+		str_len = sec_append_wlinfo(str_len, FIRM_PREFIX, firm_ver,
+			value_len);
 
-		DHD_INFO(("[WIFI_SEC] Firmware version_info len : %d\n", str_len));
+		DHD_INFO(("[WIFI_SEC] Firmware version_info len : %zu\n", str_len));
 		DHD_INFO(("[WIFI_SEC] Firmware version_info : %s\n", version_info));
 	} else {
 		DHD_ERROR(("[WIFI_SEC] Firmware version is missing.\n"));
@@ -765,6 +774,8 @@ uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_v
 	if (nvram_p) {
 #ifdef DHD_SUPPORT_VFS_CALL
 		struct file *nvfp = NULL;
+
+		BCM_REFERENCE(nvram_len);
 
 		bzero(temp_buf, sizeof(temp_buf));
 		nvfp = dhd_filp_open(nvram_p, O_RDONLY, 0);
@@ -777,22 +788,26 @@ uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_v
 			dhd_filp_close(nvfp, NULL);
 		}
 #else
+		size_t copy_len;
+
 		bzero(temp_buf, sizeof(temp_buf));
-		(void)memcpy_s(temp_buf, sizeof(temp_buf), nvram_p, sizeof(temp_buf));
+		copy_len = min_t(size_t, nvram_len, sizeof(temp_buf) - 1);
+		memcpy(temp_buf, nvram_p, copy_len);
+		temp_buf[copy_len] = '\0';
 		DHD_INFO(("[WIFI_SEC] NVRAM version_info exits\n"));
 #endif /* DHD_SUPPORT_VFS_CALL */
 
-		if (strlen(temp_buf)) {
+		if (temp_buf[0]) {
 			nvram_buf = temp_buf;
 			bcmstrtok(&nvram_buf, "\n", 0);
+			value_len = strnlen(temp_buf, sizeof(temp_buf));
 			DHD_INFO(("[WIFI_SEC] nvram tolkening : %s(%zu) \n",
-				temp_buf, strlen(temp_buf)));
-			snprintf(version_info+str_len, tstr_len(temp_buf, NV_PREFIX),
-				NV_PREFIX " %s\n", temp_buf);
-			str_len = strlen(version_info);
+				temp_buf, value_len));
+			str_len = sec_append_wlinfo(str_len, NV_PREFIX, temp_buf,
+				value_len);
 			DHD_INFO(("[WIFI_SEC] NVRAM version_info : %s\n", version_info));
-			DHD_INFO(("[WIFI_SEC] NVRAM version_info len : %d, nvram len : %zu\n",
-				str_len, strlen(temp_buf)));
+			DHD_INFO(("[WIFI_SEC] NVRAM version_info len : %zu, nvram len : %zu\n",
+				str_len, value_len));
 		} else {
 			DHD_ERROR(("[WIFI_SEC] NVRAM info is missing.\n"));
 		}
@@ -801,20 +816,19 @@ uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_v
 	}
 
 	if (strlen(clm_ver)) {
-		min_len = min(strlen(clm_ver), max_len(temp_buf, CLM_PREFIX));
-		min_len += strlen(CLM_PREFIX) + 3;
-		DHD_INFO(("[WIFI_SEC] clm ver length : %d\n", min_len));
-		snprintf(version_info+str_len, min_len, CLM_PREFIX " %s\n", clm_ver);
-		str_len = strlen(version_info);
+		value_len = min(strlen(clm_ver), max_len(temp_buf, CLM_PREFIX));
+		DHD_INFO(("[WIFI_SEC] clm ver length : %zu\n", value_len));
+		str_len = sec_append_wlinfo(str_len, CLM_PREFIX, clm_ver,
+			value_len);
 
-		DHD_INFO(("[WIFI_SEC] CLM version_info len : %d\n", str_len));
+		DHD_INFO(("[WIFI_SEC] CLM version_info len : %zu\n", str_len));
 		DHD_INFO(("[WIFI_SEC] CLM version_info : %s\n", version_info));
 	} else {
 		DHD_ERROR(("[WIFI_SEC] CLM version is missing.\n"));
 	}
 
 	DHD_INFO(("[WIFI_SEC] version_info : %s, strlen : %zu\n",
-		version_info, strlen(version_info)));
+		version_info, str_len));
 
 #ifndef DHD_EXPORT_CNTL_FILE
 	fp = dhd_filp_open(filepath, O_RDONLY, 0);
@@ -822,7 +836,8 @@ uint32 sec_save_wlinfo(char *firm_ver, char *dhd_ver, char *nvram_p, char *clm_v
 		DHD_ERROR(("[WIFI_SEC] %s: .wifiver.info File open failed.\n", __FUNCTION__));
 	} else {
 		memset(version_old_info, 0, sizeof(version_old_info));
-		ret = dhd_kernel_read_compat(fp, fp->f_pos, version_old_info, sizeof(version_info));
+		ret = dhd_kernel_read_compat(fp, fp->f_pos, version_old_info,
+			sizeof(version_old_info) - 1);
 		dhd_filp_close(fp, NULL);
 		DHD_INFO(("[WIFI_SEC] kernel_read ret : %d.\n", ret));
 		if (strcmp(version_info, version_old_info) == 0) {
