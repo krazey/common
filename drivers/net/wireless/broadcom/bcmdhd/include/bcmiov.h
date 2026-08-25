@@ -132,7 +132,7 @@ struct bcm_iov_batch_buf {
 	uint16 version;
 	uint8 count;
 	uint8 is_set; /* to differentiate set or get */
-	struct bcm_iov_batch_subcmd cmds[0];
+	struct bcm_iov_batch_subcmd cmds[];
 };
 
 /* non-batched command version = major|minor w/ major <= 127 */
