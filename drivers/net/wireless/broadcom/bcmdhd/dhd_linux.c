@@ -10474,7 +10474,8 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 
 #ifdef WRITE_WLANINFO
 #ifdef DHD_SUPPORT_VFS_CALL
-	sec_save_wlinfo(fw_version, EPI_VERSION_STR, dhd->info->nv_path, clm_version);
+	sec_save_wlinfo(fw_version, EPI_VERSION_STR, dhd->info->nv_path,
+		0, clm_version);
 #else
 	do {
 		uint len = MAX_NVRAMBUF_SIZE;
@@ -10486,7 +10487,8 @@ dhd_optimised_preinit_ioctls(dhd_pub_t * dhd)
 			break;
 		}
 
-		sec_save_wlinfo(fw_version, EPI_VERSION_STR, memblock, clm_version);
+		sec_save_wlinfo(fw_version, EPI_VERSION_STR, memblock, len,
+			clm_version);
 		if (memblock) {
 			dhd_free_download_buffer(dhd, memblock, len);
 		}
@@ -11965,7 +11967,8 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 
 #ifdef WRITE_WLANINFO
 #ifdef DHD_SUPPORT_VFS_CALL
-	sec_save_wlinfo(fw_version, EPI_VERSION_STR, dhd->info->nv_path, clm_version);
+	sec_save_wlinfo(fw_version, EPI_VERSION_STR, dhd->info->nv_path,
+		0, clm_version);
 #else
 	do {
 		uint len = MAX_NVRAMBUF_SIZE;
@@ -11977,7 +11980,8 @@ dhd_legacy_preinit_ioctls(dhd_pub_t *dhd)
 			break;
 		}
 
-		sec_save_wlinfo(fw_version, EPI_VERSION_STR, memblock, clm_version);
+		sec_save_wlinfo(fw_version, EPI_VERSION_STR, memblock, len,
+			clm_version);
 		if (memblock) {
 			dhd_free_download_buffer(dhd, memblock, len);
 		}
