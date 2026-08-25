@@ -22,6 +22,19 @@
 	model_info-hw_rev_end = <255>;
 	chassis-type = "handset";
 
+	battery_info: battery {
+		compatible = "simple-battery";
+		device-chemistry = "lithium-ion";
+		voltage-min-design-microvolt = <3200000>;
+		voltage-max-design-microvolt = <4350000>;
+		charge-full-design-microamp-hours = <3000000>;
+		charge-term-current-microamp = <150000>;
+		constant-charge-current-max-microamp = <2150000>;
+		constant-charge-voltage-max-microvolt = <4350000>;
+		over-voltage-threshold-microvolt = <4400000>;
+		re-charge-voltage-microvolt = <4280000>;
+	};
+
 	chosen {
 		#address-cells = <2>;
 		#size-cells = <1>;
@@ -247,6 +260,62 @@ firmware_class.path=/vendor/firmware bootconfig";
 			compatible = "maxim,max77705-muic";
 			#mux-state-cells = <1>;
 		};
+	};
+
+	max77705_fuelgauge: fuel-gauge@36 {
+		compatible = "maxim,max77705-battery";
+		reg = <0x36>;
+		interrupt-parent = <&max77705>;
+		interrupts = <2>;
+		power-supplies = <&max77705_charger>;
+		shunt-resistor-micro-ohms = <5000>;
+		maxim,cold-temp = <0>;
+		maxim,over-heat-temp = <500>;
+		maxim,dead-volt = <3200>;
+		maxim,over-volt = <4400>;
+	};
+
+	max77705_charger: charger@69 {
+		compatible = "maxim,max77705-charger";
+		reg = <0x69>;
+		interrupt-parent = <&max77705>;
+		interrupts = <0>;
+		monitored-battery = <&battery_info>;
+		maxim,enable-watchdog;
+		maxim,b2s-overcurrent-microamp = <5600000>;
+		maxim,input-current-max-microamp = <3000000>;
+		maxim,default-input-current-microamp = <1800000>;
+		maxim,default-charge-current-microamp = <2100000>;
+		maxim,charging-current-table =
+			<2 500000 500000>,
+			<19 500000 500000>,
+			<21 500000 500000>,
+			<22 500000 500000>,
+			<23 500000 500000>,
+			<30 500000 500000>,
+			<25 1000000 1000000>,
+			<31 1000000 1000000>,
+			<5 1500000 1500000>,
+			<32 1500000 1500000>,
+			<6 1650000 2150000>,
+			<7 1650000 2150000>,
+			<8 1650000 2150000>,
+			<9 1650000 2150000>,
+			<10 900000 1200000>,
+			<12 900000 1200000>,
+			<15 900000 1200000>,
+			<27 900000 1200000>,
+			<33 900000 1200000>,
+			<13 700000 1200000>,
+			<24 1000000 450000>,
+			<26 2000000 1800000>,
+			<11 650000 1200000>,
+			<14 650000 1200000>,
+			<16 650000 1200000>,
+			<28 650000 1200000>,
+			<29 500000 1200000>,
+			<1 475000 550000>,
+			<4 475000 550000>;
 	};
 };
 
