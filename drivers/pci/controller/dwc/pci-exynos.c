@@ -693,8 +693,7 @@ static void exynos9810_pcie_setup_rc(struct exynos_pcie *ep)
 	dw_pcie_dbi_ro_wr_en(pci);
 
 	val = dw_pcie_readl_dbi(pci, PCIE_PORT_LINK_CONTROL);
-	val &= ~(PORT_LINK_MODE_MASK | PORT_LINK_DLL_LINK_EN |
-		 PORT_LINK_FAST_LINK_MODE);
+	val &= ~PORT_LINK_MODE_MASK;
 	val |= PORT_LINK_MODE_1_LANES;
 	dw_pcie_writel_dbi(pci, PCIE_PORT_LINK_CONTROL, val);
 
@@ -1132,11 +1131,14 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	void __iomem *phy;
 
-	phy = devm_platform_ioremap_resource_byname(pdev, "phy");
-	if (IS_ERR(phy))
-		return PTR_ERR(phy);
+	ep->phy_base = devm_platform_ioremap_resource_byname(pdev, "phy");
+	if (IS_ERR(ep->phy_base))
+		return PTR_ERR(ep->phy_base);
+
+	ep->pcs_base = devm_platform_ioremap_resource_byname(pdev, "pcs");
+	if (IS_ERR(ep->pcs_base))
+		return PTR_ERR(ep->pcs_base);
 
 	ep->ia_base = devm_platform_ioremap_resource_byname(pdev, "ia");
 	if (IS_ERR(ep->ia_base))
@@ -1153,9 +1155,6 @@ static int exynos9810_pcie_get_resources(struct exynos_pcie *ep,
 	if (!ep->top_cmu_base)
 		return dev_err_probe(dev, -ENOMEM,
 				     "failed to map TOP CMU\n");
-
-	ep->pcs_base = phy;
-	ep->phy_base = phy + SZ_4K;
 
 	ep->sysreg = syscon_regmap_lookup_by_phandle(np,
 						     "samsung,fsys-sysreg");
