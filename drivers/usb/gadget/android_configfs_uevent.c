@@ -159,7 +159,8 @@ void android_class_destroy(void)
 }
 EXPORT_SYMBOL_GPL(android_class_destroy);
 
-int android_device_create(struct android_uevent_opts *opts)
+int android_device_create(struct android_uevent_opts *opts,
+			  const struct attribute_group **groups)
 {
 	unsigned long flags;
 	struct device *dev;
@@ -173,8 +174,9 @@ int android_device_create(struct android_uevent_opts *opts)
 	if (opts->device_id < 0)
 		return opts->device_id;
 
-	dev = device_create(&android_usb_class, NULL, MKDEV(0, 0),
-			       opts, "android%d", opts->device_id);
+	dev = device_create_with_groups(&android_usb_class, NULL, MKDEV(0, 0),
+					opts, groups, "android%d",
+					opts->device_id);
 
 	spin_lock_irqsave(&opts_lock, flags);
 	if (IS_ERR(dev)) {

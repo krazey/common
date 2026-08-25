@@ -5,6 +5,8 @@
 #ifndef __ANDROID_CONFIGFS_UEVENT_H
 #define __ANDROID_CONFIGFS_UEVENT_H
 
+struct attribute_group;
+
 #ifdef CONFIG_ANDROID_USB_CONFIGFS_UEVENT
 #include <linux/usb/android_configfs_uevent.h>
 
@@ -32,6 +34,7 @@ void android_class_destroy(void);
  * a state attribute file which can be read to determine the state of the
  * usb gadget.
  * @opts: contextual data for the configfs_uevent library.
+ * @groups: optional additional attribute groups for the Android device.
  *
  * Note: the state file created by this function mimics the functionaltiy
  * of the UDC driver and is likely redundant, but maintained for legacy
@@ -42,7 +45,8 @@ void android_class_destroy(void);
  * Returns: 0 for success, or if an error is encountered during ida_allocation
  * or device_creation, that error is returned.
  */
-int android_device_create(struct android_uevent_opts *opts);
+int android_device_create(struct android_uevent_opts *opts,
+			  const struct attribute_group **groups);
 
 /**
  * android_device_destroy - Removes the android device instance and performs
@@ -122,7 +126,8 @@ static inline void android_class_destroy(void)
 {
 }
 
-static inline int android_device_create(struct android_uevent_opts *opts)
+static inline int android_device_create(struct android_uevent_opts *opts,
+					const struct attribute_group **groups)
 {
 	return 0;
 }
