@@ -11596,7 +11596,7 @@ typedef struct wl_nan_event_replied {
 	int8			sub_rssi; /* Subscriber RSSI */
 	uint8		attr_num;
 	uint16		attr_list_len;  /* sizeof attributes attached to payload */
-	uint8		attr_list[0];   /* attributes payload */
+	uint8		attr_list[];    /* attributes payload */
 } wl_nan_event_replied_t;
 
 /* NAN Tx status of transmitted frames */
@@ -11693,7 +11693,7 @@ typedef struct wl_nan_ev_receive {
 	int8	fup_rssi;
 	uint8	attr_num;
 	uint16	attr_list_len;  /* sizeof attributes attached to payload */
-	uint8	attr_list[0];   /* attributes payload */
+	uint8	attr_list[];    /* attributes payload */
 } wl_nan_ev_receive_t;
 
 /* WL_NAN_EVENT_DISC_CACHE_TIMEOUT */
@@ -12866,7 +12866,7 @@ typedef struct nan_adv_table {
 	uint8  num_adv;
 	uint8	adv_size;
 	uint8	pad[2];
-	nan_adv_entry_t adv_nodes[0];
+	nan_adv_entry_t adv_nodes[];
 } nan_adv_table_t;
 
 typedef struct wl_nan_role_cfg {
@@ -13315,7 +13315,7 @@ typedef struct wl_nan_ev_disc_result {
 	wl_nan_instance_id_t pub_id;
 	wl_nan_instance_id_t sub_id;
 	struct ether_addr pub_mac;
-	uint8 opt_tlvs[0];
+	uint8 opt_tlvs[];
 } wl_nan_ev_disc_result_t;
 
 typedef struct wl_nan_event_disc_result {
@@ -13325,7 +13325,7 @@ typedef struct wl_nan_event_disc_result {
 	int8		publish_rssi;		/* publisher RSSI */
 	uint8		attr_num;
 	uint16		attr_list_len;	/* length of the all the attributes in the SDF */
-	uint8		attr_list[0];	/* list of NAN attributes */
+	uint8		attr_list[];	/* list of NAN attributes */
 } wl_nan_event_disc_result_t;
 
 typedef struct wl_nan_ev_p2p_avail {
@@ -13719,7 +13719,7 @@ typedef struct wl_nan_dp_opaque_info {
 	uint8 pub_id;     /* publish id where the opaque data is included. */
 	uint8 len;        /* len of opaque_info[]. */
 	uint8 pad[3];
-	uint8 opaque_info[0];
+	uint8 opaque_info[];
 } wl_nan_dp_opaque_info_t;
 
 /* events */
@@ -13783,7 +13783,7 @@ typedef struct wl_nan_ev_rx_bcn {
 	wl_tsf_t tsf;
 	uint16   bcn_len;
 	uint8    pad[2];
-	uint8    bcn[0];
+	uint8    bcn[];
 } wl_nan_ev_rx_bcn_t;
 
 /* reason of host assist request */
@@ -14778,7 +14778,7 @@ typedef struct wl_randmac {
 	uint16 version;
 	uint16 len;			/* total length */
 	wl_randmac_subcmd_t subcmd_id;	/* subcommand id */
-	uint8 data[0];			/* subcommand data */
+	uint8 data[];			/* subcommand data */
 } wl_randmac_t;
 
 #define WL_RANDMAC_IOV_HDR_SIZE OFFSETOF(wl_randmac_t, data)
@@ -15248,7 +15248,7 @@ typedef enum net_detect_wake_reason {
 typedef struct net_detect_wake_data {
 	net_detect_wake_reason_t    nd_wake_reason;
 	uint32			    nd_wake_date_length;
-	uint8			    nd_wake_data[0];	    /**< Wake data (currently unused) */
+	uint8			    nd_wake_data[];	    /**< Wake data (currently unused) */
 } net_detect_wake_data_t;
 
 /* endif NET_DETECT */

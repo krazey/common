@@ -1006,7 +1006,7 @@ struct beacon_proberesp {
 	__le64 timestamp;
 	__le16 beacon_int;
 	__le16 capab_info;
-	u8 variable[0];
+	u8 variable[];
 } __attribute__ ((packed));
 
 /* driver configuration */

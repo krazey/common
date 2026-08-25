@@ -5649,7 +5649,7 @@ BWL_PRE_PACKED_STRUCT struct dot11_dh_param_ie {
 	uint8   len;
 	uint8   ext_id;	/* EXT_MNG_OWE_DH_PARAM_ID */
 	uint16  group;
-	uint8   pub_key[0];
+	uint8   pub_key[];
 } BWL_POST_PACKED_STRUCT;
 typedef struct dot11_dh_param_ie dot11_dh_param_ie_t;
 
