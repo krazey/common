@@ -586,10 +586,11 @@
 			compatible = "samsung,exynos9810-pcie";
 			reg = <0x11700000 0x1000>,
 			      <0x116a0000 0x1000>,
-			      <0x12800000 0x2000>,
-			      <0x116c0000 0x2000>,
+			      <0x127fe000 0x2000>,
+			      <0x116d0000 0x1000>,
+			      <0x116c0000 0x01fc>,
 			      <0x11680000 0x1000>;
-			reg-names = "dbi", "elbi", "config", "phy", "ia";
+			reg-names = "dbi", "elbi", "config", "phy", "pcs", "ia";
 			interrupts = <GIC_SPI 253 IRQ_TYPE_LEVEL_HIGH>;
 
 			clocks = <&cmu_fsys1 CLK_GOUT_FSYS1_PCIE_PHY_REF>,
