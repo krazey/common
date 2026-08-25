@@ -248,6 +248,15 @@ config ANDROID_USB_CONFIGFS_UEVENT
 	  devices, including a "state" attribute for the android_device which
 	  shows the gadget state.
 
+config ANDROID_USB_CONFIGFS_COMPAT
+	bool "Legacy Android USB gadget controls"
+	depends on ANDROID_USB_CONFIGFS_UEVENT
+	help
+	  Expose the legacy "functions" and "enable" attributes below the
+	  android_usb device. These attributes allow Android userspace to keep
+	  all supported functions linked in configfs while selecting the active
+	  composition at runtime.
+
 config USB_CONFIGFS_SERIAL
 	bool "Generic serial bulk in/out"
 	depends on USB_CONFIGFS

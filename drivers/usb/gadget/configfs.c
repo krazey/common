@@ -60,6 +60,11 @@ struct gadget_info {
 
 	spinlock_t spinlock;
 	bool unbind;
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	struct list_head android_func_list;
+	bool android_compat_active;
+	bool android_compat_enabled;
+#endif
 };
 
 static inline struct gadget_info *to_gadget_info(struct config_item *item)
@@ -269,6 +274,256 @@ static int unregister_gadget(struct gadget_info *gi)
 	return 0;
 }
 
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+static struct gadget_info *android_device_to_gadget_info(struct device *dev)
+{
+	struct android_uevent_opts *opts = dev_get_drvdata(dev);
+	struct usb_composite_dev *cdev;
+
+	cdev = container_of(opts, struct usb_composite_dev, android_opts);
+	return container_of(cdev, struct gadget_info, cdev);
+}
+
+static const char *android_function_name(struct usb_function *f, char *buf,
+					 size_t size)
+{
+	const char *item_name;
+	const char *dot;
+	size_t type_len;
+
+	item_name = config_item_name(&f->fi->group.cg_item);
+	if (!item_name)
+		return f->name;
+
+	dot = strchr(item_name, '.');
+	if (!dot)
+		return f->name;
+
+	type_len = dot - item_name;
+	if (type_len == 3 && !strncmp(item_name, "ffs", type_len))
+		return dot + 1;
+
+	if (type_len >= size)
+		return f->name;
+
+	memcpy(buf, item_name, type_len);
+	buf[type_len] = '\0';
+	return buf;
+}
+
+static bool android_function_matches(struct usb_function *f,
+				     const char *name)
+{
+	const char *item_name;
+	const char *dot;
+	size_t type_len;
+
+	if (!strcmp(f->name, name))
+		return true;
+
+	item_name = config_item_name(&f->fi->group.cg_item);
+	if (!item_name)
+		return false;
+
+	dot = strchr(item_name, '.');
+	if (!dot)
+		return !strcmp(item_name, name);
+
+	type_len = dot - item_name;
+	return (strlen(name) == type_len &&
+		!strncmp(item_name, name, type_len)) || !strcmp(dot + 1, name);
+}
+
+static bool android_function_is_linked(struct gadget_info *gi,
+				       struct usb_function_instance *fi)
+{
+	struct usb_function *f;
+
+	list_for_each_entry(f, &gi->android_func_list, list) {
+		if (f->fi == fi)
+			return true;
+	}
+
+	return false;
+}
+
+static void android_clear_function_selection(struct gadget_info *gi)
+{
+	struct usb_configuration *c;
+
+	list_for_each_entry(c, &gi->cdev.configs, list) {
+		struct config_usb_cfg *cfg;
+
+		cfg = container_of(c, struct config_usb_cfg, c);
+		list_splice_tail_init(&cfg->func_list, &gi->android_func_list);
+	}
+}
+
+static ssize_t functions_show(struct device *dev,
+			      struct device_attribute *attr, char *buf)
+{
+	struct gadget_info *gi = android_device_to_gadget_info(dev);
+	struct usb_configuration *c;
+	ssize_t pos = 0;
+
+	mutex_lock(&gi->lock);
+	list_for_each_entry(c, &gi->cdev.configs, list) {
+		struct config_usb_cfg *cfg;
+		struct usb_function *f;
+
+		cfg = container_of(c, struct config_usb_cfg, c);
+		list_for_each_entry(f, &cfg->func_list, list) {
+			char name[MAX_NAME_LEN];
+			const char *function;
+
+			function = android_function_name(f, name, sizeof(name));
+			pos += sysfs_emit_at(buf, pos, "%s,", function);
+		}
+		list_for_each_entry(f, &c->functions, list) {
+			char name[MAX_NAME_LEN];
+			const char *function;
+
+			function = android_function_name(f, name, sizeof(name));
+			pos += sysfs_emit_at(buf, pos, "%s,", function);
+		}
+	}
+	mutex_unlock(&gi->lock);
+
+	if (pos)
+		buf[pos - 1] = '\n';
+	else
+		pos = sysfs_emit(buf, "\n");
+
+	return pos;
+}
+
+static ssize_t functions_store(struct device *dev,
+			       struct device_attribute *attr,
+			       const char *buf, size_t count)
+{
+	struct gadget_info *gi = android_device_to_gadget_info(dev);
+	struct config_usb_cfg *cfg;
+	struct usb_configuration *c;
+	struct usb_function *f, *tmp;
+	char *functions;
+	char *cursor;
+	char *name;
+	int ret = 0;
+
+	functions = kmemdup_nul(buf, count, GFP_KERNEL);
+	if (!functions)
+		return -ENOMEM;
+
+	mutex_lock(&gi->lock);
+	if (gi->android_compat_enabled ||
+	    gi->composite.gadget_driver.udc_name) {
+		ret = -EBUSY;
+		goto out;
+	}
+
+	if (list_empty(&gi->cdev.configs)) {
+		ret = -ENODEV;
+		goto out;
+	}
+
+	android_clear_function_selection(gi);
+	gi->android_compat_active = true;
+	c = list_first_entry(&gi->cdev.configs, struct usb_configuration,
+			     list);
+	cfg = container_of(c, struct config_usb_cfg, c);
+	cursor = strim(functions);
+	dev_info(dev, "selecting Android USB functions: %s\n", cursor);
+
+	while ((name = strsep(&cursor, ","))) {
+		bool found = false;
+
+		name = strim(name);
+		if (!*name)
+			continue;
+
+		list_for_each_entry_safe(f, tmp, &gi->android_func_list, list) {
+			if (!android_function_matches(f, name))
+				continue;
+
+			list_move_tail(&f->list, &cfg->func_list);
+			found = true;
+			break;
+		}
+
+		if (!found)
+			dev_warn(dev, "USB function '%s' is unavailable\n", name);
+	}
+
+out:
+	mutex_unlock(&gi->lock);
+	kfree(functions);
+	return ret ? ret : count;
+}
+static DEVICE_ATTR_RW(functions);
+
+static ssize_t enable_show(struct device *dev,
+			   struct device_attribute *attr, char *buf)
+{
+	struct gadget_info *gi = android_device_to_gadget_info(dev);
+	bool enabled;
+
+	mutex_lock(&gi->lock);
+	enabled = gi->android_compat_enabled;
+	mutex_unlock(&gi->lock);
+
+	return sysfs_emit(buf, "%u\n", enabled);
+}
+
+static ssize_t enable_store(struct device *dev,
+			    struct device_attribute *attr,
+			    const char *buf, size_t count)
+{
+	struct gadget_info *gi = android_device_to_gadget_info(dev);
+	bool enable;
+	int ret;
+
+	ret = kstrtobool(buf, &enable);
+	if (ret)
+		return ret;
+
+	mutex_lock(&gi->lock);
+	if (enable == gi->android_compat_enabled) {
+		ret = 0;
+		goto out;
+	}
+
+	if (enable) {
+		if (!gi->composite.gadget_driver.udc_name || !gi->cdev.gadget) {
+			ret = -ENODEV;
+			goto out;
+		}
+
+		ret = usb_gadget_connect(gi->cdev.gadget);
+		if (!ret)
+			gi->android_compat_enabled = true;
+	} else {
+		ret = 0;
+		if (gi->composite.gadget_driver.udc_name)
+			ret = unregister_gadget(gi);
+		if (!ret) {
+			android_clear_function_selection(gi);
+			gi->android_compat_enabled = false;
+		}
+	}
+out:
+	mutex_unlock(&gi->lock);
+	return ret ? ret : count;
+}
+static DEVICE_ATTR_RW(enable);
+
+static struct attribute *android_compat_attrs[] = {
+	&dev_attr_functions.attr,
+	&dev_attr_enable.attr,
+	NULL,
+};
+ATTRIBUTE_GROUPS(android_compat);
+#endif
+
 static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
 		const char *page, size_t len)
 {
@@ -296,6 +551,12 @@ static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
 		if (ret)
 			goto err;
 		kfree(name);
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+		if (gi->android_compat_active) {
+			android_clear_function_selection(gi);
+			gi->android_compat_enabled = false;
+		}
+#endif
 	} else {
 		if (gi->composite.gadget_driver.udc_name) {
 			ret = -EBUSY;
@@ -307,6 +568,15 @@ static ssize_t gadget_dev_desc_UDC_store(struct config_item *item,
 			gi->composite.gadget_driver.udc_name = NULL;
 			goto err;
 		}
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+		if (gi->android_compat_active && !gi->android_compat_enabled) {
+			ret = usb_gadget_disconnect(gi->cdev.gadget);
+			if (ret)
+				dev_warn(&gi->cdev.gadget->dev,
+					 "failed to hold Android USB gadget: %d\n",
+					 ret);
+		}
+#endif
 	}
 	mutex_unlock(&gi->lock);
 	return len;
@@ -409,6 +679,9 @@ static void gadget_info_attr_release(struct config_item *item)
 	WARN_ON(!list_empty(&gi->cdev.configs));
 	WARN_ON(!list_empty(&gi->string_list));
 	WARN_ON(!list_empty(&gi->available_func));
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	WARN_ON(!list_empty(&gi->android_func_list));
+#endif
 	kfree(gi->composite.gadget_driver.function);
 	kfree(gi->composite.gadget_driver.driver.name);
 	kfree(gi);
@@ -470,6 +743,12 @@ static int config_usb_cfg_link(
 			goto out;
 		}
 	}
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	if (android_function_is_linked(gi, fi)) {
+		ret = -EEXIST;
+		goto out;
+	}
+#endif
 
 	f = usb_get_function(fi);
 	if (IS_ERR(f)) {
@@ -477,8 +756,13 @@ static int config_usb_cfg_link(
 		goto out;
 	}
 
-	/* stash the function until we bind it to the gadget */
-	list_add_tail(&f->list, &cfg->func_list);
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	if (gi->android_compat_active)
+		list_add_tail(&f->list, &gi->android_func_list);
+	else
+#endif
+		/* stash the function until we bind it to the gadget */
+		list_add_tail(&f->list, &cfg->func_list);
 	ret = 0;
 out:
 	mutex_unlock(&gi->lock);
@@ -503,8 +787,12 @@ static void config_usb_cfg_unlink(
 	 * remove the function.
 	 */
 	mutex_lock(&gi->lock);
-	if (gi->composite.gadget_driver.udc_name)
+	if (gi->composite.gadget_driver.udc_name) {
 		unregister_gadget(gi);
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+		gi->android_compat_enabled = false;
+#endif
+	}
 	WARN_ON(gi->composite.gadget_driver.udc_name);
 
 	list_for_each_entry(f, &cfg->func_list, list) {
@@ -515,6 +803,16 @@ static void config_usb_cfg_unlink(
 			return;
 		}
 	}
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	list_for_each_entry(f, &gi->android_func_list, list) {
+		if (f->fi == fi) {
+			list_del(&f->list);
+			usb_put_function(f);
+			mutex_unlock(&gi->lock);
+			return;
+		}
+	}
+#endif
 	mutex_unlock(&gi->lock);
 	WARN(1, "Unable to locate function to unbind\n");
 }
@@ -2032,6 +2330,9 @@ static struct config_group *gadgets_make(
 	mutex_init(&gi->lock);
 	INIT_LIST_HEAD(&gi->string_list);
 	INIT_LIST_HEAD(&gi->available_func);
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	INIT_LIST_HEAD(&gi->android_func_list);
+#endif
 
 	composite_init_dev(&gi->cdev);
 	gi->cdev.desc.bLength = USB_DT_DEVICE_SIZE;
@@ -2051,7 +2352,12 @@ static struct config_group *gadgets_make(
 	if (!gi->composite.gadget_driver.function)
 		goto out_free_driver_name;
 
-	if (android_device_create(&gi->cdev.android_opts))
+#ifdef CONFIG_ANDROID_USB_CONFIGFS_COMPAT
+	if (android_device_create(&gi->cdev.android_opts,
+				  android_compat_groups))
+#else
+	if (android_device_create(&gi->cdev.android_opts, NULL))
+#endif
 		goto out_free_driver_name_and_function;
 
 	return &gi->group;
