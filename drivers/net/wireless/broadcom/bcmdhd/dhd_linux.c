@@ -13964,7 +13964,8 @@ dhd_os_get_img_fwreq(const struct firmware **fw, char *file_path)
 {
 	int ret = BCME_ERROR;
 
-	ret = request_firmware(fw, file_path, dhd_bus_to_dev(g_dhd_pub->bus));
+	ret = request_firmware_from_current_mount_ns(fw, file_path,
+						     dhd_bus_to_dev(g_dhd_pub->bus));
 	if (ret < 0) {
 		DHD_ERROR(("%s: request_firmware err: %d\n", __FUNCTION__, ret));
 		/* convert to BCME_NOTFOUND error for error handling */

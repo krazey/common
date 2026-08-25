@@ -545,11 +545,16 @@ fw_get_filesystem_firmware(struct device *device, struct fw_priv *fw_priv,
 		if ((fw_priv->opt_flags & FW_OPT_PARTIAL) && buffer)
 			file_size_ptr = &file_size;
 
-		/* load firmware files from the mount namespace of init */
-		rc = kernel_read_file_from_path_initns(path, fw_priv->offset,
-						       &buffer, msize,
-						       file_size_ptr,
-						       READING_FIRMWARE);
+		if (fw_priv->opt_flags & FW_OPT_CURRENT_MOUNT_NS)
+			rc = kernel_read_file_from_path(path, fw_priv->offset,
+							&buffer, msize,
+							file_size_ptr,
+							READING_FIRMWARE);
+		else
+			rc = kernel_read_file_from_path_initns(path,
+							       fw_priv->offset, &buffer,
+							       msize, file_size_ptr,
+							       READING_FIRMWARE);
 		if (rc < 0) {
 			if (!(fw_priv->opt_flags & FW_OPT_NO_WARN)) {
 				if (rc != -ENOENT)
@@ -951,6 +956,31 @@ request_firmware(const struct firmware **firmware_p, const char *name,
 	return ret;
 }
 EXPORT_SYMBOL(request_firmware);
+
+/**
+ * request_firmware_from_current_mount_ns() - request firmware from the caller
+ * @firmware_p: pointer to firmware image
+ * @name: name of firmware file
+ * @device: device for which firmware is being loaded
+ *
+ * Resolve direct filesystem lookups against the caller's mount namespace.
+ * This is intended for trusted Android drivers whose firmware resides on a
+ * filesystem mounted after the kernel's initial root was replaced.
+ *
+ * Caller must hold the reference count of @device and may sleep.
+ */
+int request_firmware_from_current_mount_ns(const struct firmware **firmware_p,
+					   const char *name, struct device *device)
+{
+	int ret;
+
+	__module_get(THIS_MODULE);
+	ret = _request_firmware(firmware_p, name, device, NULL, 0, 0,
+				FW_OPT_UEVENT | FW_OPT_CURRENT_MOUNT_NS);
+	module_put(THIS_MODULE);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(request_firmware_from_current_mount_ns);
 
 /**
  * firmware_request_nowarn() - request for an optional fw module

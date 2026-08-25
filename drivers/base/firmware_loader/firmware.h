@@ -32,6 +32,9 @@
  *      fallback are enabled, then this fallback will be tried first.
  * @FW_OPT_PARTIAL: Allow partial read of firmware instead of needing to read
  *	entire file.
+ * @FW_OPT_CURRENT_MOUNT_NS: Resolve filesystem paths in the caller's mount
+ *	namespace instead of the initial mount namespace. This is intended for
+ *	firmware stored on filesystems mounted by late userspace.
  */
 enum fw_opt {
 	FW_OPT_UEVENT			= BIT(0),
@@ -42,6 +45,7 @@ enum fw_opt {
 	FW_OPT_NOFALLBACK_SYSFS		= BIT(5),
 	FW_OPT_FALLBACK_PLATFORM	= BIT(6),
 	FW_OPT_PARTIAL			= BIT(7),
+	FW_OPT_CURRENT_MOUNT_NS		= BIT(8),
 };
 
 enum fw_status {
