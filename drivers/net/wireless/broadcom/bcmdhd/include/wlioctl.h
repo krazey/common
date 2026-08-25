@@ -17069,15 +17069,18 @@ typedef struct wnm_bss_select_factor_params {
 	uint8 pad;
 } wnm_bss_select_factor_params_t;
 
-#define WNM_BSS_SELECT_FIXED_SIZE OFFSETOF(wnm_bss_select_factor_cfg_t, params)
 typedef struct wnm_bss_select_factor_cfg {
 	uint8 version;
 	uint8 band;
 	uint16 type;
 	uint16 pad;
 	uint16 count;
-	wnm_bss_select_factor_params_t params[1];
+	wnm_bss_select_factor_params_t params[];
 } wnm_bss_select_factor_cfg_t;
+#define WNM_BSS_SELECT_FIXED_SIZE OFFSETOF(wnm_bss_select_factor_cfg_t, params)
+#define WNM_BSS_SELECT_FACTOR_SIZE(count) \
+	(WNM_BSS_SELECT_FIXED_SIZE + \
+	((count) * sizeof(wnm_bss_select_factor_params_t)))
 
 #define WNM_BSS_SELECT_WEIGHT_VERSION   1
 typedef struct wnm_bss_select_weight_cfg {
