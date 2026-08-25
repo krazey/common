@@ -9,7 +9,9 @@
 #ifndef __MAX77705_CHARGER_H
 #define __MAX77705_CHARGER_H __FILE__
 
+#include <linux/mutex.h>
 #include <linux/regmap.h>
+#include <linux/workqueue.h>
 
 /* MAX77705_CHG_REG_CHG_INT */
 #define MAX77705_BYP_I		(0)
@@ -67,6 +69,7 @@
 /* MAX77705_CHG_REG_CNFG_01 */
 #define MAX77705_FCHGTIME_DISABLE	0
 #define MAX77705_CHG_RSTRT_DISABLE	0x3
+#define MAX77705_RECYCLE_EN_ENABLE	1
 
 #define MAX77705_CHG_PQEN_DISABLE	0
 #define MAX77705_CHG_PQEN_ENABLE	1
@@ -92,6 +95,10 @@
 #define MAX77705_B2SOVRC_4_5A		6
 #define MAX77705_B2SOVRC_4_8A		8
 #define MAX77705_B2SOVRC_5_0A		9
+#define MAX77705_B2SOVRC_MIN_UA		4600000
+#define MAX77705_B2SOVRC_MAX_UA		6200000
+#define MAX77705_B2SOVRC_STEP_UA	200000
+#define MAX77705_B2SOVRC_MIN_REG	7
 
 /* MAX77705_CHG_CNFG_06 */
 #define MAX77705_WDTCLR_SHIFT		0
@@ -102,6 +109,8 @@
 
 /* MAX77705_CHG_REG_CNFG_07 */
 #define MAX77705_CHG_FMBST		4
+#define MAX77705_FMBST_ENABLE		1
+#define MAX77705_FGSRC_NORMAL		0
 #define MAX77705_REG_FMBST_SHIFT	2
 #define MAX77705_REG_FMBST_MASK		BIT(MAX77705_REG_FMBST_SHIFT)
 #define MAX77705_REG_FGSRC_SHIFT	1
@@ -114,6 +123,7 @@
 
 /* MAX77705_CHG_REG_CNFG_09 */
 #define MAX77705_CHG_DISABLE			0
+#define MAX77705_CHG_ENABLE			1
 
 /* MAX77705_CHG_REG_CNFG_12 */
 /* REG=4.5V, UVLO=4.7V */
@@ -122,6 +132,8 @@
 #define MAX77705_WCIN_4_5		0
 #define MAX77705_DISABLE_SKIP		1
 #define MAX77705_AUTO_SKIP		0
+#define MAX77705_CHGINSEL_DISABLE	0
+#define MAX77705_CHGINSEL_ENABLE		1
 
 #define AICL_WORK_DELAY_MS		100
 
@@ -130,6 +142,16 @@
 #define MAX77705_CURRENT_CHG_STEP	50000
 #define MAX77705_CURRENT_CHGIN_MIN	100000
 #define MAX77705_CURRENT_CHGIN_MAX	3200000
+#define MAX77705_CURRENT_CHG_MAX		3150000
+#define MAX77705_STOCK_SAFE_CURRENT	500000
+#define MAX77705_STOCK_SAFE_CABLE_TYPE	2
+#define MAX77705_WATCHDOG_INTERVAL_MS	30000
+
+struct max77705_current_entry {
+	u32 cable_type;
+	u32 input_current_ua;
+	u32 charge_current_ua;
+};
 
 enum max77705_field_idx {
 	MAX77705_CHGPROT,
@@ -138,6 +160,7 @@ enum max77705_field_idx {
 	MAX77705_CHG_CHGIN_LIM,
 	MAX77705_CHG_CV_PRM,
 	MAX77705_CHG_PQEN,
+	MAX77705_RECYCLE_EN,
 	MAX77705_CHG_RSTRT,
 	MAX77705_CHG_WCIN,
 	MAX77705_FCHGTIME,
@@ -146,6 +169,8 @@ enum max77705_field_idx {
 	MAX77705_OTG_ILIM,
 	MAX77705_REG_B2SOVRC,
 	MAX77705_REG_DISKIP,
+	MAX77705_REG_FGSRC,
+	MAX77705_REG_FMBST,
 	MAX77705_REG_FSW,
 	MAX77705_SYS_TRACK,
 	MAX77705_TO,
@@ -153,12 +178,14 @@ enum max77705_field_idx {
 	MAX77705_VBYPSET,
 	MAX77705_VCHGIN,
 	MAX77705_WCIN,
+	MAX77705_CHGINSEL,
 	MAX77705_N_REGMAP_FIELDS,
 };
 
 static const struct reg_field max77705_reg_field[MAX77705_N_REGMAP_FIELDS] = {
 	[MAX77705_MODE]			= REG_FIELD(MAX77705_CHG_REG_CNFG_00,   0, 3),
 	[MAX77705_FCHGTIME]		= REG_FIELD(MAX77705_CHG_REG_CNFG_01,   0, 2),
+	[MAX77705_RECYCLE_EN]		= REG_FIELD(MAX77705_CHG_REG_CNFG_01,   3, 3),
 	[MAX77705_CHG_RSTRT]		= REG_FIELD(MAX77705_CHG_REG_CNFG_01,   4, 5),
 	[MAX77705_CHG_PQEN]		= REG_FIELD(MAX77705_CHG_REG_CNFG_01,   7, 7),
 	[MAX77705_CHG_CC_LIM]		= REG_FIELD(MAX77705_CHG_REG_CNFG_02,   0, 5),
@@ -170,6 +197,8 @@ static const struct reg_field max77705_reg_field[MAX77705_N_REGMAP_FIELDS] = {
 	[MAX77705_REG_B2SOVRC]		= REG_FIELD(MAX77705_CHG_REG_CNFG_05,   0, 3),
 	[MAX77705_CHGPROT]		= REG_FIELD(MAX77705_CHG_REG_CNFG_06,   2, 3),
 	[MAX77705_LX_SLOPE]		= REG_FIELD(MAX77705_CHG_REG_CNFG_06,   5, 6),
+	[MAX77705_REG_FGSRC]		= REG_FIELD(MAX77705_CHG_REG_CNFG_07,   1, 1),
+	[MAX77705_REG_FMBST]		= REG_FIELD(MAX77705_CHG_REG_CNFG_07,   2, 2),
 	[MAX77705_REG_FSW]		= REG_FIELD(MAX77705_CHG_REG_CNFG_08,   0, 1),
 	[MAX77705_CHG_CHGIN_LIM]	= REG_FIELD(MAX77705_CHG_REG_CNFG_09,   0, 6),
 	[MAX77705_CHG_EN]		= REG_FIELD(MAX77705_CHG_REG_CNFG_09,   7, 7),
@@ -178,6 +207,7 @@ static const struct reg_field max77705_reg_field[MAX77705_N_REGMAP_FIELDS] = {
 	[MAX77705_REG_DISKIP]		= REG_FIELD(MAX77705_CHG_REG_CNFG_12,   0, 0),
 	[MAX77705_WCIN]			= REG_FIELD(MAX77705_CHG_REG_CNFG_12,   1, 2),
 	[MAX77705_VCHGIN]		= REG_FIELD(MAX77705_CHG_REG_CNFG_12,   3, 4),
+	[MAX77705_CHGINSEL]		= REG_FIELD(MAX77705_CHG_REG_CNFG_12,   5, 5),
 };
 
 struct max77705_charger_data {
@@ -187,7 +217,19 @@ struct max77705_charger_data {
 	struct power_supply_battery_info *bat_info;
 	struct workqueue_struct *wqueue;
 	struct work_struct	chgin_work;
+	struct delayed_work	watchdog_work;
+	/* Serialize cable policy and charger register updates. */
+	struct mutex		lock;
 	struct power_supply	*psy_chg;
+	struct max77705_current_entry *current_table;
+	unsigned int		current_table_size;
+	u32			default_input_current_ua;
+	u32			default_charge_current_ua;
+	u32			input_current_max_ua;
+	u32			b2s_ocp_ua;
+	u32			cable_type;
+	bool			policy_selected;
+	bool			watchdog_enabled;
 };
 
 #endif /* __MAX77705_CHARGER_H */
