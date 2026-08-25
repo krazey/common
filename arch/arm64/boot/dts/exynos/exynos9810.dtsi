@@ -622,7 +622,6 @@
 			pinctrl-names = "default";
 			samsung,fsys-sysreg = <&sysreg_fsys1>;
 			samsung,pmu-syscon = <&pmu_system_controller>;
-			dma-coherent;
 			status = "disabled";
 		};
 
