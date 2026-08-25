@@ -11,7 +11,6 @@
 #include <linux/mfd/max77705-private.h>
 #include <linux/mfd/max77693-common.h>
 #include <linux/pm.h>
-#include <linux/power/max17042_battery.h>
 #include <linux/module.h>
 #include <linux/regmap.h>
 #include <linux/of.h>
@@ -22,7 +21,6 @@ static struct mfd_cell max77705_devs[] = {
 	MFD_CELL_OF("max77705-muic", NULL, NULL, 0, 0,
 		    "maxim,max77705-muic"),
 	MFD_CELL_OF("max77705-rgb", NULL, NULL, 0, 0, "maxim,max77705-rgb"),
-	MFD_CELL_OF("max77705-charger", NULL, NULL, 0, 0, "maxim,max77705-charger"),
 	MFD_CELL_OF("max77705-haptic", NULL, NULL, 0, 0, "maxim,max77705-haptic"),
 };
 
