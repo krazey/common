@@ -14,6 +14,7 @@
 #include <linux/spinlock.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/pm_wakeup.h>
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/list.h>
@@ -40,6 +41,21 @@ static bool dwc3_is_exynos9810(struct dwc3 *dwc)
 	return dwc->dev->parent && dwc->dev->parent->of_node &&
 		of_device_is_compatible(dwc->dev->parent->of_node,
 					"samsung,exynos9810-dwusb3");
+}
+
+static void dwc3_exynos9810_set_gadget_awake(struct dwc3 *dwc, bool awake)
+{
+	if (!dwc3_is_exynos9810(dwc) || !dwc->exynos9810_gadget_wake ||
+	    dwc->exynos9810_gadget_awake == awake)
+		return;
+
+	dwc->exynos9810_gadget_awake = awake;
+	if (awake)
+		__pm_stay_awake(dwc->exynos9810_gadget_wake);
+	else
+		__pm_relax(dwc->exynos9810_gadget_wake);
+
+	dev_info(dwc->dev, "E981D: DWC3 gadget wake hold=%u\n", awake);
 }
 
 static int dwc3_exynos9810_update_dp_pullup(struct dwc3 *dwc, bool enable)
@@ -2924,6 +2940,8 @@ static int dwc3_gadget_soft_disconnect(struct dwc3 *dwc)
 	unsigned long flags;
 	int ret;
 
+	dwc3_exynos9810_set_gadget_awake(dwc, false);
+
 	spin_lock_irqsave(&dwc->lock, flags);
 	if (!dwc->pullups_connected) {
 		spin_unlock_irqrestore(&dwc->lock, flags);
@@ -3354,6 +3372,8 @@ static int dwc3_gadget_stop(struct usb_gadget *g)
 {
 	struct dwc3		*dwc = gadget_to_dwc(g);
 	unsigned long		flags;
+
+	dwc3_exynos9810_set_gadget_awake(dwc, false);
 
 	if (dwc->sys_wakeup)
 		device_wakeup_disable(dwc->sysdev);
@@ -4399,6 +4419,7 @@ static void dwc3_gadget_disconnect_interrupt(struct dwc3 *dwc)
 	dwc3_gadget_dctl_write_safe(dwc, reg);
 
 	dwc->connected = false;
+	dwc3_exynos9810_set_gadget_awake(dwc, false);
 
 	dwc3_disconnect_gadget(dwc);
 
@@ -4485,6 +4506,7 @@ static void dwc3_gadget_reset_interrupt(struct dwc3 *dwc)
 	 */
 	dwc3_stop_active_transfers(dwc);
 	dwc->connected = true;
+	dwc3_exynos9810_set_gadget_awake(dwc, true);
 
 	reg = dwc3_readl(dwc, DWC3_DCTL);
 	reg &= ~DWC3_DCTL_TSTCTRL_MASK;
@@ -5116,6 +5138,13 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 		goto err4;
 
 	if (dwc3_is_exynos9810(dwc)) {
+		dwc->exynos9810_gadget_wake =
+			wakeup_source_register(dwc->dev,
+					       "exynos9810-dwc3-gadget");
+		if (!dwc->exynos9810_gadget_wake)
+			dev_warn(dwc->dev,
+				 "failed to register gadget wake source\n");
+
 		dwc3_exynos9810_select_usb_mux(dwc);
 
 		INIT_DELAYED_WORK(&dwc->exynos9810_reconnect_work,
@@ -5154,6 +5183,9 @@ int dwc3_gadget_init(struct dwc3 *dwc)
 	return 0;
 
 err5:
+	dwc3_exynos9810_set_gadget_awake(dwc, false);
+	wakeup_source_unregister(dwc->exynos9810_gadget_wake);
+	dwc->exynos9810_gadget_wake = NULL;
 	if (dwc->exynos9810_reconnect_initialized) {
 		dwc->exynos9810_reconnect_initialized = false;
 		cancel_delayed_work_sync(&dwc->exynos9810_reconnect_work);
@@ -5194,8 +5226,9 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 		cancel_delayed_work_sync(&dwc->exynos9810_diagnostics_work);
 #endif
 
+	dwc3_exynos9810_set_gadget_awake(dwc, false);
 	if (!dwc->gadget)
-		return;
+		goto unregister_wake;
 
 	dwc3_enable_susphy(dwc, true);
 	usb_del_gadget(dwc->gadget);
@@ -5206,6 +5239,10 @@ void dwc3_gadget_exit(struct dwc3 *dwc)
 	kfree(dwc->setup_buf);
 	dma_free_coherent(dwc->sysdev, sizeof(*dwc->ep0_trb) * 2,
 			  dwc->ep0_trb, dwc->ep0_trb_addr);
+
+unregister_wake:
+	wakeup_source_unregister(dwc->exynos9810_gadget_wake);
+	dwc->exynos9810_gadget_wake = NULL;
 }
 EXPORT_SYMBOL_GPL(dwc3_gadget_exit);
 

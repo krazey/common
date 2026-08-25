@@ -1227,6 +1227,8 @@ struct dwc3 {
 	bool			exynos9810_reconnect_attempted;
 	struct mux_state	*exynos9810_usb_mux;
 	bool			exynos9810_usb_mux_selected;
+	struct wakeup_source	*exynos9810_gadget_wake;
+	bool			exynos9810_gadget_awake;
 
 #ifdef CONFIG_EXYNOS9810_EARLY_BOOT_MARKERS
 	struct delayed_work	exynos9810_diagnostics_work;
