@@ -61,23 +61,21 @@ allOf:
     then:
       properties:
         reg:
-          minItems: 5
-          maxItems: 5
           items:
             - description: Data Bus Interface (DBI) registers
             - description: External Local Bus interface (ELBI) registers
             - description: PCIe configuration space region
-            - description: Integrated PHY and PCS registers
+            - description: Integrated PHY PMA registers
+            - description: Integrated PHY PCS registers
             - description: Internal automation registers
 
         reg-names:
-          minItems: 5
-          maxItems: 5
           items:
             - const: dbi
             - const: elbi
             - const: config
             - const: phy
+            - const: pcs
             - const: ia
 
         clocks:
@@ -121,11 +119,11 @@ properties:
 
   reg:
     minItems: 3
-    maxItems: 5
+    maxItems: 6
 
   reg-names:
     minItems: 3
-    maxItems: 5
+    maxItems: 6
 
   interrupts:
     maxItems: 1
