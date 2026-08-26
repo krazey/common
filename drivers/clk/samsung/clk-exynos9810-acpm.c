@@ -114,6 +114,7 @@ static const char *const exynos9810_acpm_clk_names[] = {
 static const unsigned long
 exynos9810_acpm_clk_initial_rates[ARRAY_SIZE(exynos9810_acpm_clk_names)] = {
 	[CLK_ACPM_DVFS_CPUCL0] = 455000000,
+	[CLK_ACPM_DVFS_CPUCL1] = 1794000000,
 	[CLK_ACPM_DVFS_G3D] = 260000000,
 };
 
