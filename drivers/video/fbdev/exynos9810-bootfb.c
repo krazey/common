@@ -36,6 +36,7 @@
 #include <linux/vmalloc.h>
 #include <linux/wait.h>
 #include <linux/workqueue.h>
+#include <video/mipi_display.h>
 
 #define EXYNOS9810_BOOTFB_FPS		60
 #define EXYNOS9810_BOOTFB_MAX_WINDOWS	6
@@ -111,6 +112,28 @@
 #define EXYNOS9810_DPP_G0_IRQ			0x0004
 #define EXYNOS9810_DPP_G0_INPUT_CONTROL		0x0008
 #define EXYNOS9810_DPP_G0_CONFIG_ERROR		0x0d08
+
+/* DSIM0 is left running by the bootloader with the panel attached. */
+#define EXYNOS9810_DSIM_INTSRC			0x0050
+#define EXYNOS9810_DSIM_PKTHDR			0x0058
+#define EXYNOS9810_DSIM_PAYLOAD			0x005c
+#define EXYNOS9810_DSIM_FIFOCTRL		0x0068
+#define EXYNOS9810_DSIM_INTSRC_PH_EMPTY		BIT(28)
+#define EXYNOS9810_DSIM_FIFO_EMPTY_PH		BIT(10)
+#define EXYNOS9810_DSIM_FIFO_EMPTY_PL		BIT(8)
+#define EXYNOS9810_DSIM_FIFO_IDLE		\
+	(EXYNOS9810_DSIM_FIFO_EMPTY_PH | EXYNOS9810_DSIM_FIFO_EMPTY_PL)
+#define EXYNOS9810_DSIM_HEADER_DATA0(_value)	((u32)(_value) << 8)
+#define EXYNOS9810_DSIM_WRITE_TIMEOUT_US	50000
+
+/* Values used by the Exynos9810 HWC S3CFB_POWER_MODE ABI. */
+#define EXYNOS9810_DISP_PWR_OFF			0U
+#define EXYNOS9810_DISP_PWR_DOZE		1U
+#define EXYNOS9810_DISP_PWR_NORMAL		2U
+#define EXYNOS9810_DISP_PWR_DOZE_SUSPEND	3U
+
+static const u8 exynos9810_panel_key_enable[] = { 0x9f, 0xa5, 0xa5 };
+static const u8 exynos9810_panel_key_disable[] = { 0x9f, 0x5a, 0x5a };
 
 enum exynos9810_bootfb_window_state {
 	EXYNOS9810_WIN_DISABLED = 0,
@@ -390,6 +413,7 @@ struct exynos9810_bootfb {
 	void __iomem *decon;
 	void __iomem *dpp_g0;
 	void __iomem *idma_g0;
+	void __iomem *dsim;
 	u32 *shadow;
 	size_t screen_size;
 	u32 width;
@@ -410,6 +434,7 @@ struct exynos9810_bootfb {
 	atomic_t decon_rgb_order_fix_count;
 	bool fbdev_refresh_enabled;
 	bool fbdev_hwc_seen;
+	bool panel_enabled;
 	bool fbdev_refresh_logged;
 	ktime_t vsync_period;
 	wait_queue_head_t vsync_wait;
@@ -1917,15 +1942,119 @@ static int exynos9810_bootfb_check_var(struct fb_var_screeninfo *var,
 	return 0;
 }
 
+static int
+exynos9810_bootfb_dsim_wait_idle(struct exynos9810_bootfb *bootfb)
+{
+	void __iomem *fifoctrl = bootfb->dsim + EXYNOS9810_DSIM_FIFOCTRL;
+	u32 value;
+
+	return readl_poll_timeout_atomic(fifoctrl, value,
+		(value & EXYNOS9810_DSIM_FIFO_IDLE) ==
+			EXYNOS9810_DSIM_FIFO_IDLE,
+		10, EXYNOS9810_DSIM_WRITE_TIMEOUT_US);
+}
+
+static int
+exynos9810_bootfb_dsim_write_key(struct exynos9810_bootfb *bootfb,
+				 const u8 key[3])
+{
+	u32 header;
+	u32 payload;
+	int ret;
+
+	ret = exynos9810_bootfb_dsim_wait_idle(bootfb);
+	if (ret)
+		return ret;
+
+	payload = key[0] | (key[1] << 8) | (key[2] << 16);
+	header = MIPI_DSI_DCS_LONG_WRITE |
+		 EXYNOS9810_DSIM_HEADER_DATA0(3);
+
+	writel(EXYNOS9810_DSIM_INTSRC_PH_EMPTY,
+	       bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
+	writel(payload, bootfb->dsim + EXYNOS9810_DSIM_PAYLOAD);
+	writel(header, bootfb->dsim + EXYNOS9810_DSIM_PKTHDR);
+
+	return exynos9810_bootfb_dsim_wait_idle(bootfb);
+}
+
+static int
+exynos9810_bootfb_dsim_write_short(struct exynos9810_bootfb *bootfb,
+				   u8 command)
+{
+	u32 header;
+	int ret;
+
+	ret = exynos9810_bootfb_dsim_wait_idle(bootfb);
+	if (ret)
+		return ret;
+
+	header = MIPI_DSI_DCS_SHORT_WRITE |
+		 EXYNOS9810_DSIM_HEADER_DATA0(command);
+	writel(EXYNOS9810_DSIM_INTSRC_PH_EMPTY,
+	       bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
+	writel(header, bootfb->dsim + EXYNOS9810_DSIM_PKTHDR);
+
+	return exynos9810_bootfb_dsim_wait_idle(bootfb);
+}
+
+static int
+exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
+				   bool enabled)
+{
+	u8 command = enabled ? MIPI_DCS_SET_DISPLAY_ON :
+			       MIPI_DCS_SET_DISPLAY_OFF;
+	int disable_ret;
+	int ret;
+
+	if (bootfb->panel_enabled == enabled)
+		return 0;
+
+	ret = exynos9810_bootfb_dsim_write_key(bootfb, exynos9810_panel_key_enable);
+	if (ret)
+		return ret;
+
+	ret = exynos9810_bootfb_dsim_write_short(bootfb, command);
+	disable_ret = exynos9810_bootfb_dsim_write_key(bootfb, exynos9810_panel_key_disable);
+	if (!ret) {
+		bootfb->panel_enabled = enabled;
+		dev_info(bootfb->dev, "E981D: panel display %s\n",
+			 enabled ? "on" : "off");
+	}
+
+	return ret ? ret : disable_ret;
+}
+
+static void
+exynos9810_bootfb_set_panel(struct exynos9810_bootfb *bootfb, bool enabled)
+{
+	u32 fifo;
+	int ret;
+
+	mutex_lock(&bootfb->lock);
+	if (enabled) {
+		ret = exynos9810_bootfb_set_panel_locked(bootfb, true);
+		if (!READ_ONCE(bootfb->fbdev_hwc_seen))
+			WRITE_ONCE(bootfb->fbdev_refresh_enabled, true);
+	} else {
+		WRITE_ONCE(bootfb->fbdev_refresh_enabled, false);
+		ret = exynos9810_bootfb_set_panel_locked(bootfb, false);
+	}
+	mutex_unlock(&bootfb->lock);
+
+	if (ret) {
+		fifo = readl(bootfb->dsim + EXYNOS9810_DSIM_FIFOCTRL);
+		dev_warn_ratelimited(bootfb->dev,
+				     "panel display %s command failed: %d (FIFO %#x)\n",
+				     enabled ? "on" : "off", ret, fifo);
+	}
+}
+
 static int exynos9810_bootfb_blank(int blank, struct fb_info *info)
 {
 	struct exynos9810_bootfb *bootfb = info->par;
 
-	if (blank == FB_BLANK_UNBLANK &&
-	    !READ_ONCE(bootfb->fbdev_hwc_seen))
-		WRITE_ONCE(bootfb->fbdev_refresh_enabled, true);
-	else if (blank == FB_BLANK_POWERDOWN)
-		WRITE_ONCE(bootfb->fbdev_refresh_enabled, false);
+	exynos9810_bootfb_set_panel(bootfb, blank == FB_BLANK_UNBLANK);
 
 	return 0;
 }
@@ -1971,8 +2100,22 @@ static int exynos9810_bootfb_ioctl(struct fb_info *info, unsigned int cmd,
 		return 0;
 	case S3CFB_DECON_SELF_REFRESH:
 	case S3CFB_WIN_POSITION:
-	case S3CFB_POWER_MODE:
 		return 0;
+	case S3CFB_POWER_MODE:
+		if (get_user(value, (u32 __user *)argp))
+			return -EFAULT;
+		switch (value) {
+		case EXYNOS9810_DISP_PWR_NORMAL:
+			exynos9810_bootfb_set_panel(bootfb, true);
+			return 0;
+		case EXYNOS9810_DISP_PWR_OFF:
+		case EXYNOS9810_DISP_PWR_DOZE:
+		case EXYNOS9810_DISP_PWR_DOZE_SUSPEND:
+			exynos9810_bootfb_set_panel(bootfb, false);
+			return 0;
+		default:
+			return -EINVAL;
+		}
 	case S3CFB_WIN_CONFIG:
 		return exynos9810_bootfb_present(bootfb, cmd, arg);
 	case EXYNOS_DISP_INFO:
@@ -3469,6 +3612,7 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	atomic_set(&bootfb->decon_rgb_order_fix_count, 0);
 	bootfb->fbdev_refresh_enabled = false;
 	bootfb->fbdev_hwc_seen = false;
+	bootfb->panel_enabled = true;
 	bootfb->fbdev_refresh_logged = false;
 
 	bootfb->native_present_active_slot = -1;
@@ -3583,6 +3727,12 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	bootfb->idma_g0 = devm_platform_ioremap_resource_byname(pdev, "idma-g0");
 	if (IS_ERR(bootfb->idma_g0)) {
 		ret = PTR_ERR(bootfb->idma_g0);
+		goto release_info;
+	}
+
+	bootfb->dsim = devm_platform_ioremap_resource_byname(pdev, "dsim");
+	if (IS_ERR(bootfb->dsim)) {
+		ret = PTR_ERR(bootfb->dsim);
 		goto release_info;
 	}
 
