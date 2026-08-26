@@ -60,11 +60,9 @@ properties:
   stride:
     $ref: /schemas/types.yaml#/definitions/uint32
 
-  width-mm:
-    $ref: /schemas/types.yaml#/definitions/uint32
+  width-mm: true
 
-  height-mm:
-    $ref: /schemas/types.yaml#/definitions/uint32
+  height-mm: true
 
 required:
   - compatible
