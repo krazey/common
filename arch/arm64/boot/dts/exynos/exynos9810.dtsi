@@ -74,6 +74,7 @@
 			enable-method = "psci";
 			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
 			operating-points-v2 = <&cpucl0_opp_table>;
+			capacity-dmips-mhz = <272>;
 		};
 
 		cpu1: cpu@1 {
@@ -83,6 +84,7 @@
 			enable-method = "psci";
 			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
 			operating-points-v2 = <&cpucl0_opp_table>;
+			capacity-dmips-mhz = <272>;
 		};
 
 		cpu2: cpu@2 {
@@ -92,6 +94,7 @@
 			enable-method = "psci";
 			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
 			operating-points-v2 = <&cpucl0_opp_table>;
+			capacity-dmips-mhz = <272>;
 		};
 
 		cpu3: cpu@3 {
@@ -101,6 +104,7 @@
 			enable-method = "psci";
 			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL0>;
 			operating-points-v2 = <&cpucl0_opp_table>;
+			capacity-dmips-mhz = <272>;
 		};
 
 		cpu4: cpu@100 {
@@ -108,6 +112,9 @@
 			compatible = "samsung,mongoose-m3";
 			reg = <0x100>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL1>;
+			operating-points-v2 = <&cpucl1_opp_table>;
+			capacity-dmips-mhz = <785>;
 		};
 
 		cpu5: cpu@101 {
@@ -115,6 +122,9 @@
 			compatible = "samsung,mongoose-m3";
 			reg = <0x101>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL1>;
+			operating-points-v2 = <&cpucl1_opp_table>;
+			capacity-dmips-mhz = <785>;
 		};
 
 		cpu6: cpu@102 {
@@ -122,6 +132,9 @@
 			compatible = "samsung,mongoose-m3";
 			reg = <0x102>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL1>;
+			operating-points-v2 = <&cpucl1_opp_table>;
+			capacity-dmips-mhz = <785>;
 		};
 
 		cpu7: cpu@103 {
@@ -129,6 +142,9 @@
 			compatible = "samsung,mongoose-m3";
 			reg = <0x103>;
 			enable-method = "psci";
+			clocks = <&acpm_dvfs CLK_ACPM_DVFS_CPUCL1>;
+			operating-points-v2 = <&cpucl1_opp_table>;
+			capacity-dmips-mhz = <785>;
 		};
 	};
 
@@ -214,6 +230,66 @@
 
 		opp-1950000000 {
 			opp-hz = /bits/ 64 <1950000000>;
+			clock-latency-ns = <100000>;
+		};
+	};
+
+	cpucl1_opp_table: opp-table-cpucl1 {
+		compatible = "operating-points-v2";
+		opp-shared;
+
+		opp-650000000 {
+			opp-hz = /bits/ 64 <650000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-741000000 {
+			opp-hz = /bits/ 64 <741000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-858000000 {
+			opp-hz = /bits/ 64 <858000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-962000000 {
+			opp-hz = /bits/ 64 <962000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1066000000 {
+			opp-hz = /bits/ 64 <1066000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1170000000 {
+			opp-hz = /bits/ 64 <1170000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1261000000 {
+			opp-hz = /bits/ 64 <1261000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1469000000 {
+			opp-hz = /bits/ 64 <1469000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1586000000 {
+			opp-hz = /bits/ 64 <1586000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1690000000 {
+			opp-hz = /bits/ 64 <1690000000>;
+			clock-latency-ns = <100000>;
+		};
+
+		opp-1794000000 {
+			opp-hz = /bits/ 64 <1794000000>;
 			clock-latency-ns = <100000>;
 		};
 	};
