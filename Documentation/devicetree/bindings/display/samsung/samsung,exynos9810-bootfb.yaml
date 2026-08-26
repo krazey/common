@@ -47,6 +47,18 @@ properties:
   iommus:
     maxItems: 1
 
+  clocks:
+    minItems: 3
+    maxItems: 3
+    description:
+      ACPM DVFS clocks for the memory, internal bus and display domains.
+
+  clock-names:
+    items:
+      - const: mif
+      - const: int
+      - const: disp
+
   memory-region:
     maxItems: 1
     description: Reserved framebuffer scanned out by the bootloader.
@@ -68,6 +80,8 @@ required:
   - compatible
   - reg
   - reg-names
+  - clocks
+  - clock-names
   - memory-region
   - width
   - height
@@ -82,6 +96,12 @@ examples:
     / {
         #address-cells = <2>;
         #size-cells = <1>;
+
+        acpm_dvfs: clock-controller {
+            compatible = "samsung,exynos9810-acpm-dvfs";
+            #clock-cells = <1>;
+            acpm-ipc-channel = <5>;
+        };
 
         reserved-memory {
             #address-cells = <2>;
@@ -102,6 +122,10 @@ examples:
                   <0x0 0x16080000 0x0100>;
             reg-names = "decon", "dpp-g0", "idma-g0", "dsim";
             memory-region = <&framebuffer>;
+            clocks = <&acpm_dvfs 0>,
+                     <&acpm_dvfs 1>,
+                     <&acpm_dvfs 8>;
+            clock-names = "mif", "int", "disp";
             width = <1440>;
             height = <2960>;
             stride = <5760>;
