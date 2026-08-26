@@ -18,6 +18,7 @@
 #include <linux/mux/driver.h>
 #include <linux/platform_device.h>
 #include <linux/property.h>
+#include <linux/usb/typec.h>
 
 #define MAX77705_UIC_INT		0x02
 #define MAX77705_UIC_INT_M		0x0e
@@ -68,6 +69,10 @@ enum max77705_muic_cable {
 struct max77705_muic {
 	struct i2c_client *i2c;
 	struct extcon_dev *edev;
+	struct fwnode_handle *connector_fwnode;
+	struct typec_capability typec_cap;
+	struct typec_port *typec_port;
+	struct typec_partner *partner;
 	enum max77705_muic_cable cable;
 	/* Serializes commands sent to the controller firmware. */
 	struct mutex lock;
@@ -140,6 +145,58 @@ static bool max77705_muic_extcon_state(enum max77705_muic_cable cable, unsigned 
 	}
 }
 
+static int max77705_muic_update_typec(struct max77705_muic *muic,
+				      enum max77705_muic_cable cable)
+{
+	struct typec_partner_desc desc = {
+		.accessory = TYPEC_ACCESSORY_NONE,
+		.usb_capability = USB_CAPABILITY_USB2,
+	};
+	enum typec_data_role data_role;
+	enum typec_role power_role;
+	int ret;
+
+	if (!muic->typec_port)
+		return 0;
+
+	if (cable == MAX77705_CABLE_NONE) {
+		if (muic->partner) {
+			typec_unregister_partner(muic->partner);
+			muic->partner = NULL;
+		}
+
+		typec_set_pwr_role(muic->typec_port, TYPEC_SINK);
+		typec_set_data_role(muic->typec_port, TYPEC_DEVICE);
+		typec_set_pwr_opmode(muic->typec_port, TYPEC_PWR_MODE_USB);
+
+		return 0;
+	}
+
+	if (cable == MAX77705_CABLE_HOST) {
+		power_role = TYPEC_SOURCE;
+		data_role = TYPEC_HOST;
+	} else {
+		power_role = TYPEC_SINK;
+		data_role = TYPEC_DEVICE;
+	}
+
+	typec_set_pwr_role(muic->typec_port, power_role);
+	typec_set_data_role(muic->typec_port, data_role);
+	typec_set_pwr_opmode(muic->typec_port, TYPEC_PWR_MODE_USB);
+
+	if (muic->partner)
+		return 0;
+
+	muic->partner = typec_register_partner(muic->typec_port, &desc);
+	if (IS_ERR(muic->partner)) {
+		ret = PTR_ERR(muic->partner);
+		muic->partner = NULL;
+		return ret;
+	}
+
+	return 0;
+}
+
 static int max77705_muic_publish_cable(struct max77705_muic *muic, int usbc_status, int bc_status)
 {
 	bool changed[ARRAY_SIZE(max77705_muic_extcon_cables) - 1];
@@ -181,7 +238,7 @@ static int max77705_muic_publish_cable(struct max77705_muic *muic, int usbc_stat
 			return ret;
 	}
 
-	return 0;
+	return max77705_muic_update_typec(muic, cable);
 }
 
 static int max77705_muic_refresh_locked(struct max77705_muic *muic)
@@ -390,6 +447,59 @@ static const struct mux_control_ops max77705_muic_ops = {
 	.set = max77705_muic_set,
 };
 
+static void max77705_muic_unregister_typec(void *data)
+{
+	struct max77705_muic *muic = data;
+
+	typec_unregister_partner(muic->partner);
+	muic->partner = NULL;
+	typec_unregister_port(muic->typec_port);
+	muic->typec_port = NULL;
+	fwnode_handle_put(muic->connector_fwnode);
+	muic->connector_fwnode = NULL;
+}
+
+static int max77705_muic_register_typec(struct device *dev,
+					struct max77705_muic *muic)
+{
+	struct fwnode_handle *connector;
+	int ret;
+
+	connector = device_get_named_child_node(dev, "connector");
+	if (!connector)
+		return 0;
+
+	ret = typec_get_fw_cap(&muic->typec_cap, connector);
+	if (ret)
+		goto err_put_connector;
+
+	muic->typec_cap.revision = USB_TYPEC_REV_1_2;
+	muic->typec_cap.usb_capability = USB_CAPABILITY_USB2;
+	muic->typec_cap.driver_data = muic;
+	muic->typec_port = typec_register_port(dev, &muic->typec_cap);
+	if (IS_ERR(muic->typec_port)) {
+		ret = PTR_ERR(muic->typec_port);
+		muic->typec_port = NULL;
+		goto err_put_connector;
+	}
+
+	muic->connector_fwnode = connector;
+	ret = devm_add_action_or_reset(dev,
+				       max77705_muic_unregister_typec, muic);
+	if (ret)
+		return ret;
+
+	typec_set_pwr_opmode(muic->typec_port, TYPEC_PWR_MODE_USB);
+	dev_info(dev, "MAX77705 USB Type-C port registered\n");
+
+	return 0;
+
+err_put_connector:
+	fwnode_handle_put(connector);
+
+	return ret;
+}
+
 static int max77705_muic_probe(struct platform_device *pdev)
 {
 	struct max77693_dev *max77705 = dev_get_drvdata(pdev->dev.parent);
@@ -424,6 +534,10 @@ static int max77705_muic_probe(struct platform_device *pdev)
 	ret = devm_extcon_dev_register(dev, muic->edev);
 	if (ret)
 		return ret;
+
+	ret = max77705_muic_register_typec(dev, muic);
+	if (ret)
+		return dev_err_probe(dev, ret, "failed to register Type-C port\n");
 
 	ret = device_property_read_u32(dev, "idle-state", (u32 *)&idle_state);
 	if (!ret && idle_state != MUX_IDLE_AS_IS) {
