@@ -635,6 +635,7 @@ static void kbase_devfreq_work_term(struct kbase_device *kbdev)
 int kbase_devfreq_init(struct kbase_device *kbdev)
 {
 	struct devfreq_dev_profile *dp;
+	void *governor_data = NULL;
 	int err;
 	unsigned int i;
 	bool free_devfreq_freq_table = true;
@@ -661,6 +662,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 	dp->get_dev_status = kbase_devfreq_status;
 	dp->get_cur_freq = kbase_devfreq_cur_freq;
 	dp->exit = kbase_devfreq_exit;
+	kbase_exynos9810_gpu_devfreq_profile(kbdev, dp, &governor_data);
 
 	if (kbase_devfreq_init_freq_table(kbdev, dp))
 		return -EFAULT;
@@ -684,7 +686,7 @@ int kbase_devfreq_init(struct kbase_device *kbdev)
 		goto init_core_mask_table_failed;
 
 	kbdev->devfreq = devfreq_add_device(kbdev->dev, dp,
-				"simple_ondemand", NULL);
+				"simple_ondemand", governor_data);
 	if (IS_ERR(kbdev->devfreq)) {
 		err = PTR_ERR(kbdev->devfreq);
 		kbdev->devfreq = NULL;

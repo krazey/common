@@ -22,6 +22,8 @@
 #ifndef _BASE_DEVFREQ_H_
 #define _BASE_DEVFREQ_H_
 
+struct devfreq_dev_profile;
+
 int kbase_devfreq_init(struct kbase_device *kbdev);
 
 void kbase_devfreq_term(struct kbase_device *kbdev);
@@ -29,6 +31,10 @@ void kbase_devfreq_term(struct kbase_device *kbdev);
 int kbase_exynos9810_gpu_clock_init(struct kbase_device *kbdev);
 
 void kbase_exynos9810_gpu_clock_term(struct kbase_device *kbdev);
+
+void kbase_exynos9810_gpu_devfreq_profile(struct kbase_device *kbdev,
+					  struct devfreq_dev_profile *profile,
+					  void **governor_data);
 
 /**
  * kbase_devfreq_force_freq - Set GPU frequency on L2 power on/off.
