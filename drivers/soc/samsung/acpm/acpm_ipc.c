@@ -472,19 +472,19 @@ static void apm_interrupt_gen(unsigned int id)
 	writel((1 << id) << 16, acpm_ipc->intr + INTGR0);
 }
 
-static int acpm_ipc_channel_owner(unsigned int channel_id)
+static int acpm_ipc_read_channel(unsigned int channel_id,
+				 struct ipc_channel *ipc_channel)
 {
-	struct ipc_channel ipc_channel;
 	void __iomem *channels;
 	int i;
 
 	channels = acpm_ipc->sram_base + acpm_ipc->initdata->ipc_channels;
 	for (i = 0; i < acpm_ipc->initdata->num_ipc_channels; i++) {
-		memcpy_fromio(&ipc_channel,
-			      channels + i * sizeof(ipc_channel),
-			      sizeof(ipc_channel));
-		if (ipc_channel.id == channel_id)
-			return ipc_channel.owner;
+		memcpy_fromio(ipc_channel,
+			      channels + i * sizeof(*ipc_channel),
+			      sizeof(*ipc_channel));
+		if (ipc_channel->id == channel_id)
+			return 0;
 	}
 
 	return -ENOENT;
@@ -518,6 +518,33 @@ static void acpm_ipc_plugin_name(const struct plugin *plugin, char *name,
 	name[size - 1] = '\0';
 }
 
+static bool acpm_ipc_plugin_is_dvfs(const char *name)
+{
+	return strnstr(name, "DVFS", 32) || strnstr(name, "dvfs", 32);
+}
+
+static int acpm_ipc_find_dvfs_plugin(struct plugin *plugin, char *name,
+				     size_t size)
+{
+	void __iomem *plugins;
+	int i;
+
+	plugins = acpm_ipc->sram_base + acpm_ipc->initdata->plugins;
+	for (i = 0; i < acpm_ipc->initdata->num_plugins; i++) {
+		memcpy_fromio(plugin, plugins + i * sizeof(*plugin),
+			      sizeof(*plugin));
+		acpm_ipc_plugin_name(plugin, name, size);
+		dev_info(acpm_ipc->dev,
+			 "plugin[%d] id=%u %s attached=%u stay=%u base=%#x size=%u\n",
+			 i, plugin->id, name, plugin->is_attached,
+			 plugin->stay_attached, plugin->base_addr, plugin->size);
+		if (acpm_ipc_plugin_is_dvfs(name))
+			return 0;
+	}
+
+	return -ENOENT;
+}
+
 static int acpm_ipc_attach_plugin(unsigned int channel_id,
 				  unsigned int plugin_id)
 {
@@ -532,13 +559,57 @@ static int acpm_ipc_attach_plugin(unsigned int channel_id,
 	return acpm_ipc_send_data_sync(channel_id, &config);
 }
 
+static void acpm_ipc_refresh_channel(const struct ipc_channel *ipc_channel)
+{
+	struct acpm_ipc_ch *channel = NULL;
+	unsigned int reg;
+	int i;
+
+	for (i = 0; i < acpm_ipc->num_channels; i++) {
+		if (acpm_ipc->channel[i].id == ipc_channel->id) {
+			channel = &acpm_ipc->channel[i];
+			break;
+		}
+	}
+
+	if (!channel)
+		return;
+
+	if (channel->tx_ch.size != ipc_channel->ch.q_elem_size) {
+		dev_warn(acpm_ipc->dev,
+			 "channel %u message size changed from %u to %u\n",
+			 channel->id, channel->tx_ch.size,
+			 ipc_channel->ch.q_elem_size);
+		return;
+	}
+
+	channel->polling = ipc_channel->ap_poll;
+	channel->type = ipc_channel->type;
+	channel->rx_ch.len = ipc_channel->ch.q_len;
+	channel->tx_ch.len = ipc_channel->ch.q_len;
+	channel->rx_ch.rear = acpm_ipc->sram_base + ipc_channel->ch.tx_rear;
+	channel->rx_ch.front = acpm_ipc->sram_base + ipc_channel->ch.tx_front;
+	channel->rx_ch.base = acpm_ipc->sram_base + ipc_channel->ch.tx_base;
+	channel->tx_ch.rear = acpm_ipc->sram_base + ipc_channel->ch.rx_rear;
+	channel->tx_ch.front = acpm_ipc->sram_base + ipc_channel->ch.rx_front;
+	channel->tx_ch.base = acpm_ipc->sram_base + ipc_channel->ch.rx_base;
+	channel->tx_ch.d_buff_size = ipc_channel->ch.rx_indr_buf_size;
+	channel->tx_ch.direction = acpm_ipc->sram_base +
+				   ipc_channel->ch.rx_indr_buf;
+
+	reg = readl(acpm_ipc->intr + INTMR1);
+	reg &= ~BIT(channel->id);
+	reg |= channel->polling << channel->id;
+	writel(reg, acpm_ipc->intr + INTMR1);
+}
+
 static void acpm_ipc_prepare_dvfs(struct device_node *node)
 {
 	unsigned int control_channel;
 	unsigned int dvfs_channel;
+	struct ipc_channel ipc_channel;
 	struct plugin plugin;
 	char name[32];
-	int owner;
 	int ret;
 
 	ret = of_property_read_u32(node, "samsung,dvfs-channel",
@@ -553,25 +624,46 @@ static void acpm_ipc_prepare_dvfs(struct device_node *node)
 		return;
 	}
 
-	owner = acpm_ipc_channel_owner(dvfs_channel);
-	if (owner < 0) {
-		dev_warn(acpm_ipc->dev,
-			 "DVFS channel %u has no plugin owner\n", dvfs_channel);
-		return;
-	}
-
-	ret = acpm_ipc_find_plugin(owner, &plugin);
+	ret = acpm_ipc_read_channel(dvfs_channel, &ipc_channel);
 	if (ret) {
-		dev_warn(acpm_ipc->dev, "DVFS plugin %d is missing\n", owner);
+		dev_warn(acpm_ipc->dev,
+			 "DVFS channel %u is missing\n", dvfs_channel);
 		return;
 	}
 
-	acpm_ipc_plugin_name(&plugin, name, sizeof(name));
+	dev_info(acpm_ipc->dev,
+		 "DVFS ch%u owner=%d type=%u poll=%u len=%u size=%u tx=%u/%u rx=%u/%u\n",
+		 ipc_channel.id, ipc_channel.owner, ipc_channel.type,
+		 ipc_channel.ap_poll, ipc_channel.ch.q_len,
+		 ipc_channel.ch.q_elem_size,
+		 readl(acpm_ipc->sram_base + ipc_channel.ch.rx_rear),
+		 readl(acpm_ipc->sram_base + ipc_channel.ch.rx_front),
+		 readl(acpm_ipc->sram_base + ipc_channel.ch.tx_rear),
+		 readl(acpm_ipc->sram_base + ipc_channel.ch.tx_front));
+
+	ret = acpm_ipc_find_plugin(ipc_channel.owner, &plugin);
+	if (!ret) {
+		acpm_ipc_plugin_name(&plugin, name, sizeof(name));
+		if (!acpm_ipc_plugin_is_dvfs(name))
+			ret = -ENOENT;
+	}
+	if (ret)
+		ret = acpm_ipc_find_dvfs_plugin(&plugin, name, sizeof(name));
+	if (ret) {
+		dev_warn(acpm_ipc->dev, "named DVFS plugin is missing\n");
+		return;
+	}
 	dev_info(acpm_ipc->dev,
 		 "DVFS channel %u plugin %u (%s) attached=%u stay=%u\n",
 		 dvfs_channel, plugin.id, name, plugin.is_attached,
 		 plugin.stay_attached);
 
+	if (!plugin.stay_attached) {
+		dev_warn(acpm_ipc->dev,
+			 "DVFS plugin %u is not requested by firmware\n",
+			 plugin.id);
+		return;
+	}
 	if (!plugin.is_attached) {
 		if (!plugin.base_addr) {
 			dev_warn(acpm_ipc->dev,
@@ -592,8 +684,19 @@ static void acpm_ipc_prepare_dvfs(struct device_node *node)
 			 plugin.id);
 	}
 
-	/* Reassert a request left pending across a warm reboot. */
-	apm_interrupt_gen(dvfs_channel);
+	ret = acpm_ipc_read_channel(dvfs_channel, &ipc_channel);
+	if (ret)
+		return;
+	acpm_ipc_refresh_channel(&ipc_channel);
+	dev_info(acpm_ipc->dev,
+		 "DVFS channel %u ready owner=%d type=%u poll=%u len=%u size=%u\n",
+		 ipc_channel.id, ipc_channel.owner, ipc_channel.type,
+		 ipc_channel.ap_poll, ipc_channel.ch.q_len,
+		 ipc_channel.ch.q_elem_size);
+	if (ipc_channel.ch.q_len < 2)
+		dev_warn(acpm_ipc->dev,
+			 "DVFS channel %u has unusable queue length %u\n",
+			 ipc_channel.id, ipc_channel.ch.q_len);
 }
 
 static int enqueue_indirection_cmd(struct acpm_ipc_ch *channel,
@@ -987,8 +1090,6 @@ static int acpm_ipc_probe(struct platform_device *pdev)
 				msecs_to_jiffies(10000));
 	}
 
-	acpm_ipc_prepare_dvfs(node);
-
 	return ret;
 }
 
@@ -1016,3 +1117,12 @@ static int __init exynos_acpm_ipc_init(void)
 	return platform_driver_register(&samsung_acpm_ipc_driver);
 }
 arch_initcall(exynos_acpm_ipc_init);
+
+static int __init exynos_acpm_dvfs_init(void)
+{
+	if (acpm_ipc)
+		acpm_ipc_prepare_dvfs(acpm_ipc->dev->of_node);
+
+	return 0;
+}
+fs_initcall_sync(exynos_acpm_dvfs_init);
