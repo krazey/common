@@ -42,7 +42,7 @@ static int exynos9810_acpm_clk_xfer(struct exynos9810_acpm_clk *aclk,
 	config.cmd = command;
 	config.response = true;
 
-	ret = acpm_ipc_send_data_sync(aclk->channel, &config);
+	ret = acpm_ipc_send_data(aclk->channel, &config);
 	if (ret)
 		return ret;
 
