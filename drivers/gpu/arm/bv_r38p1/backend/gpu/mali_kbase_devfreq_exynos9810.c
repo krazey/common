@@ -24,6 +24,26 @@ struct kbase_exynos9810_gpu_clock {
 	struct kbase_device *kbdev;
 };
 
+static struct devfreq_simple_ondemand_data
+exynos9810_gpu_ondemand_data = {
+	.upthreshold = 85,
+	.downdifferential = 7,
+};
+
+void kbase_exynos9810_gpu_devfreq_profile(struct kbase_device *kbdev,
+					  struct devfreq_dev_profile *profile,
+					  void **governor_data)
+{
+	if (!of_machine_is_compatible("samsung,exynos9810"))
+		return;
+
+	profile->polling_ms = 30;
+	*governor_data = &exynos9810_gpu_ondemand_data;
+
+	dev_info(kbdev->dev,
+		 "stock GPU load thresholds applied to simple_ondemand\n");
+}
+
 static struct kbase_exynos9810_gpu_clock *
 kbase_exynos9810_gpu_clock_from_kobj(struct kobject *kobj)
 {
