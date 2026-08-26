@@ -1780,6 +1780,7 @@ config FB_EXYNOS9810_BOOT
 	tristate "Exynos9810 boot framebuffer compatibility"
 	depends on FB && DMA_SHARED_BUFFER
 	depends on ARCH_EXYNOS || COMPILE_TEST
+	depends on BACKLIGHT_CLASS_DEVICE
 	depends on !DRM_SIMPLEDRM
 	select FB_IOMEM_HELPERS
 	help
