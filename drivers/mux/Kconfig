@@ -72,7 +72,7 @@ config MUX_MMIO
 
 config MUX_MAX77705
 	tristate "Maxim MAX77705 USB data path"
-	depends on MFD_MAX77705
+	depends on MFD_MAX77705 && EXTCON
 	help
 	  Select this to control the MAX77705 internal USB data switch. The
 	  switch can isolate the connector or route its D+ and D- lines to
