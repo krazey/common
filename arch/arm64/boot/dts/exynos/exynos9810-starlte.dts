@@ -281,6 +281,7 @@ firmware_class.path=/vendor/firmware bootconfig";
 		interrupt-parent = <&max77705>;
 		interrupts = <0>;
 		monitored-battery = <&battery_info>;
+		extcon = <&max77705_muic>;
 		maxim,enable-watchdog;
 		maxim,b2s-overcurrent-microamp = <5600000>;
 		maxim,input-current-max-microamp = <3000000>;
