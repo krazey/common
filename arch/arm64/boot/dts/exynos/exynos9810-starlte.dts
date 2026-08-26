@@ -260,6 +260,16 @@ firmware_class.path=/vendor/firmware bootconfig";
 		max77705_muic: usb-mux {
 			compatible = "maxim,max77705-muic";
 			#mux-state-cells = <1>;
+
+			usb_c_connector: connector {
+				compatible = "usb-c-connector";
+				label = "USB-C";
+				power-role = "dual";
+				try-power-role = "sink";
+				data-role = "dual";
+				typec-power-opmode = "default";
+				pd-disable;
+			};
 		};
 	};
 
