@@ -21,6 +21,7 @@
 #include <linux/io.h>
 #include <linux/iommu.h>
 #include <linux/iosys-map.h>
+#include <linux/kthread.h>
 #include <linux/math64.h>
 #include <linux/mm.h>
 #include <linux/module.h>
@@ -30,6 +31,7 @@
 #include <linux/overflow.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/sched.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/scatterlist.h>
@@ -326,6 +328,18 @@ struct exynos9810_bootfb_native_slot {
 	u64 last_used;
 };
 
+struct exynos9810_bootfb;
+
+struct exynos9810_bootfb_native_update {
+	struct kthread_work work;
+	struct exynos9810_bootfb *bootfb;
+	struct exynos9810_bootfb_win_config config;
+	struct dma_buf *dmabuf;
+	struct dma_fence *acquire_fence;
+	struct dma_fence *retire_fence;
+	u64 queued_ns;
+};
+
 static const char *const exynos9810_bootfb_fabric_clock_names[] = {
 	"mif",
 	"int",
@@ -442,6 +456,19 @@ struct exynos9810_bootfb {
 	atomic_t native_async_timeout_signal_count;
 	atomic64_t native_async_last_irq_complete_ns;
 	atomic64_t native_async_max_irq_complete_ns;
+	struct kthread_worker *native_update_worker;
+	bool native_update_stopping;
+	atomic_t native_update_depth;
+	atomic_t native_update_max_depth;
+	atomic_t native_update_queue_count;
+	atomic_t native_update_complete_count;
+	atomic_t native_update_error_count;
+	atomic64_t native_update_last_enqueue_ns;
+	atomic64_t native_update_max_enqueue_ns;
+	atomic64_t native_update_last_queue_ns;
+	atomic64_t native_update_max_queue_ns;
+	atomic64_t native_update_last_acquire_ns;
+	atomic64_t native_update_max_acquire_ns;
 	bool native_auto_enabled;
 	bool native_auto_active;
 	bool native_auto_blocked;
@@ -1633,10 +1660,14 @@ exynos9810_bootfb_publish_present_fences(
 static int
 exynos9810_bootfb_disable_native_present(struct exynos9810_bootfb *bootfb);
 
+static void
+exynos9810_bootfb_flush_native_updates(struct exynos9810_bootfb *bootfb);
+
 static int
 exynos9810_bootfb_try_native_present(
 	struct exynos9810_bootfb *bootfb,
-	struct exynos9810_bootfb_win_config *config);
+	struct exynos9810_bootfb_win_config *config,
+	struct dma_fence **retire_fence);
 
 static bool
 exynos9810_bootfb_native_config_supported(
@@ -1691,6 +1722,10 @@ exynos9810_bootfb_present(struct exynos9810_bootfb *bootfb,
 	WRITE_ONCE(bootfb->fbdev_refresh_enabled, false);
 
 	mutex_lock(&bootfb->lock);
+	if (bootfb->native_update_stopping) {
+		mutex_unlock(&bootfb->lock);
+		return -ENODEV;
+	}
 
 	for (i = 0; i < ARRAY_SIZE(data.config); i++)
 		data.config[i].rel_fence = -1;
@@ -1727,12 +1762,9 @@ exynos9810_bootfb_present(struct exynos9810_bootfb *bootfb,
 			auto_was_active = bootfb->native_auto_active;
 			native_present_ret =
 				exynos9810_bootfb_try_native_present(
-					bootfb, fast_config);
+					bootfb, fast_config, &native_fence);
 			if (!native_present_ret) {
 				native_release_index = fast_config - data.config;
-				if (bootfb->native_async_fence)
-					native_fence = dma_fence_get(
-						bootfb->native_async_fence);
 				fast_path = true;
 				updated = false;
 				WRITE_ONCE(
@@ -1798,6 +1830,7 @@ native_fast_done:
 	if (bootfb->native_present_enabled && !fast_config &&
 	    !native_scanout_retained) {
 		atomic_inc(&bootfb->native_present_fallback_count);
+		exynos9810_bootfb_flush_native_updates(bootfb);
 		native_present_ret =
 			exynos9810_bootfb_disable_native_present(bootfb);
 		if (!native_present_ret)
@@ -2715,6 +2748,11 @@ exynos9810_bootfb_set_panel(struct exynos9810_bootfb *bootfb, bool enabled)
 	int ret;
 
 	mutex_lock(&bootfb->lock);
+	if (bootfb->native_update_stopping) {
+		mutex_unlock(&bootfb->lock);
+		return;
+	}
+	exynos9810_bootfb_flush_native_updates(bootfb);
 	if (enabled) {
 		ret = exynos9810_bootfb_set_panel_locked(bootfb, true);
 		if (!READ_ONCE(bootfb->fbdev_hwc_seen))
@@ -2917,6 +2955,21 @@ static ssize_t performance_stats_show(struct device *dev,
 		atomic_read(&bootfb->native_slot_cache_eviction_count),
 		EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT,
 		READ_ONCE(bootfb->native_present_active_slot));
+	len += sysfs_emit_at(buf, len,
+		"native_queue=%d/%d/%d depth=%d/%d\n",
+		atomic_read(&bootfb->native_update_queue_count),
+		atomic_read(&bootfb->native_update_complete_count),
+		atomic_read(&bootfb->native_update_error_count),
+		atomic_read(&bootfb->native_update_depth),
+		atomic_read(&bootfb->native_update_max_depth));
+	len += sysfs_emit_at(buf, len,
+		"native_queue_ns=%lld/%lld wait=%lld/%lld acquire=%lld/%lld\n",
+		atomic64_read(&bootfb->native_update_last_enqueue_ns),
+		atomic64_read(&bootfb->native_update_max_enqueue_ns),
+		atomic64_read(&bootfb->native_update_last_queue_ns),
+		atomic64_read(&bootfb->native_update_max_queue_ns),
+		atomic64_read(&bootfb->native_update_last_acquire_ns),
+		atomic64_read(&bootfb->native_update_max_acquire_ns));
 	len += sysfs_emit_at(buf, len, "native_idle_ns=%lld/%lld\n",
 			     atomic64_read(&bootfb->native_present_last_idle_ns),
 			     atomic64_read(&bootfb->native_present_max_idle_ns));
@@ -3239,21 +3292,15 @@ exynos9810_bootfb_map_native_slot(
 	ssize_t mapped;
 	int ret;
 
-	if (slot->valid) {
-		ret = -EBUSY;
-		goto put_dmabuf;
-	}
+	if (slot->valid)
+		return -EBUSY;
 	if (!bootfb->prepared_domain || !bootfb->iommu_supplier ||
-	    !bootfb->iommu_supplier_active) {
-		ret = -ENODEV;
-		goto put_dmabuf;
-	}
+	    !bootfb->iommu_supplier_active)
+		return -ENODEV;
 
 	if (dmabuf->size < bootfb->screen_size ||
-	    dmabuf->size > EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE) {
-		ret = -EINVAL;
-		goto put_dmabuf;
-	}
+	    dmabuf->size > EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE)
+		return -EINVAL;
 
 	iova = EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_BASE +
 		index * EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE;
@@ -3265,10 +3312,8 @@ exynos9810_bootfb_map_native_slot(
 	 * be reused after the display master changes domains.
 	 */
 	attachment = dma_buf_attach(dmabuf, &bootfb->iommu_supplier->dev);
-	if (IS_ERR(attachment)) {
-		ret = PTR_ERR(attachment);
-		goto put_dmabuf;
-	}
+	if (IS_ERR(attachment))
+		return PTR_ERR(attachment);
 
 	sgt = dma_buf_map_attachment(attachment, DMA_TO_DEVICE);
 	if (IS_ERR(sgt)) {
@@ -3300,6 +3345,7 @@ exynos9810_bootfb_map_native_slot(
 		goto unmap_attachment;
 	}
 
+	get_dma_buf(dmabuf);
 	slot->dmabuf = dmabuf;
 	slot->attachment = attachment;
 	slot->sgt = sgt;
@@ -3312,33 +3358,25 @@ unmap_attachment:
 	dma_buf_unmap_attachment(attachment, sgt, DMA_TO_DEVICE);
 detach:
 	dma_buf_detach(dmabuf, attachment);
-put_dmabuf:
-	dma_buf_put(dmabuf);
 	return ret;
 }
 
 static int exynos9810_bootfb_get_native_slot(struct exynos9810_bootfb *bootfb,
-					     struct exynos9810_bootfb_win_config *config,
+					     struct dma_buf *dmabuf,
 					     int active_index,
 					     int *slot_index)
 {
 	struct exynos9810_bootfb_native_slot *slot;
-	struct dma_buf *dmabuf;
 	u64 oldest = U64_MAX;
 	int candidate = -1;
 	int i;
 	int ret;
-
-	dmabuf = dma_buf_get(config->fd_idma[0]);
-	if (IS_ERR(dmabuf))
-		return PTR_ERR(dmabuf);
 
 	for (i = 0; i < EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT; i++) {
 		slot = &bootfb->native_slots[i];
 		if (!slot->valid || slot->dmabuf != dmabuf)
 			continue;
 
-		dma_buf_put(dmabuf);
 		slot->last_used = ++bootfb->native_slot_sequence;
 		atomic_inc(&bootfb->native_slot_cache_hit_count);
 		*slot_index = i;
@@ -3359,7 +3397,6 @@ static int exynos9810_bootfb_get_native_slot(struct exynos9810_bootfb *bootfb,
 	}
 
 	if (candidate < 0) {
-		dma_buf_put(dmabuf);
 		return -EBUSY;
 	}
 
@@ -4112,14 +4149,12 @@ exynos9810_bootfb_finalize_async_present(
 }
 
 static int
-exynos9810_bootfb_try_native_present_async(
-	struct exynos9810_bootfb *bootfb,
-	struct exynos9810_bootfb_win_config *config)
+exynos9810_bootfb_native_submit(struct exynos9810_bootfb *bootfb,
+				const struct exynos9810_bootfb_win_config *config,
+				struct dma_buf *dmabuf,
+				struct dma_fence *retire_fence)
 {
 	struct exynos9810_bootfb_native_slot *new_slot;
-	struct dma_fence *fence = NULL;
-	u64 fence_start_ns;
-	u64 fence_ns;
 	u64 frame_wait_ns = 0;
 	u64 map_start_ns;
 	u64 map_ns;
@@ -4135,29 +4170,17 @@ exynos9810_bootfb_try_native_present_async(
 
 	ret = exynos9810_bootfb_finalize_async_present(bootfb, true);
 	if (ret)
-		goto fallback_without_new;
+		goto fallback;
 
 	start_ns = ktime_get_ns();
 	old_index = bootfb->native_present_active_slot;
-	fence_start_ns = ktime_get_ns();
-	ret = exynos9810_bootfb_wait_fence(config->acq_fence);
-	fence_ns = ktime_get_ns() - fence_start_ns;
-	if (ret)
-		goto fallback_without_new;
-
 	map_start_ns = ktime_get_ns();
-	ret = exynos9810_bootfb_get_native_slot(bootfb, config, old_index,
+	ret = exynos9810_bootfb_get_native_slot(bootfb, dmabuf, old_index,
 						&new_index);
 	map_ns = ktime_get_ns() - map_start_ns;
 	if (ret)
-		goto fallback_without_new;
-	new_slot = &bootfb->native_slots[new_index];
-
-	fence = exynos9810_bootfb_create_async_fence(bootfb);
-	if (!fence) {
-		ret = -ENOMEM;
 		goto fallback;
-	}
+	new_slot = &bootfb->native_slots[new_index];
 
 	/*
 	 * Record the already-handled DPP sequence before programming.  If DPP
@@ -4200,8 +4223,7 @@ exynos9810_bootfb_try_native_present_async(
 		goto fallback;
 	}
 
-	bootfb->native_async_fence = fence;
-	fence = NULL;
+	bootfb->native_async_fence = dma_fence_get(retire_fence);
 	bootfb->native_async_new_slot = new_index;
 	bootfb->native_async_old_slot = old_index;
 	bootfb->native_async_dpp_before = dpp_before;
@@ -4228,7 +4250,6 @@ exynos9810_bootfb_try_native_present_async(
 	atomic_inc(&bootfb->native_async_submit_count);
 	atomic64_set(&bootfb->native_present_last_ns, submit_ns);
 	atomic64_set(&bootfb->native_present_last_map_ns, map_ns);
-	atomic64_set(&bootfb->native_present_last_fence_ns, fence_ns);
 	atomic64_set(&bootfb->native_present_last_wait_ns, frame_wait_ns);
 	atomic64_set(&bootfb->native_async_last_submit_ns, submit_ns);
 	if (submit_ns > atomic64_read(&bootfb->native_present_max_ns))
@@ -4239,16 +4260,6 @@ exynos9810_bootfb_try_native_present_async(
 	return 0;
 
 fallback:
-	dma_fence_put(fence);
-	atomic_inc(&bootfb->native_present_fallback_count);
-	bootfb->native_present_error = ret;
-	restore_ret = exynos9810_bootfb_disable_native_present(bootfb);
-	if (restore_ret)
-		return restore_ret;
-	bootfb->native_present_error = ret;
-	return ret;
-
-fallback_without_new:
 	atomic_inc(&bootfb->native_present_fallback_count);
 	bootfb->native_present_error = ret;
 	restore_ret = exynos9810_bootfb_disable_native_present(bootfb);
@@ -4318,9 +4329,188 @@ exynos9810_bootfb_disable_native_present(struct exynos9810_bootfb *bootfb)
 }
 
 static int
+exynos9810_bootfb_wait_acquire_fence(struct dma_fence *fence)
+{
+	signed long ret;
+
+	if (!fence)
+		return 0;
+
+	ret = dma_fence_wait_timeout(fence, true, msecs_to_jiffies(900));
+	if (ret > 0)
+		return 0;
+	if (!ret)
+		return -ETIMEDOUT;
+	return ret;
+}
+
+static void
+exynos9810_bootfb_signal_update_fence(struct dma_fence *fence, int error)
+{
+	if (dma_fence_is_signaled(fence))
+		return;
+	if (error)
+		dma_fence_set_error(fence, error);
+	dma_fence_signal(fence);
+}
+
+static void
+exynos9810_bootfb_native_update_work(struct kthread_work *work)
+{
+	struct exynos9810_bootfb_native_update *update =
+		container_of(work, struct exynos9810_bootfb_native_update, work);
+	struct exynos9810_bootfb *bootfb = update->bootfb;
+	u64 acquire_start_ns;
+	u64 acquire_ns = 0;
+	u64 queue_ns;
+	int ret = 0;
+
+	queue_ns = ktime_get_ns() - update->queued_ns;
+	atomic64_set(&bootfb->native_update_last_queue_ns, queue_ns);
+	if (queue_ns > atomic64_read(&bootfb->native_update_max_queue_ns))
+		atomic64_set(&bootfb->native_update_max_queue_ns, queue_ns);
+
+	if (READ_ONCE(bootfb->native_update_stopping))
+		ret = -ESHUTDOWN;
+	else if (!READ_ONCE(bootfb->native_present_enabled))
+		ret = -EPIPE;
+
+	if (!ret) {
+		acquire_start_ns = ktime_get_ns();
+		ret = exynos9810_bootfb_wait_acquire_fence(update->acquire_fence);
+		acquire_ns = ktime_get_ns() - acquire_start_ns;
+		atomic64_set(&bootfb->native_update_last_acquire_ns,
+			     acquire_ns);
+		if (acquire_ns >
+		    atomic64_read(&bootfb->native_update_max_acquire_ns))
+			atomic64_set(&bootfb->native_update_max_acquire_ns,
+				     acquire_ns);
+		atomic64_set(&bootfb->native_present_last_fence_ns,
+			     acquire_ns);
+	}
+
+	if (!ret)
+		ret = exynos9810_bootfb_native_submit(bootfb,
+						      &update->config,
+						      update->dmabuf,
+						      update->retire_fence);
+	if (!ret)
+		ret = exynos9810_bootfb_finalize_async_present(bootfb, true);
+
+	if (ret) {
+		atomic_inc(&bootfb->native_update_error_count);
+		exynos9810_bootfb_signal_update_fence(update->retire_fence,
+						      ret);
+	} else {
+		atomic_inc(&bootfb->native_update_complete_count);
+	}
+
+	atomic_dec(&bootfb->native_update_depth);
+	dma_fence_put(update->retire_fence);
+	dma_fence_put(update->acquire_fence);
+	dma_buf_put(update->dmabuf);
+	kfree(update);
+}
+
+static void
+exynos9810_bootfb_flush_native_updates(struct exynos9810_bootfb *bootfb)
+{
+	if (!bootfb->native_update_worker ||
+	    current == bootfb->native_update_worker->task)
+		return;
+
+	kthread_flush_worker(bootfb->native_update_worker);
+}
+
+static int
+exynos9810_bootfb_queue_native(struct exynos9810_bootfb *bootfb,
+			       const struct exynos9810_bootfb_win_config *config,
+			       struct dma_fence **retire_fence)
+{
+	struct exynos9810_bootfb_native_update *update;
+	struct dma_fence *published_fence;
+	u64 enqueue_start_ns;
+	u64 enqueue_ns;
+	int depth;
+	int ret;
+
+	if (!bootfb->native_update_worker ||
+	    READ_ONCE(bootfb->native_update_stopping))
+		return -ENODEV;
+
+	enqueue_start_ns = ktime_get_ns();
+	update = kzalloc_obj(*update);
+	if (!update)
+		return -ENOMEM;
+
+	update->dmabuf = dma_buf_get(config->fd_idma[0]);
+	if (IS_ERR(update->dmabuf)) {
+		ret = PTR_ERR(update->dmabuf);
+		update->dmabuf = NULL;
+		goto free_update;
+	}
+
+	if (config->acq_fence >= 0) {
+		update->acquire_fence = sync_file_get_fence(config->acq_fence);
+		if (!update->acquire_fence) {
+			ret = -EINVAL;
+			goto put_dmabuf;
+		}
+	}
+
+	update->retire_fence = exynos9810_bootfb_create_async_fence(bootfb);
+	if (!update->retire_fence) {
+		ret = -ENOMEM;
+		goto put_acquire_fence;
+	}
+	published_fence = dma_fence_get(update->retire_fence);
+
+	update->bootfb = bootfb;
+	update->config = *config;
+	update->queued_ns = ktime_get_ns();
+	kthread_init_work(&update->work,
+			  exynos9810_bootfb_native_update_work);
+
+	depth = atomic_inc_return(&bootfb->native_update_depth);
+	if (depth > atomic_read(&bootfb->native_update_max_depth))
+		atomic_set(&bootfb->native_update_max_depth, depth);
+	atomic_inc(&bootfb->native_update_queue_count);
+
+	if (!kthread_queue_work(bootfb->native_update_worker,
+				&update->work)) {
+		atomic_dec(&bootfb->native_update_queue_count);
+		atomic_dec(&bootfb->native_update_depth);
+		dma_fence_put(published_fence);
+		ret = -EBUSY;
+		goto put_retire_fence;
+	}
+
+	enqueue_ns = ktime_get_ns() - enqueue_start_ns;
+	atomic64_set(&bootfb->native_update_last_enqueue_ns, enqueue_ns);
+	if (enqueue_ns >
+	    atomic64_read(&bootfb->native_update_max_enqueue_ns))
+		atomic64_set(&bootfb->native_update_max_enqueue_ns,
+			     enqueue_ns);
+
+	*retire_fence = published_fence;
+	return 0;
+
+put_retire_fence:
+	dma_fence_put(update->retire_fence);
+put_acquire_fence:
+	dma_fence_put(update->acquire_fence);
+put_dmabuf:
+	dma_buf_put(update->dmabuf);
+free_update:
+	kfree(update);
+	return ret;
+}
+
+static int
 exynos9810_bootfb_try_native_present(
 	struct exynos9810_bootfb *bootfb,
-	struct exynos9810_bootfb_win_config *config)
+	struct exynos9810_bootfb_win_config *config,
+	struct dma_fence **retire_fence)
 {
 	int ret;
 
@@ -4329,11 +4519,22 @@ exynos9810_bootfb_try_native_present(
 
 	if (!exynos9810_bootfb_native_client_config_supported(bootfb, config)) {
 		atomic_inc(&bootfb->native_present_fallback_count);
+		exynos9810_bootfb_flush_native_updates(bootfb);
 		ret = exynos9810_bootfb_disable_native_present(bootfb);
 		return ret ? ret : -EAGAIN;
 	}
 
-	return exynos9810_bootfb_try_native_present_async(bootfb, config);
+	ret = exynos9810_bootfb_queue_native(bootfb, config, retire_fence);
+	if (!ret)
+		return 0;
+
+	atomic_inc(&bootfb->native_present_fallback_count);
+	exynos9810_bootfb_flush_native_updates(bootfb);
+	if (exynos9810_bootfb_disable_native_present(bootfb))
+		return bootfb->native_present_error;
+
+	bootfb->native_present_error = ret;
+	return ret;
 }
 
 static struct attribute *exynos9810_bootfb_attrs[] = {
@@ -4424,15 +4625,18 @@ exynos9810_bootfb_vsync_timer(struct hrtimer *timer)
 static void exynos9810_bootfb_cleanup(void *data)
 {
 	struct exynos9810_bootfb *bootfb = data;
+	int native_present_ret = 0;
 
 	hrtimer_cancel(&bootfb->vsync_timer);
 	cancel_work_sync(&bootfb->fbdev_refresh_work);
 	cancel_work_sync(&bootfb->vsync_notify_work);
 
+	mutex_lock(&bootfb->lock);
+	WRITE_ONCE(bootfb->native_update_stopping, true);
+	exynos9810_bootfb_flush_native_updates(bootfb);
+
 	if (bootfb->native_present_enabled ||
 	    bootfb->native_present_active_slot >= 0) {
-		int native_present_ret;
-
 		native_present_ret =
 			exynos9810_bootfb_disable_native_present(bootfb);
 		if (native_present_ret) {
@@ -4441,11 +4645,17 @@ static void exynos9810_bootfb_cleanup(void *data)
 				"synchronous native present cleanup failed: %d; "
 				"keeping display mappings pinned\n",
 				native_present_ret);
-			return;
 		}
 	}
+	mutex_unlock(&bootfb->lock);
 
 	cancel_work_sync(&bootfb->native_async_complete_work);
+	if (bootfb->native_update_worker) {
+		kthread_destroy_worker(bootfb->native_update_worker);
+		bootfb->native_update_worker = NULL;
+	}
+	if (native_present_ret)
+		return;
 
 	if (bootfb->translated_attached && bootfb->prepared_domain) {
 		/*
@@ -4535,6 +4745,9 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	struct exynos9810_bootfb *bootfb;
 	struct fb_info *info;
 	struct resource framebuffer;
+	struct sched_param update_sched = {
+		.sched_priority = 20,
+	};
 	u64 required_size;
 	int ret;
 
@@ -4602,6 +4815,18 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	atomic_set(&bootfb->native_async_timeout_signal_count, 0);
 	atomic64_set(&bootfb->native_async_last_irq_complete_ns, 0);
 	atomic64_set(&bootfb->native_async_max_irq_complete_ns, 0);
+	bootfb->native_update_stopping = false;
+	atomic_set(&bootfb->native_update_depth, 0);
+	atomic_set(&bootfb->native_update_max_depth, 0);
+	atomic_set(&bootfb->native_update_queue_count, 0);
+	atomic_set(&bootfb->native_update_complete_count, 0);
+	atomic_set(&bootfb->native_update_error_count, 0);
+	atomic64_set(&bootfb->native_update_last_enqueue_ns, 0);
+	atomic64_set(&bootfb->native_update_max_enqueue_ns, 0);
+	atomic64_set(&bootfb->native_update_last_queue_ns, 0);
+	atomic64_set(&bootfb->native_update_max_queue_ns, 0);
+	atomic64_set(&bootfb->native_update_last_acquire_ns, 0);
+	atomic64_set(&bootfb->native_update_max_acquire_ns, 0);
 	bootfb->native_auto_enabled = true;
 	bootfb->native_auto_active = false;
 	bootfb->native_auto_blocked = false;
@@ -4774,19 +4999,34 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	if (ret)
 		goto release_shadow;
 
-	ret = register_framebuffer(info);
-	if (ret)
-		goto release_shadow;
-
-	bootfb->vsync_period =
-		ns_to_ktime(DIV_ROUND_CLOSEST_ULL(NSEC_PER_SEC,
-						  EXYNOS9810_BOOTFB_FPS));
 	INIT_WORK(&bootfb->vsync_notify_work,
 		  exynos9810_bootfb_vsync_notify_work);
 	INIT_WORK(&bootfb->fbdev_refresh_work,
 		  exynos9810_bootfb_fbdev_refresh_work);
 	INIT_WORK(&bootfb->native_async_complete_work,
 		  exynos9810_bootfb_async_complete_work);
+
+	bootfb->native_update_worker =
+		kthread_run_worker(0, "exynos9810-decon");
+	if (IS_ERR(bootfb->native_update_worker)) {
+		ret = PTR_ERR(bootfb->native_update_worker);
+		bootfb->native_update_worker = NULL;
+		goto release_shadow;
+	}
+
+	ret = sched_setscheduler_nocheck(bootfb->native_update_worker->task,
+					 SCHED_FIFO, &update_sched);
+	if (ret)
+		dev_warn(&pdev->dev,
+			 "failed to set display update priority: %d\n", ret);
+
+	ret = register_framebuffer(info);
+	if (ret)
+		goto destroy_update_worker;
+
+	bootfb->vsync_period =
+		ns_to_ktime(DIV_ROUND_CLOSEST_ULL(NSEC_PER_SEC,
+						  EXYNOS9810_BOOTFB_FPS));
 	hrtimer_setup(&bootfb->vsync_timer, exynos9810_bootfb_vsync_timer,
 		      CLOCK_MONOTONIC, HRTIMER_MODE_REL);
 	hrtimer_start(&bootfb->vsync_timer, bootfb->vsync_period,
@@ -4842,6 +5082,9 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 		 bootfb->width, bootfb->height, info->node);
 	return 0;
 
+destroy_update_worker:
+	kthread_destroy_worker(bootfb->native_update_worker);
+	bootfb->native_update_worker = NULL;
 release_shadow:
 	vfree(bootfb->source_shadow);
 	vfree(bootfb->shadow);
