@@ -13,14 +13,38 @@ description: |
   Samsung's Exynos9810 bootloader leaves the internal display pipeline
   scanning out a reserved framebuffer. This binding describes that scanout
   while native DECON, DPP and DSIM support is unavailable. The register
-  resource identifies the primary DECON instance and preserves the legacy
-  platform-device name used by Android userspace.
+  resources identify the display blocks retained by the compatibility driver
+  and preserve the legacy platform-device name used by Android userspace.
 
 properties:
   compatible:
     const: samsung,exynos9810-bootfb
 
   reg:
+    items:
+      - description: Primary DECON registers
+      - description: DPP G0 registers
+      - description: IDMA G0 registers
+      - description: Primary DSIM registers
+
+  reg-names:
+    items:
+      - const: decon
+      - const: dpp-g0
+      - const: idma-g0
+      - const: dsim
+
+  interrupts:
+    items:
+      - description: IDMA G0 interrupt
+      - description: DPP G0 interrupt
+
+  interrupt-names:
+    items:
+      - const: idma-g0
+      - const: dpp-g0
+
+  iommus:
     maxItems: 1
 
   memory-region:
@@ -45,6 +69,7 @@ properties:
 required:
   - compatible
   - reg
+  - reg-names
   - memory-region
   - width
   - height
@@ -73,7 +98,11 @@ examples:
 
         decon_f@16030000 {
             compatible = "samsung,exynos9810-bootfb";
-            reg = <0x0 0x16030000 0x1000>;
+            reg = <0x0 0x16030000 0x1000>,
+                  <0x0 0x16021000 0x1000>,
+                  <0x0 0x16071000 0x1000>,
+                  <0x0 0x16080000 0x0100>;
+            reg-names = "decon", "dpp-g0", "idma-g0", "dsim";
             memory-region = <&framebuffer>;
             width = <1440>;
             height = <2960>;
