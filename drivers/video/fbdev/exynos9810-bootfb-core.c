@@ -49,9 +49,9 @@
 #define EXYNOS9810_BOOTFB_PSR_MIPI	2
 
 #define EXYNOS9810_BOOTFB_FABRIC_CLOCKS	3U
-#define EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT	2U
-#define EXYNOS9810_BOOTFB_NATIVE_SLOT0_IOVA	0x24000000ULL
-#define EXYNOS9810_BOOTFB_NATIVE_SLOT1_IOVA	0x28000000ULL
+#define EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT	4U
+#define EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_BASE	0x24000000ULL
+#define EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE	0x02000000ULL
 #define EXYNOS9810_BOOTFB_NATIVE_WAIT_NS	(100ULL * NSEC_PER_MSEC)
 #define EXYNOS9810_BOOTFB_NATIVE_IDLE_WAIT_NS	(50ULL * NSEC_PER_MSEC)
 
@@ -323,6 +323,7 @@ struct exynos9810_bootfb_native_slot {
 	dma_addr_t iova;
 	size_t mapped;
 	bool valid;
+	u64 last_used;
 };
 
 static const char *const exynos9810_bootfb_fabric_clock_names[] = {
@@ -361,6 +362,10 @@ struct exynos9810_bootfb {
 	int fabric_vote_error;
 
 	struct exynos9810_bootfb_native_slot native_slots[EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT];
+	u64 native_slot_sequence;
+	atomic_t native_slot_cache_hit_count;
+	atomic_t native_slot_cache_miss_count;
+	atomic_t native_slot_cache_eviction_count;
 	bool native_present_enabled;
 	bool native_present_hw_active;
 	int native_present_active_slot;
@@ -373,6 +378,7 @@ struct exynos9810_bootfb {
 	atomic64_t native_present_last_ns;
 	atomic64_t native_present_max_ns;
 	atomic64_t native_present_last_map_ns;
+	atomic64_t native_present_last_fence_ns;
 	atomic64_t native_present_last_wait_ns;
 	atomic_t native_present_completion_count;
 	atomic_t native_present_completion_timeout_count;
@@ -2898,11 +2904,19 @@ static ssize_t performance_stats_show(struct device *dev,
 		atomic_read(&bootfb->native_present_completion_timeout_count),
 		atomic_read(&bootfb->native_present_release_fence_count));
 	len += sysfs_emit_at(buf, len,
-		"native_submit_ns=%lld/%lld map=%lld frame_wait=%lld\n",
+		"native_submit_ns=%lld/%lld fence=%lld map=%lld frame_wait=%lld\n",
 		atomic64_read(&bootfb->native_present_last_ns),
 		atomic64_read(&bootfb->native_present_max_ns),
+		atomic64_read(&bootfb->native_present_last_fence_ns),
 		atomic64_read(&bootfb->native_present_last_map_ns),
 		atomic64_read(&bootfb->native_present_last_wait_ns));
+	len += sysfs_emit_at(buf, len,
+		"native_cache_hit=%d miss=%d evict=%d slots=%u active=%d\n",
+		atomic_read(&bootfb->native_slot_cache_hit_count),
+		atomic_read(&bootfb->native_slot_cache_miss_count),
+		atomic_read(&bootfb->native_slot_cache_eviction_count),
+		EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT,
+		READ_ONCE(bootfb->native_present_active_slot));
 	len += sysfs_emit_at(buf, len, "native_idle_ns=%lld/%lld\n",
 			     atomic64_read(&bootfb->native_present_last_idle_ns),
 			     atomic64_read(&bootfb->native_present_max_idle_ns));
@@ -3215,33 +3229,34 @@ exynos9810_bootfb_release_native_slot(
 static int
 exynos9810_bootfb_map_native_slot(
 	struct exynos9810_bootfb *bootfb,
-	struct exynos9810_bootfb_win_config *config,
+	struct dma_buf *dmabuf,
 	struct exynos9810_bootfb_native_slot *slot,
-	dma_addr_t iova)
+	unsigned int index)
 {
 	struct dma_buf_attachment *attachment;
-	struct dma_buf *dmabuf;
 	struct sg_table *sgt;
+	dma_addr_t iova;
 	ssize_t mapped;
 	int ret;
 
-	if (slot->valid)
-		return -EBUSY;
+	if (slot->valid) {
+		ret = -EBUSY;
+		goto put_dmabuf;
+	}
 	if (!bootfb->prepared_domain || !bootfb->iommu_supplier ||
-	    !bootfb->iommu_supplier_active)
-		return -ENODEV;
+	    !bootfb->iommu_supplier_active) {
+		ret = -ENODEV;
+		goto put_dmabuf;
+	}
 
-	ret = exynos9810_bootfb_wait_fence(config->acq_fence);
-	if (ret)
-		return ret;
-
-	dmabuf = dma_buf_get(config->fd_idma[0]);
-	if (IS_ERR(dmabuf))
-		return PTR_ERR(dmabuf);
-	if (dmabuf->size < bootfb->screen_size) {
+	if (dmabuf->size < bootfb->screen_size ||
+	    dmabuf->size > EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE) {
 		ret = -EINVAL;
 		goto put_dmabuf;
 	}
+
+	iova = EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_BASE +
+		index * EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE;
 
 	/*
 	 * Use the SysMMU provider as the attachment device, then map the
@@ -3268,10 +3283,12 @@ exynos9810_bootfb_map_native_slot(
 		ret = mapped;
 		goto unmap_attachment;
 	}
-	if ((size_t)mapped < bootfb->screen_size) {
+	if ((size_t)mapped < bootfb->screen_size ||
+	    (size_t)mapped > EXYNOS9810_BOOTFB_NATIVE_SLOT_IOVA_STRIDE) {
 		if (mapped)
 			iommu_unmap(bootfb->prepared_domain, iova, mapped);
-		ret = -ENOSPC;
+		ret = (size_t)mapped < bootfb->screen_size ?
+			-ENOSPC : -E2BIG;
 		goto unmap_attachment;
 	}
 	if (!iommu_iova_to_phys(bootfb->prepared_domain, iova) ||
@@ -3298,6 +3315,68 @@ detach:
 put_dmabuf:
 	dma_buf_put(dmabuf);
 	return ret;
+}
+
+static int exynos9810_bootfb_get_native_slot(struct exynos9810_bootfb *bootfb,
+					     struct exynos9810_bootfb_win_config *config,
+					     int active_index,
+					     int *slot_index)
+{
+	struct exynos9810_bootfb_native_slot *slot;
+	struct dma_buf *dmabuf;
+	u64 oldest = U64_MAX;
+	int candidate = -1;
+	int i;
+	int ret;
+
+	dmabuf = dma_buf_get(config->fd_idma[0]);
+	if (IS_ERR(dmabuf))
+		return PTR_ERR(dmabuf);
+
+	for (i = 0; i < EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT; i++) {
+		slot = &bootfb->native_slots[i];
+		if (!slot->valid || slot->dmabuf != dmabuf)
+			continue;
+
+		dma_buf_put(dmabuf);
+		slot->last_used = ++bootfb->native_slot_sequence;
+		atomic_inc(&bootfb->native_slot_cache_hit_count);
+		*slot_index = i;
+		return 0;
+	}
+
+	atomic_inc(&bootfb->native_slot_cache_miss_count);
+	for (i = 0; i < EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT; i++) {
+		slot = &bootfb->native_slots[i];
+		if (!slot->valid) {
+			candidate = i;
+			break;
+		}
+		if (i != active_index && slot->last_used < oldest) {
+			oldest = slot->last_used;
+			candidate = i;
+		}
+	}
+
+	if (candidate < 0) {
+		dma_buf_put(dmabuf);
+		return -EBUSY;
+	}
+
+	slot = &bootfb->native_slots[candidate];
+	if (slot->valid) {
+		exynos9810_bootfb_release_native_slot(bootfb, slot);
+		atomic_inc(&bootfb->native_slot_cache_eviction_count);
+	}
+
+	ret = exynos9810_bootfb_map_native_slot(bootfb, dmabuf, slot,
+						candidate);
+	if (ret)
+		return ret;
+
+	slot->last_used = ++bootfb->native_slot_sequence;
+	*slot_index = candidate;
+	return 0;
 }
 
 static int
@@ -3983,7 +4062,6 @@ static int
 exynos9810_bootfb_finalize_async_present(
 	struct exynos9810_bootfb *bootfb, bool wait)
 {
-	struct exynos9810_bootfb_native_slot *old_slot = NULL;
 	struct dma_fence *fence;
 	int new_index;
 	int old_index;
@@ -4016,13 +4094,8 @@ exynos9810_bootfb_finalize_async_present(
 	    old_index >= (int)EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT)
 		return -EIO;
 
-	if (old_index >= 0)
-		old_slot = &bootfb->native_slots[old_index];
-
 	bootfb->native_present_active_slot = new_index;
 	bootfb->native_present_hw_active = true;
-	if (old_slot)
-		exynos9810_bootfb_release_native_slot(bootfb, old_slot);
 
 	fence = bootfb->native_async_fence;
 	bootfb->native_async_fence = NULL;
@@ -4045,7 +4118,8 @@ exynos9810_bootfb_try_native_present_async(
 {
 	struct exynos9810_bootfb_native_slot *new_slot;
 	struct dma_fence *fence = NULL;
-	dma_addr_t iova;
+	u64 fence_start_ns;
+	u64 fence_ns;
 	u64 frame_wait_ns = 0;
 	u64 map_start_ns;
 	u64 map_ns;
@@ -4065,25 +4139,19 @@ exynos9810_bootfb_try_native_present_async(
 
 	start_ns = ktime_get_ns();
 	old_index = bootfb->native_present_active_slot;
-	new_index = old_index == 0 ? 1 : 0;
-	if (old_index < 0)
-		new_index = 0;
-
-	new_slot = &bootfb->native_slots[new_index];
-	if (new_slot->valid) {
-		ret = -EBUSY;
+	fence_start_ns = ktime_get_ns();
+	ret = exynos9810_bootfb_wait_fence(config->acq_fence);
+	fence_ns = ktime_get_ns() - fence_start_ns;
+	if (ret)
 		goto fallback_without_new;
-	}
-
-	iova = new_index ? EXYNOS9810_BOOTFB_NATIVE_SLOT1_IOVA :
-		EXYNOS9810_BOOTFB_NATIVE_SLOT0_IOVA;
 
 	map_start_ns = ktime_get_ns();
-	ret = exynos9810_bootfb_map_native_slot(
-		bootfb, config, new_slot, iova);
+	ret = exynos9810_bootfb_get_native_slot(bootfb, config, old_index,
+						&new_index);
 	map_ns = ktime_get_ns() - map_start_ns;
 	if (ret)
 		goto fallback_without_new;
+	new_slot = &bootfb->native_slots[new_index];
 
 	fence = exynos9810_bootfb_create_async_fence(bootfb);
 	if (!fence) {
@@ -4160,6 +4228,7 @@ exynos9810_bootfb_try_native_present_async(
 	atomic_inc(&bootfb->native_async_submit_count);
 	atomic64_set(&bootfb->native_present_last_ns, submit_ns);
 	atomic64_set(&bootfb->native_present_last_map_ns, map_ns);
+	atomic64_set(&bootfb->native_present_last_fence_ns, fence_ns);
 	atomic64_set(&bootfb->native_present_last_wait_ns, frame_wait_ns);
 	atomic64_set(&bootfb->native_async_last_submit_ns, submit_ns);
 	if (submit_ns > atomic64_read(&bootfb->native_present_max_ns))
@@ -4493,11 +4562,16 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	bootfb->fbdev_refresh_logged = false;
 
 	bootfb->native_present_active_slot = -1;
+	bootfb->native_slot_sequence = 0;
+	atomic_set(&bootfb->native_slot_cache_hit_count, 0);
+	atomic_set(&bootfb->native_slot_cache_miss_count, 0);
+	atomic_set(&bootfb->native_slot_cache_eviction_count, 0);
 	atomic_set(&bootfb->native_present_count, 0);
 	atomic_set(&bootfb->native_present_fallback_count, 0);
 	atomic64_set(&bootfb->native_present_last_ns, 0);
 	atomic64_set(&bootfb->native_present_max_ns, 0);
 	atomic64_set(&bootfb->native_present_last_map_ns, 0);
+	atomic64_set(&bootfb->native_present_last_fence_ns, 0);
 	atomic64_set(&bootfb->native_present_last_wait_ns, 0);
 	bootfb->native_async_new_slot = -1;
 	bootfb->native_async_old_slot = -1;
