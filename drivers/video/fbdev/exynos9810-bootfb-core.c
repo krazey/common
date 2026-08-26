@@ -2860,6 +2860,132 @@ static ssize_t psr_info_show(struct device *dev, struct device_attribute *attr,
 }
 static DEVICE_ATTR_RO(psr_info);
 
+static ssize_t performance_stats_show(struct device *dev,
+				      struct device_attribute *attr,
+				      char *buf)
+{
+	struct exynos9810_bootfb *bootfb = dev_get_drvdata(dev);
+	ssize_t len = 0;
+
+	len += sysfs_emit_at(buf, len, "fabric_hz=%lu %lu %lu\n",
+			     clk_get_rate(bootfb->fabric_clocks[0].clk),
+			     clk_get_rate(bootfb->fabric_clocks[1].clk),
+			     clk_get_rate(bootfb->fabric_clocks[2].clk));
+	len += sysfs_emit_at(buf, len, "fabric_vote_error=%d\n",
+			     READ_ONCE(bootfb->fabric_vote_error));
+	len += sysfs_emit_at(buf, len,
+		"present=%d fast=%d generic=%d refresh=%d/%d\n",
+		atomic_read(&bootfb->present_count),
+		atomic_read(&bootfb->fast_present_count),
+		atomic_read(&bootfb->generic_present_count),
+		atomic_read(&bootfb->fbdev_refresh_count),
+		atomic_read(&bootfb->fbdev_refresh_error_count));
+	len += sysfs_emit_at(buf, len,
+		"native_state=%u/%u auto=%u/%u/%u pending=%u err=%d/%d\n",
+		READ_ONCE(bootfb->native_present_enabled),
+		READ_ONCE(bootfb->native_present_hw_active),
+		READ_ONCE(bootfb->native_auto_enabled),
+		READ_ONCE(bootfb->native_auto_active),
+		READ_ONCE(bootfb->native_auto_blocked),
+		READ_ONCE(bootfb->native_async_pending),
+		READ_ONCE(bootfb->native_present_error),
+		READ_ONCE(bootfb->native_auto_last_error));
+	len += sysfs_emit_at(buf, len,
+		"native_count=%d fallback=%d complete=%d/%d fence=%d\n",
+		atomic_read(&bootfb->native_present_count),
+		atomic_read(&bootfb->native_present_fallback_count),
+		atomic_read(&bootfb->native_present_completion_count),
+		atomic_read(&bootfb->native_present_completion_timeout_count),
+		atomic_read(&bootfb->native_present_release_fence_count));
+	len += sysfs_emit_at(buf, len,
+		"native_submit_ns=%lld/%lld map=%lld frame_wait=%lld\n",
+		atomic64_read(&bootfb->native_present_last_ns),
+		atomic64_read(&bootfb->native_present_max_ns),
+		atomic64_read(&bootfb->native_present_last_map_ns),
+		atomic64_read(&bootfb->native_present_last_wait_ns));
+	len += sysfs_emit_at(buf, len, "native_idle_ns=%lld/%lld\n",
+			     atomic64_read(&bootfb->native_present_last_idle_ns),
+			     atomic64_read(&bootfb->native_present_max_idle_ns));
+	len += sysfs_emit_at(buf, len,
+		"async_count=%d/%d/%d err=%d busy=%d prev=%d/%d\n",
+		atomic_read(&bootfb->native_async_submit_count),
+		atomic_read(&bootfb->native_async_signal_count),
+		atomic_read(&bootfb->native_async_finalize_count),
+		atomic_read(&bootfb->native_async_error_count),
+		atomic_read(&bootfb->native_async_early_busy_count),
+		atomic_read(&bootfb->native_async_previous_wait_count),
+		atomic_read(&bootfb->native_async_previous_wait_timeout_count));
+	len += sysfs_emit_at(buf, len,
+		"async_signal=%d/%d missed=%d busy=%d err=%d timeout=%d\n",
+		atomic_read(&bootfb->native_async_irq_signal_count),
+		atomic_read(&bootfb->native_async_worker_signal_count),
+		atomic_read(&bootfb->native_async_irq_missed_count),
+		atomic_read(&bootfb->native_async_irq_busy_fallback_count),
+		atomic_read(&bootfb->native_async_irq_error_signal_count),
+		atomic_read(&bootfb->native_async_timeout_signal_count));
+	len += sysfs_emit_at(buf, len,
+		"async_complete_ns=%lld/%lld irq=%lld/%lld\n",
+		atomic64_read(&bootfb->native_async_last_complete_ns),
+		atomic64_read(&bootfb->native_async_max_complete_ns),
+		atomic64_read(&bootfb->native_async_last_irq_complete_ns),
+		atomic64_read(&bootfb->native_async_max_irq_complete_ns));
+	len += sysfs_emit_at(buf, len,
+		"irq_count=%d/%d framedone=%d/%d enabled=%u/%u\n",
+		atomic_read(&bootfb->idma_g0_irq_count),
+		atomic_read(&bootfb->dpp_g0_irq_count),
+		atomic_read(&bootfb->idma_g0_framedone_count),
+		atomic_read(&bootfb->dpp_g0_framedone_count),
+		READ_ONCE(bootfb->g0_irqs_available),
+		READ_ONCE(bootfb->g0_irqs_enabled));
+	len += sysfs_emit_at(buf, len,
+		"irq_error=%d/%d sample=%d miss=%d/%d\n",
+		atomic_read(&bootfb->idma_g0_irq_error_count),
+		atomic_read(&bootfb->dpp_g0_irq_error_count),
+		atomic_read(&bootfb->native_irq_sample_count),
+		atomic_read(&bootfb->native_idma_irq_miss_count),
+		atomic_read(&bootfb->native_dpp_irq_miss_count));
+	len += sysfs_emit_at(buf, len,
+		"irq_latency_ns=%lld/%lld %lld/%lld\n",
+		atomic64_read(&bootfb->idma_g0_last_latency_ns),
+		atomic64_read(&bootfb->idma_g0_max_latency_ns),
+		atomic64_read(&bootfb->dpp_g0_last_latency_ns),
+		atomic64_read(&bootfb->dpp_g0_max_latency_ns));
+	len += sysfs_emit_at(buf, len,
+		"dpp_wait=%d/%d busy=%d ns=%lld/%lld\n",
+		atomic_read(&bootfb->native_dpp_irq_wait_count),
+		atomic_read(&bootfb->native_dpp_irq_wait_timeout_count),
+		atomic_read(&bootfb->native_dpp_irq_early_busy_count),
+		atomic64_read(&bootfb->native_dpp_irq_last_wait_ns),
+		atomic64_read(&bootfb->native_dpp_irq_max_wait_ns));
+	len += sysfs_emit_at(buf, len,
+		"auto=%d/%d/%d/%d kick=%d/%d\n",
+		atomic_read(&bootfb->native_auto_attempt_count),
+		atomic_read(&bootfb->native_auto_entry_count),
+		atomic_read(&bootfb->native_auto_failure_count),
+		atomic_read(&bootfb->native_auto_restore_count),
+		atomic_read(&bootfb->decon_kick_count),
+		atomic_read(&bootfb->decon_kick_failures));
+	len += sysfs_emit_at(buf, len,
+		"blit_ns=%lld/%lld bytes=%lld rows=%d/%d/%d/%d\n",
+		atomic64_read(&bootfb->last_blit_ns),
+		atomic64_read(&bootfb->max_blit_ns),
+		atomic64_read(&bootfb->last_blit_bytes),
+		atomic_read(&bootfb->last_source_changed_rows),
+		atomic_read(&bootfb->last_changed_rows),
+		atomic_read(&bootfb->last_scan_y),
+		atomic_read(&bootfb->last_scan_rows));
+	len += sysfs_emit_at(buf, len,
+		"cpu_stage_ns=%lld/%lld/%lld/%lld/%lld\n",
+		atomic64_read(&bootfb->last_fence_ns),
+		atomic64_read(&bootfb->last_begin_ns),
+		atomic64_read(&bootfb->last_map_ns),
+		atomic64_read(&bootfb->last_scan_ns),
+		atomic64_read(&bootfb->last_end_ns));
+
+	return len;
+}
+static DEVICE_ATTR_RO(performance_stats);
+
 static ssize_t fix_green_screen_show(struct device *dev,
 				     struct device_attribute *attr, char *buf)
 {
@@ -4145,6 +4271,7 @@ static struct attribute *exynos9810_bootfb_attrs[] = {
 	&dev_attr_vsync.attr,
 	&dev_attr_psr_info.attr,
 	&dev_attr_fix_green_screen.attr,
+	&dev_attr_performance_stats.attr,
 	NULL,
 };
 
