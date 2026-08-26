@@ -638,7 +638,7 @@ config CHARGER_MAX77693
 
 config CHARGER_MAX77705
 	tristate "Maxim MAX77705 battery charger driver"
-	depends on MFD_MAX77705
+	depends on MFD_MAX77705 && EXTCON
 	help
 	  Say Y to enable support for the Maxim MAX77705 battery charger.
 
