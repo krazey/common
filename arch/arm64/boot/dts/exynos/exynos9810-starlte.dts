@@ -198,6 +198,10 @@ firmware_class.path=/vendor/firmware bootconfig";
 		interrupt-names = "idma-g0", "dpp-g0";
 		memory-region = <&cont_splash_mem>;
 		iommus = <&sysmmu_dpu1>;
+		clocks = <&acpm_dvfs CLK_ACPM_DVFS_MIF>,
+			 <&acpm_dvfs CLK_ACPM_DVFS_INT>,
+			 <&acpm_dvfs CLK_ACPM_DVFS_DISP>;
+		clock-names = "mif", "int", "disp";
 		width = <1440>;
 		height = <2960>;
 		stride = <(1440 * 4)>;
