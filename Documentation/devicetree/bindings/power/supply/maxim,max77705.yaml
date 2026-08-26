@@ -25,6 +25,12 @@ properties:
   reg:
     maxItems: 1
 
+  extcon:
+    maxItems: 1
+    description:
+      Phandle to the MAX77705 MUIC connector used to select the board
+      charging-current policy.
+
   maxim,enable-watchdog:
     type: boolean
     description:
