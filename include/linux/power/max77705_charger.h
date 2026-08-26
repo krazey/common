@@ -10,6 +10,7 @@
 #define __MAX77705_CHARGER_H __FILE__
 
 #include <linux/mutex.h>
+#include <linux/notifier.h>
 #include <linux/regmap.h>
 #include <linux/workqueue.h>
 
@@ -144,8 +145,17 @@
 #define MAX77705_CURRENT_CHGIN_MAX	3200000
 #define MAX77705_CURRENT_CHG_MAX		3150000
 #define MAX77705_STOCK_SAFE_CURRENT	500000
+#define MAX77705_STOCK_CABLE_NONE	1
 #define MAX77705_STOCK_SAFE_CABLE_TYPE	2
+#define MAX77705_STOCK_CABLE_TA		3
+#define MAX77705_STOCK_CABLE_USB		4
+#define MAX77705_STOCK_CABLE_USB_CDP	5
+#define MAX77705_STOCK_CABLE_OTG		21
+#define MAX77705_STOCK_CABLE_TIMEOUT	30
+#define MAX77705_USB_INPUT_VOLTAGE_UV	5000000
 #define MAX77705_WATCHDOG_INTERVAL_MS	30000
+
+struct extcon_dev;
 
 struct max77705_current_entry {
 	u32 cable_type;
@@ -217,6 +227,9 @@ struct max77705_charger_data {
 	struct power_supply_battery_info *bat_info;
 	struct workqueue_struct *wqueue;
 	struct work_struct	chgin_work;
+	struct work_struct	extcon_work;
+	struct extcon_dev	*extcon;
+	struct notifier_block	extcon_nb;
 	struct delayed_work	watchdog_work;
 	/* Serialize cable policy and charger register updates. */
 	struct mutex		lock;
@@ -229,6 +242,9 @@ struct max77705_charger_data {
 	u32			b2s_ocp_ua;
 	u32			cable_type;
 	bool			policy_selected;
+	u32			advertised_current_ua;
+	u32			advertised_voltage_uv;
+	int			usb_type;
 	bool			watchdog_enabled;
 };
 

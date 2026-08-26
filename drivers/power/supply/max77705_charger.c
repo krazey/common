@@ -8,6 +8,7 @@
  */
 
 #include <linux/devm-helpers.h>
+#include <linux/extcon.h>
 #include <linux/i2c.h>
 #include <linux/interrupt.h>
 #include <linux/mfd/max77693-common.h>
@@ -36,11 +37,14 @@ static enum power_supply_property max77705_charger_props[] = {
 	POWER_SUPPLY_PROP_CHARGE_TYPE,
 	POWER_SUPPLY_PROP_HEALTH,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
+	POWER_SUPPLY_PROP_VOLTAGE_MAX,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE,
 	POWER_SUPPLY_PROP_CONSTANT_CHARGE_CURRENT,
+	POWER_SUPPLY_PROP_CURRENT_MAX,
 	POWER_SUPPLY_PROP_INPUT_CURRENT_LIMIT,
 	POWER_SUPPLY_PROP_MODEL_NAME,
 	POWER_SUPPLY_PROP_MANUFACTURER,
+	POWER_SUPPLY_PROP_USB_TYPE,
 };
 
 static irqreturn_t max77705_aicl_irq(int irq, void *irq_drv_data)
@@ -130,6 +134,8 @@ static void max77705_charger_disable(void *data)
 {
 	struct max77705_charger_data *chg = data;
 
+	if (chg->extcon)
+		cancel_work_sync(&chg->extcon_work);
 	cancel_delayed_work_sync(&chg->watchdog_work);
 
 	mutex_lock(&chg->lock);
@@ -426,12 +432,11 @@ static int max77705_charger_sync_locked(struct max77705_charger_data *chg)
 	if (ret)
 		return ret;
 
-	if (!online) {
-		chg->cable_type = 0;
-		chg->policy_selected = false;
-	}
-
-	if (!online || (chg->policy_selected && chg->cable_type <= 1)) {
+	chg->advertised_current_ua = 0;
+	chg->advertised_voltage_uv = 0;
+	if (!online || (chg->policy_selected &&
+			(chg->cable_type <= MAX77705_STOCK_CABLE_NONE ||
+			 chg->cable_type == MAX77705_STOCK_CABLE_OTG))) {
 		ret = regmap_field_write(chg->rfield[MAX77705_MODE], 0);
 		if (ret)
 			return ret;
@@ -468,6 +473,8 @@ static int max77705_charger_sync_locked(struct max77705_charger_data *chg)
 	if (ret)
 		goto disable;
 
+	chg->advertised_current_ua = input_ua;
+	chg->advertised_voltage_uv = MAX77705_USB_INPUT_VOLTAGE_UV;
 	dev_info(chg->dev,
 		 "input present, cable %u, limits %u/%u uA\n",
 		 chg->policy_selected ? chg->cable_type :
@@ -479,6 +486,8 @@ static int max77705_charger_sync_locked(struct max77705_charger_data *chg)
 disable:
 	regmap_field_write(chg->rfield[MAX77705_MODE], 0);
 	max77705_set_watchdog_locked(chg, false);
+	chg->advertised_current_ua = 0;
+	chg->advertised_voltage_uv = 0;
 	return ret;
 }
 
@@ -763,6 +772,15 @@ static int max77705_chg_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
 		val->intval = chg->bat_info->voltage_max_design_uv;
 		break;
+	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
+		val->intval = READ_ONCE(chg->advertised_voltage_uv);
+		break;
+	case POWER_SUPPLY_PROP_CURRENT_MAX:
+		val->intval = READ_ONCE(chg->advertised_current_ua);
+		break;
+	case POWER_SUPPLY_PROP_USB_TYPE:
+		val->intval = READ_ONCE(chg->usb_type);
+		break;
 	case POWER_SUPPLY_PROP_MODEL_NAME:
 		val->strval = max77705_charger_model;
 		break;
@@ -826,12 +844,74 @@ static int max77705_property_is_writeable(struct power_supply *psy,
 static const struct power_supply_desc max77705_charger_psy_desc = {
 	.name = "max77705-charger",
 	.type = POWER_SUPPLY_TYPE_USB,
+	.usb_types = BIT(POWER_SUPPLY_USB_TYPE_UNKNOWN) |
+		     BIT(POWER_SUPPLY_USB_TYPE_SDP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_DCP) |
+		     BIT(POWER_SUPPLY_USB_TYPE_CDP),
 	.properties = max77705_charger_props,
 	.property_is_writeable = max77705_property_is_writeable,
 	.num_properties = ARRAY_SIZE(max77705_charger_props),
 	.get_property = max77705_chg_get_property,
 	.set_property = max77705_set_property,
 };
+
+static void max77705_charger_select_extcon_policy(struct max77705_charger_data *chg)
+{
+	if (extcon_get_state(chg->extcon, EXTCON_CHG_USB_DCP) > 0) {
+		chg->cable_type = MAX77705_STOCK_CABLE_TA;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_DCP;
+	} else if (extcon_get_state(chg->extcon,
+					    EXTCON_CHG_USB_CDP) > 0) {
+		chg->cable_type = MAX77705_STOCK_CABLE_USB_CDP;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_CDP;
+	} else if (extcon_get_state(chg->extcon,
+					    EXTCON_CHG_USB_SDP) > 0) {
+		chg->cable_type = MAX77705_STOCK_CABLE_USB;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_SDP;
+	} else if (extcon_get_state(chg->extcon,
+					    EXTCON_CHG_USB_SLOW) > 0) {
+		chg->cable_type = MAX77705_STOCK_CABLE_TIMEOUT;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_SDP;
+	} else if (extcon_get_state(chg->extcon, EXTCON_USB_HOST) > 0) {
+		chg->cable_type = MAX77705_STOCK_CABLE_OTG;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	} else if (extcon_get_state(chg->extcon, EXTCON_USB) > 0) {
+		chg->cable_type = MAX77705_STOCK_CABLE_USB;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_SDP;
+	} else {
+		chg->cable_type = MAX77705_STOCK_CABLE_NONE;
+		chg->usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	}
+	chg->policy_selected = true;
+}
+
+static void max77705_charger_extcon_work(struct work_struct *work)
+{
+	struct max77705_charger_data *chg =
+		container_of(work, struct max77705_charger_data, extcon_work);
+	int ret;
+
+	mutex_lock(&chg->lock);
+	max77705_charger_select_extcon_policy(chg);
+	ret = max77705_charger_sync_locked(chg);
+	mutex_unlock(&chg->lock);
+
+	if (ret)
+		dev_err(chg->dev, "failed to select cable policy: %d\n", ret);
+
+	power_supply_changed(chg->psy_chg);
+}
+
+static int max77705_charger_extcon_notifier(struct notifier_block *nb,
+					    unsigned long event, void *data)
+{
+	struct max77705_charger_data *chg =
+		container_of(nb, struct max77705_charger_data, extcon_nb);
+
+	schedule_work(&chg->extcon_work);
+
+	return NOTIFY_OK;
+}
 
 static void max77705_chgin_isr_work(struct work_struct *work)
 {
@@ -1015,6 +1095,14 @@ static int max77705_charger_probe(struct i2c_client *i2c)
 	if (ret)
 		return ret;
 
+	chg->usb_type = POWER_SUPPLY_USB_TYPE_UNKNOWN;
+	if (device_property_present(dev, "extcon")) {
+		chg->extcon = extcon_get_edev_by_phandle(dev, 0);
+		if (IS_ERR(chg->extcon))
+			return dev_err_probe(dev, PTR_ERR(chg->extcon),
+					     "failed to get cable detector\n");
+	}
+
 	chip_desc = devm_kmemdup(dev, &max77705_charger_irq_chip,
 				 sizeof(max77705_charger_irq_chip),
 				 GFP_KERNEL);
@@ -1057,6 +1145,14 @@ static int max77705_charger_probe(struct i2c_client *i2c)
 		return dev_err_probe(dev, ret,
 				     "failed to initialize interrupt work\n");
 
+	if (chg->extcon) {
+		ret = devm_work_autocancel(dev, &chg->extcon_work,
+					   max77705_charger_extcon_work);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "failed to initialize cable work\n");
+	}
+
 	ret = devm_delayed_work_autocancel(dev, &chg->watchdog_work,
 					   max77705_watchdog_work);
 	if (ret)
@@ -1090,11 +1186,24 @@ static int max77705_charger_probe(struct i2c_client *i2c)
 		return ret;
 
 	mutex_lock(&chg->lock);
+	if (chg->extcon)
+		max77705_charger_select_extcon_policy(chg);
 	sync_ret = max77705_charger_sync_locked(chg);
 	mutex_unlock(&chg->lock);
 	if (sync_ret)
 		return dev_err_probe(dev, sync_ret,
 				     "failed to select initial charging policy\n");
+
+	if (chg->extcon) {
+		chg->extcon_nb.notifier_call =
+			max77705_charger_extcon_notifier;
+		ret = devm_extcon_register_notifier_all(dev, chg->extcon, &chg->extcon_nb);
+		if (ret)
+			return dev_err_probe(dev, ret,
+					     "failed to register cable notifier\n");
+
+		schedule_work(&chg->extcon_work);
+	}
 
 	return 0;
 }
