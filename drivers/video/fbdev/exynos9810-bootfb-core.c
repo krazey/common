@@ -139,6 +139,8 @@
 #define EXYNOS9810_DSIM_RX_ERROR_MASK		0x3f3f
 
 #define EXYNOS9810_STAR_DEFAULT_BRIGHTNESS	128
+#define EXYNOS9810_STAR_GREENFIX_FRAME_US	16700
+#define EXYNOS9810_STAR_GREENFIX_WAIT_US	126000
 
 /* Values used by the Exynos9810 HWC S3CFB_POWER_MODE ABI. */
 #define EXYNOS9810_DISP_PWR_OFF			0U
@@ -456,6 +458,7 @@ struct exynos9810_bootfb {
 	bool fbdev_refresh_enabled;
 	bool fbdev_hwc_seen;
 	bool panel_enabled;
+	bool panel_greenfix;
 	bool fbdev_refresh_logged;
 	ktime_t vsync_period;
 	wait_queue_head_t vsync_wait;
@@ -2513,16 +2516,149 @@ exynos9810_bootfb_register_backlight(struct exynos9810_bootfb *bootfb)
 }
 
 static int
+exynos9810_bootfb_disable_panel_key(struct exynos9810_bootfb *bootfb,
+				    const u8 *key, size_t key_len,
+				    int ret)
+{
+	int disable_ret;
+
+	disable_ret = exynos9810_bootfb_dsim_write(bootfb, key, key_len);
+	if (!ret)
+		ret = disable_ret;
+
+	return ret;
+}
+
+static int
+exynos9810_bootfb_green_screen_recovery_locked(
+	struct exynos9810_bootfb *bootfb)
+{
+	static const u8 lpm_aor[] = { 0xb1, 0x0b, 0x74 };
+	static const u8 gamma_update[] = { 0xf7, 0x03 };
+	static const u8 lpm_nit[] = {
+		0xbb, 0x07, 0x0c, 0xbb, 0x4f, 0x4f, 0x84,
+	};
+	static const u8 avs_on[] = { 0xfd, 0x03 };
+	static const u8 lpm_mode[] = { 0x53, 0x03 };
+	static const u8 avc2_off[] = {
+		0xf4, 0xeb, 0x23, 0x0b, 0x17, 0x8a,
+	};
+	static const u8 lpm_off[] = { 0xbb, 0x03 };
+	static const u8 avc2_on[] = {
+		0xf4, 0xeb, 0x23, 0x0b, 0x17, 0xca,
+	};
+	static const u8 exit_alpm[] = { 0x53, 0x00 };
+	int ret;
+
+	/* Match the stock STAR_A3_S0 ALPM entry sequence. */
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_enable,
+		ARRAY_SIZE(exynos9810_panel_key2_enable));
+	if (ret)
+		return ret;
+
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, lpm_aor, sizeof(lpm_aor));
+	if (!ret)
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, gamma_update, sizeof(gamma_update));
+	ret = exynos9810_bootfb_disable_panel_key(
+		bootfb, exynos9810_panel_key2_disable,
+		ARRAY_SIZE(exynos9810_panel_key2_disable), ret);
+	if (ret)
+		return ret;
+
+	usleep_range(EXYNOS9810_STAR_GREENFIX_FRAME_US,
+		     EXYNOS9810_STAR_GREENFIX_FRAME_US + 10);
+
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_enable,
+		ARRAY_SIZE(exynos9810_panel_key2_enable));
+	if (ret)
+		return ret;
+
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, lpm_nit, sizeof(lpm_nit));
+	if (!ret) {
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, exynos9810_panel_key3_enable,
+			ARRAY_SIZE(exynos9810_panel_key3_enable));
+		if (!ret) {
+			ret = exynos9810_bootfb_dsim_write_offset(
+				bootfb, 0x2b, avs_on, sizeof(avs_on));
+			ret = exynos9810_bootfb_disable_panel_key(
+				bootfb, exynos9810_panel_key3_disable,
+				ARRAY_SIZE(exynos9810_panel_key3_disable),
+				ret);
+		}
+	}
+	if (!ret)
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, lpm_mode, sizeof(lpm_mode));
+	if (!ret)
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, avc2_off, sizeof(avc2_off));
+	if (!ret)
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, gamma_update, sizeof(gamma_update));
+	ret = exynos9810_bootfb_disable_panel_key(
+		bootfb, exynos9810_panel_key2_disable,
+		ARRAY_SIZE(exynos9810_panel_key2_disable), ret);
+	if (ret)
+		return ret;
+
+	usleep_range(EXYNOS9810_STAR_GREENFIX_WAIT_US,
+		     EXYNOS9810_STAR_GREENFIX_WAIT_US + 10);
+
+	/* Match the stock STAR_A3_S0 ALPM exit sequence. */
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_enable,
+		ARRAY_SIZE(exynos9810_panel_key2_enable));
+	if (ret)
+		return ret;
+
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, lpm_off, sizeof(lpm_off));
+	if (!ret)
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, avc2_on, sizeof(avc2_on));
+	if (!ret)
+		ret = exynos9810_bootfb_dsim_write(
+			bootfb, exit_alpm, sizeof(exit_alpm));
+	ret = exynos9810_bootfb_disable_panel_key(
+		bootfb, exynos9810_panel_key2_disable,
+		ARRAY_SIZE(exynos9810_panel_key2_disable), ret);
+	if (ret)
+		return ret;
+
+	ret = exynos9810_bootfb_write_brightness_locked(
+		bootfb, bootfb->panel_brightness);
+	if (!ret)
+		dev_info(bootfb->dev,
+			 "E981D: STAR green-screen recovery completed\n");
+
+	return ret;
+}
+
+static int
 exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
 				   bool enabled)
 {
 	u8 command = enabled ? MIPI_DCS_SET_DISPLAY_ON :
 			       MIPI_DCS_SET_DISPLAY_OFF;
+	bool brightness_restored = false;
 	int disable_ret;
 	int ret;
 
 	if (bootfb->panel_enabled == enabled)
 		return 0;
+	if (enabled && bootfb->backlight &&
+	    READ_ONCE(bootfb->panel_greenfix)) {
+		ret = exynos9810_bootfb_green_screen_recovery_locked(bootfb);
+		if (ret)
+			return ret;
+		brightness_restored = true;
+	}
 
 	ret = exynos9810_bootfb_dsim_write(
 		bootfb, exynos9810_panel_key1_enable,
@@ -2542,7 +2678,7 @@ exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
 		 enabled ? "on" : "off");
 	if (disable_ret)
 		return disable_ret;
-	if (enabled && bootfb->backlight)
+	if (enabled && bootfb->backlight && !brightness_restored)
 		ret = exynos9810_bootfb_write_brightness_locked(
 			bootfb, bootfb->panel_brightness);
 
@@ -2706,6 +2842,34 @@ static ssize_t psr_info_show(struct device *dev, struct device_attribute *attr,
 			  bootfb->width, bootfb->height, bootfb->width);
 }
 static DEVICE_ATTR_RO(psr_info);
+
+static ssize_t fix_green_screen_show(struct device *dev,
+				     struct device_attribute *attr, char *buf)
+{
+	struct exynos9810_bootfb *bootfb = dev_get_drvdata(dev);
+
+	return sysfs_emit(buf, "%u\n", READ_ONCE(bootfb->panel_greenfix));
+}
+
+static ssize_t fix_green_screen_store(struct device *dev,
+				      struct device_attribute *attr,
+				      const char *buf, size_t count)
+{
+	struct exynos9810_bootfb *bootfb = dev_get_drvdata(dev);
+	bool enabled;
+	int ret;
+
+	ret = kstrtobool(buf, &enabled);
+	if (ret)
+		return ret;
+
+	WRITE_ONCE(bootfb->panel_greenfix, enabled);
+	dev_info(bootfb->dev, "E981D: STAR green-screen recovery %s\n",
+		 enabled ? "enabled" : "disabled");
+
+	return count;
+}
+static DEVICE_ATTR_RW(fix_green_screen);
 
 static int
 exynos9810_bootfb_prepare_iommu_domain(struct exynos9810_bootfb *bootfb)
@@ -3963,6 +4127,7 @@ exynos9810_bootfb_try_native_present(
 static struct attribute *exynos9810_bootfb_attrs[] = {
 	&dev_attr_vsync.attr,
 	&dev_attr_psr_info.attr,
+	&dev_attr_fix_green_screen.attr,
 	NULL,
 };
 
