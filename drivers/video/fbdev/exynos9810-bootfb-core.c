@@ -9,6 +9,7 @@
  */
 
 #include <linux/backlight.h>
+#include <linux/clk.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-fence.h>
 #include <linux/delay.h>
@@ -47,6 +48,7 @@
 #define EXYNOS9810_BOOTFB_CHIP_ID	9810
 #define EXYNOS9810_BOOTFB_PSR_MIPI	2
 
+#define EXYNOS9810_BOOTFB_FABRIC_CLOCKS	3U
 #define EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT	2U
 #define EXYNOS9810_BOOTFB_NATIVE_SLOT0_IOVA	0x24000000ULL
 #define EXYNOS9810_BOOTFB_NATIVE_SLOT1_IOVA	0x28000000ULL
@@ -323,6 +325,18 @@ struct exynos9810_bootfb_native_slot {
 	bool valid;
 };
 
+static const char *const exynos9810_bootfb_fabric_clock_names[] = {
+	"mif",
+	"int",
+	"disp",
+};
+
+static const unsigned long exynos9810_bootfb_fabric_rates[] = {
+	1794000000,
+	667000000,
+	640000000,
+};
+
 struct exynos9810_bootfb {
 	struct device *dev;
 	struct fb_info *info;
@@ -342,6 +356,9 @@ struct exynos9810_bootfb {
 	int attach_iommu_error;
 	bool translated_attached;
 	bool iommu_supplier_active;
+
+	struct clk_bulk_data fabric_clocks[EXYNOS9810_BOOTFB_FABRIC_CLOCKS];
+	int fabric_vote_error;
 
 	struct exynos9810_bootfb_native_slot native_slots[EXYNOS9810_BOOTFB_NATIVE_SLOT_COUNT];
 	bool native_present_enabled;
@@ -4273,6 +4290,45 @@ static void exynos9810_bootfb_cleanup(void *data)
 	framebuffer_release(bootfb->info);
 }
 
+static int
+exynos9810_bootfb_vote_fabric(struct exynos9810_bootfb *bootfb)
+{
+	unsigned int i;
+	int ret;
+
+	for (i = 0; i < EXYNOS9810_BOOTFB_FABRIC_CLOCKS; i++)
+		bootfb->fabric_clocks[i].id =
+			exynos9810_bootfb_fabric_clock_names[i];
+
+	ret = devm_clk_bulk_get(bootfb->dev,
+				EXYNOS9810_BOOTFB_FABRIC_CLOCKS,
+				bootfb->fabric_clocks);
+	if (ret)
+		return dev_err_probe(bootfb->dev, ret,
+				     "failed to get display fabric clocks\n");
+
+	for (i = 0; i < EXYNOS9810_BOOTFB_FABRIC_CLOCKS; i++) {
+		ret = clk_set_rate(bootfb->fabric_clocks[i].clk,
+				   exynos9810_bootfb_fabric_rates[i]);
+		if (ret) {
+			if (!bootfb->fabric_vote_error)
+				bootfb->fabric_vote_error = ret;
+			dev_warn(bootfb->dev,
+				 "failed to vote %s fabric clock: %d\n",
+				 bootfb->fabric_clocks[i].id, ret);
+		}
+	}
+
+	dev_info(bootfb->dev,
+		 "E981D: display fabric MIF=%lu INT=%lu DISP=%lu ret=%d\n",
+		 clk_get_rate(bootfb->fabric_clocks[0].clk),
+		 clk_get_rate(bootfb->fabric_clocks[1].clk),
+		 clk_get_rate(bootfb->fabric_clocks[2].clk),
+		 bootfb->fabric_vote_error);
+
+	return 0;
+}
+
 static int exynos9810_bootfb_probe(struct platform_device *pdev)
 {
 	struct exynos9810_bootfb *bootfb;
@@ -4400,6 +4456,10 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 		goto release_info;
 	}
 	bootfb->screen_size = required_size;
+
+	ret = exynos9810_bootfb_vote_fabric(bootfb);
+	if (ret)
+		goto release_info;
 
 	bootfb->decon = devm_platform_ioremap_resource_byname(pdev, "decon");
 	if (IS_ERR(bootfb->decon)) {
