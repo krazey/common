@@ -17,8 +17,12 @@
 
 #define MAX77705_REVISION_RETRIES	5
 
+static const struct resource max77705_muic_resources[] = {
+	DEFINE_RES_IRQ_NAMED(MAX77705_IRQ_USBC, "usbc"),
+};
+
 static struct mfd_cell max77705_devs[] = {
-	MFD_CELL_OF("max77705-muic", NULL, NULL, 0, 0,
+	MFD_CELL_OF("max77705-muic", max77705_muic_resources, NULL, 0, 0,
 		    "maxim,max77705-muic"),
 	MFD_CELL_OF("max77705-rgb", NULL, NULL, 0, 0, "maxim,max77705-rgb"),
 	MFD_CELL_OF("max77705-haptic", NULL, NULL, 0, 0, "maxim,max77705-haptic"),
@@ -65,10 +69,10 @@ static const struct regmap_config max77705_regmap_config = {
 };
 
 static const struct regmap_irq max77705_irqs[] = {
-	{ .mask = MAX77705_SRC_IRQ_CHG, },
-	{ .mask = MAX77705_SRC_IRQ_TOP, },
-	{ .mask = MAX77705_SRC_IRQ_FG, },
-	{ .mask = MAX77705_SRC_IRQ_USBC, },
+	[MAX77705_IRQ_CHG] = { .mask = MAX77705_SRC_IRQ_CHG, },
+	[MAX77705_IRQ_TOP] = { .mask = MAX77705_SRC_IRQ_TOP, },
+	[MAX77705_IRQ_FG] = { .mask = MAX77705_SRC_IRQ_FG, },
+	[MAX77705_IRQ_USBC] = { .mask = MAX77705_SRC_IRQ_USBC, },
 };
 
 static const struct regmap_irq_chip max77705_irq_chip = {
