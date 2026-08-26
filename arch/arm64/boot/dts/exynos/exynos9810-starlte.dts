@@ -190,8 +190,9 @@ firmware_class.path=/vendor/firmware bootconfig";
 		compatible = "samsung,exynos9810-bootfb";
 		reg = <0x0 0x16030000 0x1000>,
 		      <0x0 0x16021000 0x1000>,
-		      <0x0 0x16071000 0x1000>;
-		reg-names = "decon", "dpp-g0", "idma-g0";
+		      <0x0 0x16071000 0x1000>,
+		      <0x0 0x16080000 0x100>;
+		reg-names = "decon", "dpp-g0", "idma-g0", "dsim";
 		interrupts = <GIC_SPI 197 IRQ_TYPE_LEVEL_HIGH>,
 			     <GIC_SPI 204 IRQ_TYPE_LEVEL_HIGH>;
 		interrupt-names = "idma-g0", "dpp-g0";
