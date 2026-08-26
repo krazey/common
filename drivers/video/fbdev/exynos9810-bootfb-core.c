@@ -4421,6 +4421,7 @@ static int
 exynos9810_bootfb_vote_fabric(struct exynos9810_bootfb *bootfb)
 {
 	unsigned int i;
+	unsigned long rate;
 	int ret;
 
 	for (i = 0; i < EXYNOS9810_BOOTFB_FABRIC_CLOCKS; i++)
@@ -4437,6 +4438,10 @@ exynos9810_bootfb_vote_fabric(struct exynos9810_bootfb *bootfb)
 	for (i = 0; i < EXYNOS9810_BOOTFB_FABRIC_CLOCKS; i++) {
 		ret = clk_set_rate(bootfb->fabric_clocks[i].clk,
 				   exynos9810_bootfb_fabric_rates[i]);
+		rate = clk_get_rate(bootfb->fabric_clocks[i].clk);
+		if (!ret && rate != exynos9810_bootfb_fabric_rates[i])
+			ret = -EIO;
+
 		if (ret) {
 			if (!bootfb->fabric_vote_error)
 				bootfb->fabric_vote_error = ret;
