@@ -8,6 +8,7 @@
  * Exynos9810 hardware composer.
  */
 
+#include <linux/backlight.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-fence.h>
 #include <linux/delay.h>
@@ -37,6 +38,8 @@
 #include <linux/wait.h>
 #include <linux/workqueue.h>
 #include <video/mipi_display.h>
+
+#include "exynos9810-star-panel.h"
 
 #define EXYNOS9810_BOOTFB_FPS		60
 #define EXYNOS9810_BOOTFB_MAX_WINDOWS	6
@@ -117,14 +120,25 @@
 #define EXYNOS9810_DSIM_INTSRC			0x0050
 #define EXYNOS9810_DSIM_PKTHDR			0x0058
 #define EXYNOS9810_DSIM_PAYLOAD			0x005c
+#define EXYNOS9810_DSIM_RXFIFO			0x0060
 #define EXYNOS9810_DSIM_FIFOCTRL		0x0068
 #define EXYNOS9810_DSIM_INTSRC_PH_EMPTY		BIT(28)
+#define EXYNOS9810_DSIM_INTSRC_RX_DATA_DONE	BIT(18)
+#define EXYNOS9810_DSIM_FIFO_EMPTY_RX		BIT(12)
 #define EXYNOS9810_DSIM_FIFO_EMPTY_PH		BIT(10)
 #define EXYNOS9810_DSIM_FIFO_EMPTY_PL		BIT(8)
 #define EXYNOS9810_DSIM_FIFO_IDLE		\
 	(EXYNOS9810_DSIM_FIFO_EMPTY_PH | EXYNOS9810_DSIM_FIFO_EMPTY_PL)
 #define EXYNOS9810_DSIM_HEADER_DATA0(_value)	((u32)(_value) << 8)
+#define EXYNOS9810_DSIM_HEADER_DATA1(_value)	((u32)(_value) << 16)
+#define EXYNOS9810_DSIM_HEADER_BTA		BIT(24)
 #define EXYNOS9810_DSIM_WRITE_TIMEOUT_US	50000
+#define EXYNOS9810_DSIM_READ_TIMEOUT_US		100000
+#define EXYNOS9810_DSIM_RX_FIFO_MAX_DEPTH	64
+#define EXYNOS9810_DSIM_READ_RETRIES		5
+#define EXYNOS9810_DSIM_RX_ERROR_MASK		0x3f3f
+
+#define EXYNOS9810_STAR_DEFAULT_BRIGHTNESS	128
 
 /* Values used by the Exynos9810 HWC S3CFB_POWER_MODE ABI. */
 #define EXYNOS9810_DISP_PWR_OFF			0U
@@ -132,8 +146,12 @@
 #define EXYNOS9810_DISP_PWR_NORMAL		2U
 #define EXYNOS9810_DISP_PWR_DOZE_SUSPEND	3U
 
-static const u8 exynos9810_panel_key_enable[] = { 0x9f, 0xa5, 0xa5 };
-static const u8 exynos9810_panel_key_disable[] = { 0x9f, 0x5a, 0x5a };
+static const u8 exynos9810_panel_key1_enable[] = { 0x9f, 0xa5, 0xa5 };
+static const u8 exynos9810_panel_key1_disable[] = { 0x9f, 0x5a, 0x5a };
+static const u8 exynos9810_panel_key2_enable[] = { 0xf0, 0x5a, 0x5a };
+static const u8 exynos9810_panel_key2_disable[] = { 0xf0, 0xa5, 0xa5 };
+static const u8 exynos9810_panel_key3_enable[] = { 0xfc, 0x5a, 0x5a };
+static const u8 exynos9810_panel_key3_disable[] = { 0xfc, 0xa5, 0xa5 };
 
 enum exynos9810_bootfb_window_state {
 	EXYNOS9810_WIN_DISABLED = 0,
@@ -414,6 +432,9 @@ struct exynos9810_bootfb {
 	void __iomem *dpp_g0;
 	void __iomem *idma_g0;
 	void __iomem *dsim;
+	struct backlight_device *backlight;
+	struct exynos9810_star_panel panel;
+	unsigned int panel_brightness;
 	u32 *shadow;
 	size_t screen_size;
 	u32 width;
@@ -1955,47 +1976,540 @@ exynos9810_bootfb_dsim_wait_idle(struct exynos9810_bootfb *bootfb)
 }
 
 static int
-exynos9810_bootfb_dsim_write_key(struct exynos9810_bootfb *bootfb,
-				 const u8 key[3])
+exynos9810_bootfb_dsim_write_header(struct exynos9810_bootfb *bootfb,
+				    u8 type, u8 data0, u8 data1,
+				    bool bus_turnaround)
 {
 	u32 header;
-	u32 payload;
 	int ret;
 
 	ret = exynos9810_bootfb_dsim_wait_idle(bootfb);
 	if (ret)
 		return ret;
 
-	payload = key[0] | (key[1] << 8) | (key[2] << 16);
-	header = MIPI_DSI_DCS_LONG_WRITE |
-		 EXYNOS9810_DSIM_HEADER_DATA0(3);
+	header = type | EXYNOS9810_DSIM_HEADER_DATA0(data0) |
+		 EXYNOS9810_DSIM_HEADER_DATA1(data1);
+	if (bus_turnaround)
+		header |= EXYNOS9810_DSIM_HEADER_BTA;
 
 	writel(EXYNOS9810_DSIM_INTSRC_PH_EMPTY,
 	       bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
-	writel(payload, bootfb->dsim + EXYNOS9810_DSIM_PAYLOAD);
 	writel(header, bootfb->dsim + EXYNOS9810_DSIM_PKTHDR);
 
 	return exynos9810_bootfb_dsim_wait_idle(bootfb);
 }
 
 static int
-exynos9810_bootfb_dsim_write_short(struct exynos9810_bootfb *bootfb,
-				   u8 command)
+exynos9810_bootfb_dsim_write(struct exynos9810_bootfb *bootfb,
+			     const u8 *data, size_t len)
 {
+	size_t offset;
 	u32 header;
 	int ret;
+
+	if (!data || !len || len > U16_MAX)
+		return -EINVAL;
+
+	if (len == 1)
+		return exynos9810_bootfb_dsim_write_header(
+			bootfb, MIPI_DSI_DCS_SHORT_WRITE, data[0], 0, false);
 
 	ret = exynos9810_bootfb_dsim_wait_idle(bootfb);
 	if (ret)
 		return ret;
 
-	header = MIPI_DSI_DCS_SHORT_WRITE |
-		 EXYNOS9810_DSIM_HEADER_DATA0(command);
 	writel(EXYNOS9810_DSIM_INTSRC_PH_EMPTY,
 	       bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
+	for (offset = 0; offset < len; offset += sizeof(u32)) {
+		size_t count = min_t(size_t, sizeof(u32), len - offset);
+		u32 payload = 0;
+		size_t index;
+
+		for (index = 0; index < count; index++)
+			payload |= (u32)data[offset + index] << (index * 8);
+		writel(payload, bootfb->dsim + EXYNOS9810_DSIM_PAYLOAD);
+	}
+
+	header = MIPI_DSI_DCS_LONG_WRITE |
+		 EXYNOS9810_DSIM_HEADER_DATA0(len & 0xff) |
+		 EXYNOS9810_DSIM_HEADER_DATA1((len >> 8) & 0xff);
 	writel(header, bootfb->dsim + EXYNOS9810_DSIM_PKTHDR);
 
 	return exynos9810_bootfb_dsim_wait_idle(bootfb);
+}
+
+static int
+exynos9810_bootfb_dsim_write_gpara(struct exynos9810_bootfb *bootfb,
+				   u8 offset)
+{
+	return exynos9810_bootfb_dsim_write_header(
+		bootfb, MIPI_DSI_DCS_SHORT_WRITE_PARAM, 0xb0, offset, false);
+}
+
+static int
+exynos9810_bootfb_dsim_drain_rx(struct exynos9810_bootfb *bootfb)
+{
+	unsigned int depth;
+
+	for (depth = 0; depth < EXYNOS9810_DSIM_RX_FIFO_MAX_DEPTH; depth++) {
+		if (readl(bootfb->dsim + EXYNOS9810_DSIM_FIFOCTRL) &
+		    EXYNOS9810_DSIM_FIFO_EMPTY_RX)
+			return 0;
+		readl(bootfb->dsim + EXYNOS9810_DSIM_RXFIFO);
+	}
+
+	return -EOVERFLOW;
+}
+
+struct exynos9810_bootfb_dsim_read_trace {
+	u32 interrupt;
+	u32 fifoctrl;
+	u32 response;
+	u32 response_size;
+};
+
+static int
+exynos9810_bootfb_dsim_read(struct exynos9810_bootfb *bootfb, u8 command,
+			    u8 *buffer, size_t count,
+			    struct exynos9810_bootfb_dsim_read_trace *trace)
+{
+	u32 response_size;
+	u32 interrupt;
+	u32 payload;
+	u32 word;
+	unsigned int depth = 0;
+	unsigned int index;
+	unsigned int offset;
+	int response = -ENODATA;
+	int ret;
+
+	if (!buffer || !count || count > U16_MAX)
+		return -EINVAL;
+	if (trace)
+		*trace = (struct exynos9810_bootfb_dsim_read_trace) {};
+
+	ret = exynos9810_bootfb_dsim_drain_rx(bootfb);
+	if (ret)
+		return ret;
+
+	writel(EXYNOS9810_DSIM_INTSRC_RX_DATA_DONE,
+	       bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
+	ret = exynos9810_bootfb_dsim_write_header(
+		bootfb, MIPI_DSI_SET_MAXIMUM_RETURN_PACKET_SIZE,
+		count & 0xff, (count >> 8) & 0xff, false);
+	if (ret)
+		goto clear_interrupt;
+
+	ret = exynos9810_bootfb_dsim_write_header(
+		bootfb, MIPI_DSI_DCS_READ, command, 0, true);
+	if (ret)
+		goto clear_interrupt;
+
+	ret = readl_poll_timeout_atomic(
+		bootfb->dsim + EXYNOS9810_DSIM_INTSRC, interrupt,
+		interrupt & EXYNOS9810_DSIM_INTSRC_RX_DATA_DONE,
+		10, EXYNOS9810_DSIM_READ_TIMEOUT_US);
+	if (ret)
+		goto drain_fifo;
+
+	while (!(readl(bootfb->dsim + EXYNOS9810_DSIM_FIFOCTRL) &
+		 EXYNOS9810_DSIM_FIFO_EMPTY_RX)) {
+		if (depth >= EXYNOS9810_DSIM_RX_FIFO_MAX_DEPTH) {
+			ret = -EOVERFLOW;
+			goto clear_interrupt;
+		}
+		depth++;
+
+		word = readl(bootfb->dsim + EXYNOS9810_DSIM_RXFIFO);
+		if (trace &&
+		    (word & 0xff) != MIPI_DSI_RX_END_OF_TRANSMISSION)
+			trace->response = word;
+		switch (word & 0xff) {
+		case MIPI_DSI_RX_ACKNOWLEDGE_AND_ERROR_REPORT:
+			if ((word >> 8) & EXYNOS9810_DSIM_RX_ERROR_MASK) {
+				ret = -EIO;
+				goto drain_fifo;
+			}
+			break;
+		case MIPI_DSI_RX_END_OF_TRANSMISSION:
+			break;
+		case MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_1BYTE:
+		case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_1BYTE:
+			response_size = 1;
+			goto copy_short_response;
+		case MIPI_DSI_RX_DCS_SHORT_READ_RESPONSE_2BYTE:
+		case MIPI_DSI_RX_GENERIC_SHORT_READ_RESPONSE_2BYTE:
+			response_size = 2;
+copy_short_response:
+			if (trace)
+				trace->response_size = response_size;
+			if (response >= 0) {
+				ret = -EPROTO;
+				goto drain_fifo;
+			}
+			if (response_size > count) {
+				ret = -EMSGSIZE;
+				goto drain_fifo;
+			}
+			for (index = 0; index < response_size; index++)
+				buffer[index] = (word >> (8 + index * 8)) & 0xff;
+			response = response_size;
+			break;
+		case MIPI_DSI_RX_DCS_LONG_READ_RESPONSE:
+		case MIPI_DSI_RX_GENERIC_LONG_READ_RESPONSE:
+			if (response >= 0) {
+				ret = -EPROTO;
+				goto drain_fifo;
+			}
+			response_size = (word >> 8) & 0xffff;
+			if (trace)
+				trace->response_size = response_size;
+			for (offset = 0; offset < response_size;
+			     offset += sizeof(u32)) {
+				if (readl(bootfb->dsim +
+					  EXYNOS9810_DSIM_FIFOCTRL) &
+				    EXYNOS9810_DSIM_FIFO_EMPTY_RX) {
+					ret = -EPROTO;
+					goto clear_interrupt;
+				}
+				if (depth >=
+				    EXYNOS9810_DSIM_RX_FIFO_MAX_DEPTH) {
+					ret = -EPROTO;
+					goto clear_interrupt;
+				}
+				depth++;
+				payload = readl(bootfb->dsim +
+						EXYNOS9810_DSIM_RXFIFO);
+				if (response_size > count)
+					continue;
+				for (index = 0;
+				     index < min_t(u32, sizeof(u32),
+						   response_size - offset);
+				     index++)
+					buffer[offset + index] =
+						(payload >> (index * 8)) & 0xff;
+			}
+			if (response_size > count) {
+				ret = -EMSGSIZE;
+				goto drain_fifo;
+			}
+			response = response_size;
+			break;
+		default:
+			ret = -EPROTO;
+			goto drain_fifo;
+		}
+	}
+
+	ret = response;
+	goto clear_interrupt;
+
+drain_fifo:
+	exynos9810_bootfb_dsim_drain_rx(bootfb);
+clear_interrupt:
+	if (trace) {
+		trace->interrupt = readl(bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
+		trace->fifoctrl = readl(bootfb->dsim + EXYNOS9810_DSIM_FIFOCTRL);
+	}
+	writel(EXYNOS9810_DSIM_INTSRC_RX_DATA_DONE,
+	       bootfb->dsim + EXYNOS9810_DSIM_INTSRC);
+	return ret;
+}
+
+static int
+exynos9810_bootfb_dsim_read_panel(struct exynos9810_bootfb *bootfb,
+				  u8 command, u8 offset, u8 *buffer,
+				  size_t count)
+{
+	struct exynos9810_bootfb_dsim_read_trace trace = {};
+	int ret = -EIO;
+	int attempt;
+
+	for (attempt = 0; attempt < EXYNOS9810_DSIM_READ_RETRIES; attempt++) {
+		trace = (struct exynos9810_bootfb_dsim_read_trace) {};
+		if (offset) {
+			ret = exynos9810_bootfb_dsim_write_gpara(bootfb, offset);
+			if (ret)
+				continue;
+		}
+
+		ret = exynos9810_bootfb_dsim_read(bootfb, command, buffer, count, &trace);
+		if (ret == (int)count)
+			return ret;
+	}
+
+	dev_warn(bootfb->dev,
+		 "E981D: STAR panel 0x%02x+%u read failed: %d/%zu after %d attempts\n",
+		 command, offset, ret, count, EXYNOS9810_DSIM_READ_RETRIES);
+	dev_warn(bootfb->dev,
+		 "E981D: DSIM read rx=%#010x size=%u intsrc=%#010x fifo=%#010x\n",
+		 trace.response, trace.response_size, trace.interrupt,
+		 trace.fifoctrl);
+
+	return ret < 0 ? ret : -EIO;
+}
+
+static int
+exynos9810_bootfb_disable_calibration_keys(
+	struct exynos9810_bootfb *bootfb)
+{
+	int current_ret;
+	int ret = 0;
+
+	current_ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key3_disable,
+		ARRAY_SIZE(exynos9810_panel_key3_disable));
+	if (current_ret)
+		ret = current_ret;
+	current_ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_disable,
+		ARRAY_SIZE(exynos9810_panel_key2_disable));
+	if (!ret && current_ret)
+		ret = current_ret;
+	current_ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key1_disable,
+		ARRAY_SIZE(exynos9810_panel_key1_disable));
+	if (!ret && current_ret)
+		ret = current_ret;
+
+	return ret;
+}
+
+static int
+exynos9810_bootfb_calibrate_panel(struct exynos9810_bootfb *bootfb)
+{
+	u8 mtp[EXYNOS9810_STAR_MTP_LEN];
+	u8 elvss_temp;
+	int disable_ret;
+	int ret;
+
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key1_enable,
+		ARRAY_SIZE(exynos9810_panel_key1_enable));
+	if (ret)
+		goto disable_keys;
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_enable,
+		ARRAY_SIZE(exynos9810_panel_key2_enable));
+	if (ret)
+		goto disable_keys;
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key3_enable,
+		ARRAY_SIZE(exynos9810_panel_key3_enable));
+	if (ret)
+		goto disable_keys;
+
+	ret = exynos9810_bootfb_dsim_read_panel(bootfb, 0xc8, 0, mtp, sizeof(mtp));
+	if (ret < 0)
+		goto disable_keys;
+
+	ret = exynos9810_bootfb_dsim_read_panel(bootfb, 0xb5, 22, &elvss_temp, sizeof(elvss_temp));
+	if (ret < 0)
+		goto disable_keys;
+
+	ret = 0;
+disable_keys:
+	disable_ret = exynos9810_bootfb_disable_calibration_keys(bootfb);
+	if (!ret)
+		ret = disable_ret;
+	if (ret)
+		return ret;
+
+	return exynos9810_star_panel_calibrate(
+		&bootfb->panel, mtp, sizeof(mtp), elvss_temp);
+}
+
+static int
+exynos9810_bootfb_dsim_write_offset(struct exynos9810_bootfb *bootfb,
+				    u8 offset, const u8 *data,
+				    size_t len)
+{
+	int ret;
+
+	ret = exynos9810_bootfb_dsim_write_gpara(bootfb, offset);
+	if (ret)
+		return ret;
+
+	return exynos9810_bootfb_dsim_write(bootfb, data, len);
+}
+
+static int
+exynos9810_bootfb_write_brightness_locked(
+	struct exynos9810_bootfb *bootfb, unsigned int brightness)
+{
+	static const u8 acl_control[] = {
+		0xb4, 0x00, 0x44, 0x80, 0x65, 0x26, 0x00,
+	};
+	static const u8 acl_dim[] = { 0xb4, 0x20 };
+	static const u8 acl_off[] = { 0x55, 0x00 };
+	static const u8 irc_on[] = { 0xb8, 0x15 };
+	static const u8 poc_comp1[] = {
+		0xb1, 0x01, 0xaf, 0x54, 0x68, 0xcc,
+		0x78, 0x30, 0xcc, 0x64, 0xff,
+	};
+	static const u8 gamma_update[] = { 0xf7, 0x03 };
+	struct exynos9810_star_setting setting;
+	u8 gamma[EXYNOS9810_STAR_GAMMA_LEN + 1] = { 0xca };
+	u8 aor[] = { 0xb1, 0x00, 0x00 };
+	u8 tset[] = { 0xb5, 0x19, 0x00, 0x00 };
+	u8 elvss_temp[] = { 0xb5, bootfb->panel.elvss_temp };
+	u8 vgh_vint[] = { 0xf4, 0xeb, 0x23 };
+	u8 irc[] = {
+		0xb8, 0x25, 0x69, 0xca, 0x8c, 0x06, 0x45, 0x3c, 0x6f,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+	};
+	u8 poc_comp2[] = { 0xb8, 0x00, 0x00 };
+	int disable_ret;
+	unsigned int index;
+	int ret;
+
+	ret = exynos9810_star_panel_get_setting(
+		&bootfb->panel, brightness, &setting);
+	if (ret)
+		return ret;
+
+	memcpy(&gamma[1], setting.gamma, EXYNOS9810_STAR_GAMMA_LEN);
+	aor[1] = setting.aor[0];
+	aor[2] = setting.aor[1];
+	tset[2] = setting.mps;
+	tset[3] = setting.elvss;
+	for (index = 0; index < 3; index++) {
+		irc[9 + index * 3] = setting.irc[index];
+		irc[10 + index * 3] = setting.irc[index];
+		irc[11 + index * 3] = setting.irc[index];
+	}
+	poc_comp2[1] = setting.poc >> 8;
+	poc_comp2[2] = setting.poc;
+
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_enable,
+		ARRAY_SIZE(exynos9810_panel_key2_enable));
+	if (ret)
+		return ret;
+
+	ret = exynos9810_bootfb_dsim_write(bootfb, gamma, sizeof(gamma));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, aor, sizeof(aor));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, tset, sizeof(tset));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write_offset(
+		bootfb, 22, elvss_temp, sizeof(elvss_temp));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, vgh_vint,
+					     sizeof(vgh_vint));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, acl_control,
+					     sizeof(acl_control));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write_offset(
+		bootfb, 0x0f, acl_dim, sizeof(acl_dim));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, acl_off,
+					     sizeof(acl_off));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write_offset(
+		bootfb, 0x12, irc, sizeof(irc));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, irc_on,
+					     sizeof(irc_on));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write_offset(
+		bootfb, 0x06, poc_comp1, sizeof(poc_comp1));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write_offset(
+		bootfb, 0x53, poc_comp2, sizeof(poc_comp2));
+	if (ret)
+		goto disable_key;
+	ret = exynos9810_bootfb_dsim_write(bootfb, gamma_update,
+					     sizeof(gamma_update));
+
+disable_key:
+	disable_ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key2_disable,
+		ARRAY_SIZE(exynos9810_panel_key2_disable));
+	if (!ret)
+		ret = disable_ret;
+	if (!ret)
+		bootfb->panel_brightness = brightness;
+
+	return ret;
+}
+
+static int
+exynos9810_bootfb_backlight_update_status(struct backlight_device *backlight)
+{
+	struct exynos9810_bootfb *bootfb = bl_get_data(backlight);
+	unsigned int brightness = backlight->props.brightness;
+	int ret = 0;
+
+	mutex_lock(&bootfb->lock);
+	bootfb->panel_brightness = brightness;
+	if (bootfb->panel_enabled && !backlight_is_blank(backlight))
+		ret = exynos9810_bootfb_write_brightness_locked(
+			bootfb, brightness);
+	mutex_unlock(&bootfb->lock);
+
+	if (ret)
+		dev_warn_ratelimited(
+			bootfb->dev, "panel brightness %u update failed: %d\n",
+			brightness, ret);
+
+	return ret;
+}
+
+static int
+exynos9810_bootfb_backlight_get_brightness(
+	struct backlight_device *backlight)
+{
+	struct exynos9810_bootfb *bootfb = bl_get_data(backlight);
+
+	return bootfb->panel_brightness;
+}
+
+static const struct backlight_ops exynos9810_bootfb_backlight_ops = {
+	.update_status = exynos9810_bootfb_backlight_update_status,
+	.get_brightness = exynos9810_bootfb_backlight_get_brightness,
+};
+
+static int
+exynos9810_bootfb_register_backlight(struct exynos9810_bootfb *bootfb)
+{
+	struct backlight_properties properties = {
+		.type = BACKLIGHT_RAW,
+		.brightness = EXYNOS9810_STAR_DEFAULT_BRIGHTNESS,
+		.max_brightness = EXYNOS9810_STAR_MAX_BRIGHTNESS,
+		.scale = BACKLIGHT_SCALE_NON_LINEAR,
+	};
+
+	if (!bootfb->panel.calibrated)
+		return -ENODEV;
+
+	bootfb->panel_brightness = properties.brightness;
+	bootfb->backlight = devm_backlight_device_register(
+		bootfb->dev, "panel", bootfb->dev, bootfb,
+		&exynos9810_bootfb_backlight_ops, &properties);
+	if (IS_ERR(bootfb->backlight)) {
+		int ret = PTR_ERR(bootfb->backlight);
+
+		bootfb->backlight = NULL;
+		return ret;
+	}
+
+	dev_info(bootfb->dev,
+		 "E981D: calibrated STAR panel backlight registered\n");
+	return 0;
 }
 
 static int
@@ -2010,19 +2524,29 @@ exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
 	if (bootfb->panel_enabled == enabled)
 		return 0;
 
-	ret = exynos9810_bootfb_dsim_write_key(bootfb, exynos9810_panel_key_enable);
+	ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key1_enable,
+		ARRAY_SIZE(exynos9810_panel_key1_enable));
 	if (ret)
 		return ret;
 
-	ret = exynos9810_bootfb_dsim_write_short(bootfb, command);
-	disable_ret = exynos9810_bootfb_dsim_write_key(bootfb, exynos9810_panel_key_disable);
-	if (!ret) {
-		bootfb->panel_enabled = enabled;
-		dev_info(bootfb->dev, "E981D: panel display %s\n",
-			 enabled ? "on" : "off");
-	}
+	ret = exynos9810_bootfb_dsim_write(bootfb, &command, sizeof(command));
+	disable_ret = exynos9810_bootfb_dsim_write(
+		bootfb, exynos9810_panel_key1_disable,
+		ARRAY_SIZE(exynos9810_panel_key1_disable));
+	if (ret)
+		return ret;
 
-	return ret ? ret : disable_ret;
+	bootfb->panel_enabled = enabled;
+	dev_info(bootfb->dev, "E981D: panel display %s\n",
+		 enabled ? "on" : "off");
+	if (disable_ret)
+		return disable_ret;
+	if (enabled && bootfb->backlight)
+		ret = exynos9810_bootfb_write_brightness_locked(
+			bootfb, bootfb->panel_brightness);
+
+	return ret;
 }
 
 static void
@@ -3736,6 +4260,13 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 		goto release_info;
 	}
 
+	ret = exynos9810_bootfb_calibrate_panel(bootfb);
+	if (ret)
+		dev_warn(&pdev->dev,
+			 "STAR panel calibration failed: %d; "
+			 "bootloader brightness retained\n",
+			 ret);
+
 	ret = exynos9810_bootfb_setup_g0_irqs(bootfb, pdev);
 	if (ret)
 		goto release_info;
@@ -3834,6 +4365,14 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 				       exynos9810_bootfb_cleanup, bootfb);
 	if (ret)
 		return ret;
+
+	if (bootfb->panel.calibrated) {
+		ret = exynos9810_bootfb_register_backlight(bootfb);
+		if (ret)
+			dev_warn(&pdev->dev,
+				 "calibrated panel backlight unavailable: %d\n",
+				 ret);
+	}
 
 	bootfb->prepare_iommu_error =
 		exynos9810_bootfb_prepare_iommu_domain(bootfb);
