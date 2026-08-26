@@ -693,7 +693,8 @@ static void acpm_ipc_prepare_dvfs(struct device_node *node)
 		 ipc_channel.id, ipc_channel.owner, ipc_channel.type,
 		 ipc_channel.ap_poll, ipc_channel.ch.q_len,
 		 ipc_channel.ch.q_elem_size);
-	if (ipc_channel.ch.q_len < 2)
+	if (ipc_channel.type == TYPE_QUEUE &&
+	    ipc_channel.ch.q_len < 2)
 		dev_warn(acpm_ipc->dev,
 			 "DVFS channel %u has unusable queue length %u\n",
 			 ipc_channel.id, ipc_channel.ch.q_len);
@@ -796,6 +797,31 @@ int acpm_ipc_send_data(unsigned int channel_id, struct ipc_config *cfg)
 	channel = &acpm_ipc->channel[channel_id];
 
 	spin_lock(&channel->tx_lock);
+
+	if (channel->type == TYPE_BUFFER) {
+		if (cfg->indirection) {
+			spin_unlock(&channel->tx_lock);
+			return -EOPNOTSUPP;
+		}
+
+		if (++channel->seq_num == 64)
+			channel->seq_num = 1;
+
+		cfg->cmd[0] |= (channel->seq_num & 0x3f) <<
+			       ACPM_IPC_PROTOCOL_SEQ_NUM;
+		memcpy_align_4(channel->tx_ch.base, cfg->cmd,
+			       channel->tx_ch.size);
+
+		cfg->cmd[1] = 0;
+		cfg->cmd[2] = 0;
+		cfg->cmd[3] = 0;
+
+		/* Publish the buffer before ringing the ACPM doorbell. */
+		wmb();
+		apm_interrupt_gen(channel->id);
+		spin_unlock(&channel->tx_lock);
+		return 0;
+	}
 
 	front = __raw_readl(channel->tx_ch.front);
 	rear = __raw_readl(channel->tx_ch.rear);
