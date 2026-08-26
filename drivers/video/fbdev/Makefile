@@ -122,6 +122,11 @@ obj-$(CONFIG_FB_OF)               += offb.o
 obj-$(CONFIG_FB_SSD1307)	  += ssd1307fb.o
 obj-$(CONFIG_FB_SIMPLE)           += simplefb.o
 obj-$(CONFIG_FB_EXYNOS9810_BOOT)  += exynos9810-bootfb.o
+exynos9810-bootfb-y := exynos9810-bootfb-core.o \
+			 exynos9810-panel-dimming.o \
+			 exynos9810-star-panel.o
+
+CFLAGS_exynos9810-panel-dimming.o += -Wno-missing-prototypes
 
 # the test framebuffer is last
 obj-$(CONFIG_FB_VIRTUAL)          += vfb.o
