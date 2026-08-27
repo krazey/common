@@ -13,6 +13,17 @@ if SND_SOC_SAMSUNG
 
 source "sound/soc/samsung/abox/Kconfig"
 
+config SND_SOC_SAMSUNG_STAR_MADERA
+	tristate "Audio support for Exynos9810 Star devices"
+	depends on SOC_EXYNOS9810 && SND_SOC_SAMSUNG_ABOX
+	depends on MFD_CS47L92 && SPI_MASTER
+	select SND_SOC_CS47L92
+	help
+	  Enable the ABOX machine driver for Samsung Exynos9810 Star
+	  devices using a Cirrus Logic CS47L93 audio codec. The driver
+	  preserves the PCM device ordering used by the stock Android
+	  audio HAL.
+
 config SND_SAMSUNG_PCM
 	tristate "Samsung PCM interface support"
 
