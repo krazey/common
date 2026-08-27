@@ -20,9 +20,10 @@
 #define CLKS_NR_TOP		(CLK_DOUT_TOP_FSYS1_PCIE + 1)
 #define CLKS_NR_FSYS0		(CLK_GOUT_FSYS0_USB30DRD_CTRL + 1)
 #define CLKS_NR_FSYS1		(CLK_GOUT_FSYS1_PCIE_SLV + 1)
-#define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI3_PCLK + 1)
+#define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI1_PCLK + 1)
 #define CLKS_NR_CMGP		(CLK_GOUT_CMGP_USI3_PCLK + 1)
 #define CLKS_NR_DPU		(CLK_GOUT_DPU_SYSMMU_DPUD1_QCH + 1)
+#define CLKS_NR_AUD		(CLK_GOUT_AUD_CPU + 1)
 
 /* ---- CMU_TOP ---------------------------------------------------------- */
 
@@ -300,41 +301,249 @@ static const struct samsung_cmu_info dpu_cmu_info __initconst = {
 	.clk_name		= "dout_clkcmu_dpu_bus",
 };
 
+/* ---- CMU_AUD --------------------------------------------------------- */
+
+#define PLL_LOCKTIME_PLL_AUD				0x0000
+#define PLL_CON0_PLL_AUD				0x0120
+#define PLL_CON3_PLL_AUD				0x018c
+#define CLK_CON_MUX_MUX_CLK_AUD_UAIF0			0x1004
+#define CLK_CON_MUX_MUX_CLK_AUD_UAIF1			0x1008
+#define CLK_CON_MUX_MUX_CLK_AUD_UAIF2			0x100c
+#define CLK_CON_MUX_MUX_CLK_AUD_UAIF3			0x1010
+#define CLK_CON_DIV_DIV_CLK_AUD_AUDIF			0x1800
+#define CLK_CON_DIV_DIV_CLK_AUD_BUS			0x1804
+#define CLK_CON_DIV_DIV_CLK_AUD_BUSP			0x1808
+#define CLK_CON_DIV_DIV_CLK_AUD_DMIC			0x1818
+#define CLK_CON_DIV_DIV_CLK_AUD_DSIF			0x181c
+#define CLK_CON_DIV_DIV_CLK_AUD_UAIF0			0x1824
+#define CLK_CON_DIV_DIV_CLK_AUD_UAIF1			0x1828
+#define CLK_CON_DIV_DIV_CLK_AUD_UAIF2			0x182c
+#define CLK_CON_DIV_DIV_CLK_AUD_UAIF3			0x1830
+#define CLK_CON_GAT_AUD_CODEC_MCLK			0x2004
+#define CLK_CON_GAT_AUD_DMIC				0x2008
+#define CLK_CON_GAT_AUD_DSIF				0x2018
+#define CLK_CON_GAT_AUD_UAIF0				0x201c
+#define CLK_CON_GAT_AUD_UAIF1				0x2020
+#define CLK_CON_GAT_AUD_UAIF2				0x2024
+#define CLK_CON_GAT_AUD_UAIF3				0x2028
+#define CLK_CON_GAT_AUD_SYSMMU_PCLK			0x203c
+#define DMYQCH_CON_ABOX_CPU				0x3000
+#define DMYQCH_CON_DMIC					0x3008
+#define QCH_CON_ABOX_ACLK				0x3024
+#define QCH_CON_ABOX_BCLK0				0x3028
+#define QCH_CON_ABOX_BCLK1				0x302c
+#define QCH_CON_ABOX_BCLK2				0x3030
+#define QCH_CON_ABOX_BCLK3				0x3034
+#define QCH_CON_ABOX_BCLK_DSIF				0x3038
+#define QCH_CON_SYSMMU_AUD				0x3060
+
+static const unsigned long aud_clk_regs[] __initconst = {
+	PLL_LOCKTIME_PLL_AUD,
+	PLL_CON0_PLL_AUD,
+	PLL_CON3_PLL_AUD,
+	CLK_CON_MUX_MUX_CLK_AUD_UAIF0,
+	CLK_CON_MUX_MUX_CLK_AUD_UAIF1,
+	CLK_CON_MUX_MUX_CLK_AUD_UAIF2,
+	CLK_CON_MUX_MUX_CLK_AUD_UAIF3,
+	CLK_CON_DIV_DIV_CLK_AUD_AUDIF,
+	CLK_CON_DIV_DIV_CLK_AUD_BUS,
+	CLK_CON_DIV_DIV_CLK_AUD_BUSP,
+	CLK_CON_DIV_DIV_CLK_AUD_DMIC,
+	CLK_CON_DIV_DIV_CLK_AUD_DSIF,
+	CLK_CON_DIV_DIV_CLK_AUD_UAIF0,
+	CLK_CON_DIV_DIV_CLK_AUD_UAIF1,
+	CLK_CON_DIV_DIV_CLK_AUD_UAIF2,
+	CLK_CON_DIV_DIV_CLK_AUD_UAIF3,
+	CLK_CON_GAT_AUD_CODEC_MCLK,
+	CLK_CON_GAT_AUD_DMIC,
+	CLK_CON_GAT_AUD_DSIF,
+	CLK_CON_GAT_AUD_UAIF0,
+	CLK_CON_GAT_AUD_UAIF1,
+	CLK_CON_GAT_AUD_UAIF2,
+	CLK_CON_GAT_AUD_UAIF3,
+	CLK_CON_GAT_AUD_SYSMMU_PCLK,
+	DMYQCH_CON_ABOX_CPU,
+	DMYQCH_CON_DMIC,
+	QCH_CON_ABOX_ACLK,
+	QCH_CON_ABOX_BCLK0,
+	QCH_CON_ABOX_BCLK1,
+	QCH_CON_ABOX_BCLK2,
+	QCH_CON_ABOX_BCLK3,
+	QCH_CON_ABOX_BCLK_DSIF,
+	QCH_CON_SYSMMU_AUD,
+};
+
+/* Rates are the exact values requested by the stock ABOX driver. */
+static const struct samsung_pll_rate_table aud_pll_rates[] __initconst = {
+	{
+		.rate = 1179648040U,
+		.mdiv = 45,
+		.pdiv = 1,
+		.sdiv = 0,
+		.kdiv = 24319,
+	}, {
+		.rate = 1083801600U,
+		.mdiv = 42,
+		.pdiv = 1,
+		.sdiv = 0,
+		.kdiv = 0xaf47,
+	}, {
+	},
+};
+
+static const struct samsung_pll_clock aud_pll_clks[] __initconst = {
+	PLL_KDIV(pll_1031x, CLK_FOUT_AUD_PLL, "fout_aud_pll", "oscclk",
+		  PLL_LOCKTIME_PLL_AUD, PLL_CON0_PLL_AUD, 0x6c, 29,
+		  aud_pll_rates),
+};
+
+static const struct samsung_fixed_rate_clock aud_fixed_clks[] __initconst = {
+	FRATE(0, "ioclk_aud_uaif0", NULL, 0, 10 * MHZ),
+	FRATE(0, "ioclk_aud_uaif1", NULL, 0, 10 * MHZ),
+	FRATE(0, "ioclk_aud_uaif2", NULL, 0, 10 * MHZ),
+	FRATE(0, "ioclk_aud_uaif3", NULL, 0, 100 * MHZ),
+};
+
+PNAME(mout_aud_uaif0_p) = {
+	"dout_aud_uaif0", "ioclk_aud_uaif0"
+};
+
+PNAME(mout_aud_uaif1_p) = {
+	"dout_aud_uaif1", "ioclk_aud_uaif1"
+};
+
+PNAME(mout_aud_uaif2_p) = {
+	"dout_aud_uaif2", "ioclk_aud_uaif2"
+};
+
+PNAME(mout_aud_uaif3_p) = {
+	"dout_aud_uaif3", "ioclk_aud_uaif3"
+};
+
+static const struct samsung_mux_clock aud_mux_clks[] __initconst = {
+	MUX(CLK_MOUT_AUD_UAIF0, "mout_aud_uaif0", mout_aud_uaif0_p,
+	    CLK_CON_MUX_MUX_CLK_AUD_UAIF0, 0, 1),
+	MUX(CLK_MOUT_AUD_UAIF1, "mout_aud_uaif1", mout_aud_uaif1_p,
+	    CLK_CON_MUX_MUX_CLK_AUD_UAIF1, 0, 1),
+	MUX(CLK_MOUT_AUD_UAIF2, "mout_aud_uaif2", mout_aud_uaif2_p,
+	    CLK_CON_MUX_MUX_CLK_AUD_UAIF2, 0, 1),
+	MUX(CLK_MOUT_AUD_UAIF3, "mout_aud_uaif3", mout_aud_uaif3_p,
+	    CLK_CON_MUX_MUX_CLK_AUD_UAIF3, 0, 1),
+};
+
+static const struct samsung_div_clock aud_div_clks[] __initconst = {
+	DIV(CLK_DOUT_AUD_AUDIF, "dout_aud_audif", "fout_aud_pll",
+	    CLK_CON_DIV_DIV_CLK_AUD_AUDIF, 0, 9),
+	DIV(CLK_DOUT_AUD_BUS, "dout_aud_bus", "fout_aud_pll",
+	    CLK_CON_DIV_DIV_CLK_AUD_BUS, 0, 3),
+	DIV(CLK_DOUT_AUD_BUSP, "dout_aud_busp", "dout_aud_bus",
+	    CLK_CON_DIV_DIV_CLK_AUD_BUSP, 0, 2),
+	DIV(CLK_DOUT_AUD_DMIC, "dout_aud_dmic", "dout_aud_dsif",
+	    CLK_CON_DIV_DIV_CLK_AUD_DMIC, 0, 2),
+	DIV(CLK_DOUT_AUD_DSIF, "dout_aud_dsif", "dout_aud_audif",
+	    CLK_CON_DIV_DIV_CLK_AUD_DSIF, 0, 5),
+	DIV(CLK_DOUT_AUD_UAIF0, "dout_aud_uaif0", "dout_aud_audif",
+	    CLK_CON_DIV_DIV_CLK_AUD_UAIF0, 0, 9),
+	DIV(CLK_DOUT_AUD_UAIF1, "dout_aud_uaif1", "dout_aud_audif",
+	    CLK_CON_DIV_DIV_CLK_AUD_UAIF1, 0, 9),
+	DIV(CLK_DOUT_AUD_UAIF2, "dout_aud_uaif2", "dout_aud_audif",
+	    CLK_CON_DIV_DIV_CLK_AUD_UAIF2, 0, 9),
+	DIV(CLK_DOUT_AUD_UAIF3, "dout_aud_uaif3", "dout_aud_audif",
+	    CLK_CON_DIV_DIV_CLK_AUD_UAIF3, 0, 9),
+};
+
+static const struct samsung_gate_clock aud_gate_clks[] __initconst = {
+	GATE(CLK_GOUT_AUD_UAIF0, "gout_aud_uaif0", "mout_aud_uaif0",
+	     QCH_CON_ABOX_BCLK0, 1, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF1, "gout_aud_uaif1", "mout_aud_uaif1",
+	     QCH_CON_ABOX_BCLK1, 1, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF2, "gout_aud_uaif2", "mout_aud_uaif2",
+	     QCH_CON_ABOX_BCLK2, 1, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF3, "gout_aud_uaif3", "mout_aud_uaif3",
+	     QCH_CON_ABOX_BCLK3, 1, 0, 0),
+	GATE(CLK_GOUT_AUD_DSIF, "gout_aud_dsif", "dout_aud_dsif",
+	     QCH_CON_ABOX_BCLK_DSIF, 1, 0, 0),
+	GATE(CLK_GOUT_AUD_ABOX_ACLK, "gout_aud_abox_aclk",
+	     "dout_aud_bus", QCH_CON_ABOX_ACLK, 1,
+	     CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_AUD_SYSMMU_ACLK, "gout_aud_sysmmu_aclk",
+	     "dout_aud_bus", QCH_CON_SYSMMU_AUD, 1,
+	     CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_AUD_SYSMMU_PCLK, "gout_aud_sysmmu_pclk",
+	     "dout_aud_busp", CLK_CON_GAT_AUD_SYSMMU_PCLK, 21,
+	     CLK_IS_CRITICAL, 0),
+	GATE(CLK_GOUT_AUD_CODEC_MCLK, "gout_aud_codec_mclk",
+	     "dout_aud_audif", CLK_CON_GAT_AUD_CODEC_MCLK, 21, 0, 0),
+	GATE(CLK_GOUT_AUD_DMIC, "gout_aud_dmic", "dout_aud_dmic",
+	     DMYQCH_CON_DMIC, 1, 0, 0),
+	GATE(CLK_GOUT_AUD_CPU, "gout_aud_cpu", "dout_aud_bus",
+	     DMYQCH_CON_ABOX_CPU, 1, CLK_IS_CRITICAL, 0),
+};
+
+static const struct samsung_cmu_info aud_cmu_info __initconst = {
+	.pll_clks		= aud_pll_clks,
+	.nr_pll_clks		= ARRAY_SIZE(aud_pll_clks),
+	.fixed_clks		= aud_fixed_clks,
+	.nr_fixed_clks		= ARRAY_SIZE(aud_fixed_clks),
+	.mux_clks		= aud_mux_clks,
+	.nr_mux_clks		= ARRAY_SIZE(aud_mux_clks),
+	.div_clks		= aud_div_clks,
+	.nr_div_clks		= ARRAY_SIZE(aud_div_clks),
+	.gate_clks		= aud_gate_clks,
+	.nr_gate_clks		= ARRAY_SIZE(aud_gate_clks),
+	.nr_clk_ids		= CLKS_NR_AUD,
+	.clk_regs		= aud_clk_regs,
+	.nr_clk_regs		= ARRAY_SIZE(aud_clk_regs),
+	.clk_name		= "oscclk",
+};
+
 /* ---- CMU_PERIC0 -------------------------------------------------------- */
 
 #define PLL_CON0_MUX_CLKCMU_PERIC0_BUS_USER		0x0100
 #define PLL_CON0_MUX_CLKCMU_PERIC0_IP_USER		0x0120
 #define CLK_CON_DIV_DIV_CLK_PERIC0_UART_DBG		0x1800
+#define CLK_CON_DIV_DIV_CLK_PERIC0_USI01			0x1808
 #define CLK_CON_DIV_DIV_CLK_PERIC0_USI03			0x1810
 #define CLK_CON_GAT_GATE_PERIC0_UART_DBG			0x2008
+#define CLK_CON_GAT_GATE_CLK_PERIC0_USI01		0x2010
 #define CLK_CON_GAT_GATE_CLK_PERIC0_USI03		0x2018
 #define CLK_CON_GAT_GOUT_PERIC0_UART_DBG_RST		0x204c
+#define CLK_CON_GAT_GOUT_PERIC0_USI01_RST		0x205c
 #define CLK_CON_GAT_GOUT_PERIC0_USI03_RST		0x206c
 #define CLK_CON_GAT_GOUT_PERIC0_SYSREG_PCLK		0x2098
 #define CLK_CON_GAT_GOUT_PERIC0_UART_DBG_IPCLK		0x209c
 #define CLK_CON_GAT_GOUT_PERIC0_UART_DBG_PCLK		0x20a0
+#define CLK_CON_GAT_GOUT_PERIC0_USI01_IPCLK		0x20bc
+#define CLK_CON_GAT_GOUT_PERIC0_USI01_PCLK		0x20c0
 #define CLK_CON_GAT_GOUT_PERIC0_USI03_IPCLK		0x20dc
 #define CLK_CON_GAT_GOUT_PERIC0_USI03_PCLK		0x20e0
 #define QCH_CON_SYSREG_PERIC0				0x3014
 #define QCH_CON_UART_DBG					0x3018
+#define QCH_CON_USI01					0x3028
 #define QCH_CON_USI03					0x3038
 
 static const unsigned long peric0_clk_regs[] __initconst = {
 	PLL_CON0_MUX_CLKCMU_PERIC0_BUS_USER,
 	PLL_CON0_MUX_CLKCMU_PERIC0_IP_USER,
 	CLK_CON_DIV_DIV_CLK_PERIC0_UART_DBG,
+	CLK_CON_DIV_DIV_CLK_PERIC0_USI01,
 	CLK_CON_DIV_DIV_CLK_PERIC0_USI03,
 	CLK_CON_GAT_GATE_PERIC0_UART_DBG,
+	CLK_CON_GAT_GATE_CLK_PERIC0_USI01,
 	CLK_CON_GAT_GATE_CLK_PERIC0_USI03,
 	CLK_CON_GAT_GOUT_PERIC0_UART_DBG_RST,
+	CLK_CON_GAT_GOUT_PERIC0_USI01_RST,
 	CLK_CON_GAT_GOUT_PERIC0_USI03_RST,
 	CLK_CON_GAT_GOUT_PERIC0_SYSREG_PCLK,
 	CLK_CON_GAT_GOUT_PERIC0_UART_DBG_IPCLK,
 	CLK_CON_GAT_GOUT_PERIC0_UART_DBG_PCLK,
+	CLK_CON_GAT_GOUT_PERIC0_USI01_IPCLK,
+	CLK_CON_GAT_GOUT_PERIC0_USI01_PCLK,
 	CLK_CON_GAT_GOUT_PERIC0_USI03_IPCLK,
 	CLK_CON_GAT_GOUT_PERIC0_USI03_PCLK,
 	QCH_CON_SYSREG_PERIC0,
 	QCH_CON_UART_DBG,
+	QCH_CON_USI01,
 	QCH_CON_USI03,
 };
 
@@ -363,6 +572,9 @@ static const struct samsung_mux_clock peric0_mux_clks[] __initconst = {
 static const struct samsung_div_clock peric0_div_clks[] __initconst = {
 	DIV(CLK_DOUT_PERIC0_UART_DBG, "dout_peric0_uart_dbg",
 	    "gout_peric0_uart_dbg", CLK_CON_DIV_DIV_CLK_PERIC0_UART_DBG,
+	    0, 4),
+	DIV(CLK_DOUT_PERIC0_USI1, "dout_peric0_usi1",
+	    "gout_peric0_usi1", CLK_CON_DIV_DIV_CLK_PERIC0_USI01,
 	    0, 4),
 	DIV(CLK_DOUT_PERIC0_USI3, "dout_peric0_usi3",
 	    "gout_peric0_usi3", CLK_CON_DIV_DIV_CLK_PERIC0_USI03,
@@ -395,6 +607,26 @@ static const struct samsung_gate_clock peric0_gate_clks[] __initconst = {
 	     21, 0, 0),
 	GATE(CLK_GOUT_PERIC0_UART_DBG_IPCLK, "gout_peric0_uart_dbg_ipclk",
 	     "dout_peric0_uart_dbg", CLK_CON_GAT_GOUT_PERIC0_UART_DBG_IPCLK,
+	     21, 0, 0),
+	/* USI1 provides the SPI link used by the CS47L93 codec. */
+	GATE(0, "gout_peric0_usi1_qch_ignore", "mout_peric0_bus_user",
+	     QCH_CON_USI01, 2, CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_peric0_usi1_qch_mode",
+	     "gout_peric0_usi1_qch_ignore", QCH_CON_USI01,
+	     0, CLK_IS_CRITICAL, CLK_GATE_SET_TO_DISABLE),
+	GATE(CLK_GOUT_PERIC0_USI1_QCH, "gout_peric0_usi1_qch",
+	     "gout_peric0_usi1_qch_mode", QCH_CON_USI01, 1, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI1, "gout_peric0_usi1",
+	     "mout_peric0_ip_user", CLK_CON_GAT_GATE_CLK_PERIC0_USI01,
+	     21, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI1_RST, "gout_peric0_usi1_rst",
+	     "dout_peric0_usi1", CLK_CON_GAT_GOUT_PERIC0_USI01_RST,
+	     21, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI1_IPCLK, "gout_peric0_usi1_ipclk",
+	     "gout_peric0_usi1_rst", CLK_CON_GAT_GOUT_PERIC0_USI01_IPCLK,
+	     21, 0, 0),
+	GATE(CLK_GOUT_PERIC0_USI1_PCLK, "gout_peric0_usi1_pclk",
+	     "gout_peric0_usi1_qch", CLK_CON_GAT_GOUT_PERIC0_USI01_PCLK,
 	     21, 0, 0),
 	/* USI3 provides the HSI2C10 link used by the touchscreen. */
 	GATE(0, "gout_peric0_usi3_qch_ignore", "mout_peric0_bus_user",
@@ -560,6 +792,9 @@ static const struct of_device_id exynos9810_cmu_of_match[] = {
 	}, {
 		.compatible = "samsung,exynos9810-cmu-dpu",
 		.data = &dpu_cmu_info,
+	}, {
+		.compatible = "samsung,exynos9810-cmu-aud",
+		.data = &aud_cmu_info,
 	}, {
 		.compatible = "samsung,exynos9810-cmu-fsys0",
 		.data = &fsys0_cmu_info,
