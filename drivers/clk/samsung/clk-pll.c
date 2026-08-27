@@ -22,6 +22,7 @@ struct samsung_clk_pll {
 	struct clk_hw		hw;
 	void __iomem		*lock_reg;
 	void __iomem		*con_reg;
+	void __iomem		*kdiv_reg;
 	/* PLL enable control bit offset in @con_reg register */
 	unsigned short		enable_offs;
 	/* PLL lock status bit offset in @con_reg register */
@@ -1349,15 +1350,16 @@ static unsigned long samsung_pll1031x_recalc_rate(struct clk_hw *hw,
 						  unsigned long parent_rate)
 {
 	struct samsung_clk_pll *pll = to_clk_pll(hw);
-	u32 mdiv, pdiv, sdiv, kdiv, pll_con0, pll_con3;
-	u64 fvco = parent_rate;
+	u32 mdiv, pdiv, sdiv, pll_con0, pll_con3;
+	s32 kdiv;
+	s64 fvco = parent_rate;
 
 	pll_con0 = readl_relaxed(pll->con_reg);
-	pll_con3 = readl_relaxed(pll->con_reg + 0xc);
+	pll_con3 = readl_relaxed(pll->kdiv_reg);
 	mdiv = (pll_con0 >> PLL1031X_MDIV_SHIFT) & PLL1031X_MDIV_MASK;
 	pdiv = (pll_con0 >> PLL1031X_PDIV_SHIFT) & PLL1031X_PDIV_MASK;
 	sdiv = (pll_con0 >> PLL1031X_SDIV_SHIFT) & PLL1031X_SDIV_MASK;
-	kdiv = (pll_con3 & PLL1031X_KDIV_MASK);
+	kdiv = sign_extend32(pll_con3 & PLL1031X_KDIV_MASK, 15);
 
 	fvco *= (mdiv << PLL1031X_MDIV_SHIFT) + kdiv;
 	do_div(fvco, (pdiv << sdiv));
@@ -1373,10 +1375,11 @@ static bool samsung_pll1031x_mpk_change(u32 pll_con0, u32 pll_con3,
 
 	old_mdiv = (pll_con0 >> PLL1031X_MDIV_SHIFT) & PLL1031X_MDIV_MASK;
 	old_pdiv = (pll_con0 >> PLL1031X_PDIV_SHIFT) & PLL1031X_PDIV_MASK;
-	old_kdiv = (pll_con3 >> PLL1031X_KDIV_SHIFT) & PLL1031X_KDIV_MASK;
+	old_kdiv = (pll_con3 >> PLL1031X_KDIV_SHIFT) &
+		PLL1031X_KDIV_MASK;
 
 	return (old_mdiv != rate->mdiv || old_pdiv != rate->pdiv ||
-		old_kdiv != rate->kdiv);
+		old_kdiv != (rate->kdiv & PLL1031X_KDIV_MASK));
 }
 
 static int samsung_pll1031x_set_rate(struct clk_hw *hw, unsigned long drate,
@@ -1395,7 +1398,7 @@ static int samsung_pll1031x_set_rate(struct clk_hw *hw, unsigned long drate,
 	}
 
 	con0 = readl_relaxed(pll->con_reg);
-	con3 = readl_relaxed(pll->con_reg + 0xc);
+	con3 = readl_relaxed(pll->kdiv_reg);
 
 	if (!(samsung_pll1031x_mpk_change(con0, con3, rate))) {
 		/* If only s change, change just s value only */
@@ -1419,17 +1422,18 @@ static int samsung_pll1031x_set_rate(struct clk_hw *hw, unsigned long drate,
 		(rate->sdiv << PLL1031X_SDIV_SHIFT);
 
 	/* Set PLL K, MFR and MRR values. */
-	con3 = readl_relaxed(pll->con_reg + 0xc);
+	con3 = readl_relaxed(pll->kdiv_reg);
 	con3 &= ~((PLL1031X_KDIV_MASK << PLL1031X_KDIV_SHIFT) |
 		  (PLL1031X_MFR_MASK << PLL1031X_MFR_SHIFT) |
 		  (PLL1031X_MRR_MASK << PLL1031X_MRR_SHIFT));
-	con3 |= (rate->kdiv << PLL1031X_KDIV_SHIFT) |
+	con3 |= ((rate->kdiv & PLL1031X_KDIV_MASK) <<
+		 PLL1031X_KDIV_SHIFT) |
 		(rate->mfr << PLL1031X_MFR_SHIFT) |
 		(rate->mrr << PLL1031X_MRR_SHIFT);
 
 	/* Write configuration to PLL */
 	writel_relaxed(con0, pll->con_reg);
-	writel_relaxed(con3, pll->con_reg + 0xc);
+	writel_relaxed(con3, pll->kdiv_reg);
 
 	/* Wait for PLL lock if the PLL is enabled */
 	return samsung_pll_lock_wait(pll, BIT(pll->lock_offs));
@@ -1756,6 +1760,10 @@ static void __init _samsung_clk_register_pll(struct samsung_clk_provider *ctx,
 	pll->type = pll_clk->type;
 	pll->lock_reg = ctx->reg_base + pll_clk->lock_offset;
 	pll->con_reg = ctx->reg_base + pll_clk->con_offset;
+	pll->kdiv_reg = pll->con_reg +
+		(pll_clk->kdiv_offset ?: 0xc);
+	if (pll_clk->lock_status_offset)
+		pll->lock_offs = pll_clk->lock_status_offset;
 
 	ret = clk_hw_register(ctx->dev, &pll->hw);
 	if (ret) {

@@ -266,6 +266,8 @@ struct samsung_clk_reg_dump {
  * @parent_name: name of the parent clock
  * @flags: optional flags for basic clock
  * @con_offset: offset of the register for configuring the PLL
+ * @kdiv_offset: optional K-divider register offset from @con_offset
+ * @lock_status_offset: optional lock-status bit in @con_offset
  * @lock_offset: offset of the register for locking the PLL
  * @type: type of PLL to be registered
  * @rate_table: array of PLL settings for possible PLL rates
@@ -276,6 +278,8 @@ struct samsung_pll_clock {
 	const char		*parent_name;
 	unsigned long		flags;
 	int			con_offset;
+	int			kdiv_offset;
+	unsigned int		lock_status_offset;
 	int			lock_offset;
 	enum samsung_pll_type	type;
 	const struct samsung_pll_rate_table *rate_table;
@@ -296,6 +300,20 @@ struct samsung_pll_clock {
 #define PLL(_typ, _id, _name, _pname, _lock, _con, _rtable)	\
 	__PLL(_typ, _id, _name, _pname, CLK_GET_RATE_NOCACHE, _lock,	\
 	      _con, _rtable)
+
+#define PLL_KDIV(_typ, _id, _name, _pname, _lock, _con, _kdiv, _lock_bit, _rtable) \
+	{ \
+		.id		= _id, \
+		.type		= _typ, \
+		.name		= _name, \
+		.parent_name	= _pname, \
+		.flags		= CLK_GET_RATE_NOCACHE, \
+		.con_offset	= _con, \
+		.kdiv_offset	= _kdiv, \
+		.lock_status_offset = _lock_bit, \
+		.lock_offset	= _lock, \
+		.rate_table	= _rtable, \
+	}
 
 struct samsung_cpu_clock {
 	unsigned int	id;
