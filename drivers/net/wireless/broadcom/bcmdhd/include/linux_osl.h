@@ -321,7 +321,6 @@ extern uint64 osl_systztime_us(void);
 
 #if defined(CONFIG_SOC_EXYNOS9810) || defined(CONFIG_SOC_EXYNOS9820) || \
 	defined(CONFIG_SOC_EXYNOS9830) || defined(CONFIG_SOC_GS101)
-extern int pcie_ch_num;
 extern int exynos_pcie_l1_exit(int ch_num);
 #endif /* CONFIG_SOC_EXYNOS9810 || CONFIG_SOC_EXYNOS9820
 	* CONFIG_SOC_EXYNOS9830 || CONFIG_SOC_GS101
@@ -356,7 +355,7 @@ extern uint64 regs_addr;
 	SELECT_BUS_READ(osh, \
 		({ \
 			__typeof(*(r)) __osl_v = 0; \
-			exynos_pcie_l1_exit(pcie_ch_num); \
+			exynos_pcie_l1_exit(0); \
 			BCM_REFERENCE(osh);	\
 			switch (sizeof(*(r))) { \
 				case sizeof(uint8):	__osl_v = \
@@ -422,7 +421,7 @@ extern uint64 regs_addr;
 #define W_REG(osh, r, v) do { \
 	SELECT_BUS_WRITE(osh, \
 		({ \
-			exynos_pcie_l1_exit(pcie_ch_num); \
+			exynos_pcie_l1_exit(0); \
 			switch (sizeof(*(r))) { \
 				case sizeof(uint8):	writeb((uint8)(v), \
 						(volatile uint8*)(r)); break; \

@@ -15,6 +15,7 @@
 #include <linux/interrupt.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/exynos-pci-ctrl.h>
 #include <linux/init.h>
 #include <linux/mfd/syscon.h>
 #include <linux/mutex.h>
@@ -26,6 +27,7 @@
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
 #include <linux/sizes.h>
+#include <linux/spinlock.h>
 #include <linux/mod_devicetable.h>
 #include <linux/module.h>
 
@@ -59,6 +61,7 @@
 #define PCIE_ELBI_SLV_ARMISC		0x120
 #define PCIE_ELBI_SLV_DBI_ENABLE	BIT(21)
 
+#define EXYNOS9810_PCIE_APP_REQ_EXIT_L1	0x040
 #define EXYNOS9810_PCIE_REQ_EXIT_L1_MODE	0x0f4
 #define EXYNOS9810_PCIE_REQ_EXIT_L1	BIT(0)
 #define EXYNOS9810_PCIE_L1_NAK_CONTROL	BIT(4)
@@ -151,6 +154,8 @@ struct exynos_pcie {
 	bool				link_deferred;
 	bool				link_active;
 	bool				irq_enabled;
+	u32				l1ss_ctrl_state;
+	spinlock_t			l1_exit_lock;
 };
 
 static void exynos_pcie_enable_irq_pulse(struct exynos_pcie *ep);
@@ -895,6 +900,166 @@ int exynos9810_pcie_wlan_power(bool on)
 }
 EXPORT_SYMBOL_GPL(exynos9810_pcie_wlan_power);
 
+static struct pci_dev *exynos9810_pcie_get_endpoint(
+		struct exynos_pcie *ep, struct pci_dev **root_port)
+{
+	struct pci_bus *root_bus = ep->pci.pp.bridge->bus;
+	struct pci_dev *endpoint;
+
+	*root_port = pci_get_slot(root_bus, PCI_DEVFN(0, 0));
+	if (!*root_port)
+		return NULL;
+
+	if (!(*root_port)->subordinate) {
+		pci_dev_put(*root_port);
+		*root_port = NULL;
+		return NULL;
+	}
+
+	endpoint = pci_get_slot((*root_port)->subordinate,
+				PCI_DEVFN(0, 0));
+	if (!endpoint) {
+		pci_dev_put(*root_port);
+		*root_port = NULL;
+	}
+
+	return endpoint;
+}
+
+static int exynos9810_pcie_set_l1_aspm(struct pci_dev *root_port,
+		struct pci_dev *endpoint, bool enable)
+{
+	int ret;
+
+	if (enable) {
+		ret = pcie_capability_clear_and_set_word(root_port,
+				PCI_EXP_LNKCTL, PCI_EXP_LNKCTL_ASPMC,
+				PCI_EXP_LNKCTL_CCC | PCI_EXP_LNKCTL_ASPM_L1);
+		if (ret)
+			return ret;
+
+		ret = pcie_capability_clear_and_set_word(endpoint,
+				PCI_EXP_LNKCTL, PCI_EXP_LNKCTL_ASPMC,
+				PCI_EXP_LNKCTL_ASPM_L1);
+		if (ret)
+			pcie_capability_clear_word(root_port,
+						  PCI_EXP_LNKCTL,
+						  PCI_EXP_LNKCTL_ASPMC);
+		return ret;
+	}
+
+	ret = pcie_capability_clear_word(endpoint, PCI_EXP_LNKCTL,
+					 PCI_EXP_LNKCTL_ASPMC);
+	if (ret)
+		return ret;
+
+	return pcie_capability_clear_word(root_port, PCI_EXP_LNKCTL,
+					  PCI_EXP_LNKCTL_ASPMC);
+}
+
+int exynos_pcie_l1ss_ctrl(int enable, int id)
+{
+	struct exynos_pcie *ep;
+	struct pci_dev *root_port = NULL;
+	struct pci_dev *endpoint = NULL;
+	u32 old_state;
+	int ret = 0;
+
+	if (!id)
+		return -EINVAL;
+
+	mutex_lock(&exynos9810_wlan_pcie_lock);
+	ep = exynos9810_wlan_pcie;
+	if (!ep) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	old_state = ep->l1ss_ctrl_state;
+	if (enable)
+		ep->l1ss_ctrl_state &= ~id;
+	else
+		ep->l1ss_ctrl_state |= id;
+
+	if (!ep->link_active) {
+		ret = -ENOLINK;
+		goto out_unlock;
+	}
+
+	if (!!old_state == !!ep->l1ss_ctrl_state)
+		goto out_unlock;
+
+	endpoint = exynos9810_pcie_get_endpoint(ep, &root_port);
+	if (!endpoint) {
+		ret = -ENODEV;
+		goto out_unlock;
+	}
+
+	ret = exynos9810_pcie_set_l1_aspm(root_port, endpoint,
+					      !ep->l1ss_ctrl_state);
+	if (ret)
+		dev_err(ep->pci.dev, "failed to update WLAN L1 ASPM: %d\n",
+			ret);
+
+	pci_dev_put(endpoint);
+	pci_dev_put(root_port);
+out_unlock:
+	mutex_unlock(&exynos9810_wlan_pcie_lock);
+	return ret;
+}
+EXPORT_SYMBOL(exynos_pcie_l1ss_ctrl);
+
+int exynos_pcie_l1_exit(int ch_num)
+{
+	struct exynos_pcie *ep;
+	void __iomem *elbi;
+	unsigned long flags;
+	unsigned int count;
+	u32 val;
+	int ret = 0;
+
+	if (ch_num)
+		return -EINVAL;
+
+	ep = READ_ONCE(exynos9810_wlan_pcie);
+	if (!ep || !READ_ONCE(ep->link_active) ||
+	    READ_ONCE(ep->l1ss_ctrl_state))
+		return 0;
+
+	elbi = ep->pci.elbi_base;
+	spin_lock_irqsave(&ep->l1_exit_lock, flags);
+
+	exynos_pcie_writel(elbi, 1, EXYNOS9810_PCIE_APP_REQ_EXIT_L1);
+
+	val = exynos_pcie_readl(elbi, EXYNOS9810_PCIE_REQ_EXIT_L1_MODE);
+	val &= ~EXYNOS9810_PCIE_REQ_EXIT_L1;
+	exynos_pcie_writel(elbi, val, EXYNOS9810_PCIE_REQ_EXIT_L1_MODE);
+
+	for (count = 0; count < 300; count++) {
+		val = exynos_pcie_readl(elbi, PCIE_ELBI_RDLH_LINKUP);
+		val &= GENMASK(4, 0);
+		if (val == 0x11)
+			break;
+		udelay(10);
+	}
+
+	if (count == 300) {
+		dev_err_ratelimited(ep->pci.dev,
+				    "failed to exit PCIe L1, LTSSM=0x%x\n",
+				    val);
+		ret = -EPIPE;
+	}
+
+	val = exynos_pcie_readl(elbi, EXYNOS9810_PCIE_REQ_EXIT_L1_MODE);
+	val |= EXYNOS9810_PCIE_REQ_EXIT_L1;
+	exynos_pcie_writel(elbi, val, EXYNOS9810_PCIE_REQ_EXIT_L1_MODE);
+	exynos_pcie_writel(elbi, 0, EXYNOS9810_PCIE_APP_REQ_EXIT_L1);
+
+	spin_unlock_irqrestore(&ep->l1_exit_lock, flags);
+	return ret;
+}
+EXPORT_SYMBOL(exynos_pcie_l1_exit);
+
 static int exynos_pcie_start_link(struct dw_pcie *pci)
 {
 	struct exynos_pcie *ep = to_exynos_pcie(pci);
@@ -1218,6 +1383,7 @@ static int exynos_pcie_probe(struct platform_device *pdev)
 	if (!ep)
 		return -ENOMEM;
 
+	spin_lock_init(&ep->l1_exit_lock);
 	ep->data = of_device_get_match_data(dev);
 	if (!ep->data)
 		return -EINVAL;
