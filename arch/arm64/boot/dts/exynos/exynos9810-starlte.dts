@@ -8,6 +8,7 @@
 
 /dts-v1/;
 #include "exynos9810.dtsi"
+#include "exynos9810-abox.dtsi"
 #include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
 #include <dt-bindings/mux/maxim,max77705.h>
@@ -123,7 +124,18 @@ firmware_class.path=/vendor/firmware bootconfig";
 		};
 
 		memory@f0000000 {
-			reg = <0x0 0xf0000000 0xed10000>;
+			reg = <0x0 0xf0000000 0xb200000>;
+			no-map;
+		};
+
+		abox_rmem: audio@fb200000 {
+			compatible = "exynos,abox_rmem";
+			reg = <0x0 0xfb200000 0x2800000>;
+			no-map;
+		};
+
+		memory@fda00000 {
+			reg = <0x0 0xfda00000 0x1310000>;
 			no-map;
 		};
 
@@ -207,6 +219,13 @@ firmware_class.path=/vendor/firmware bootconfig";
 		stride = <(1440 * 4)>;
 		width-mm = <64>;
 		height-mm = <132>;
+	};
+};
+
+&abox {
+	abox_debug: debug {
+		compatible = "samsung,abox-debug";
+		memory-region = <&abox_rmem>;
 	};
 };
 
