@@ -30,4 +30,12 @@ properties:
         enum: [0, 1, 2, 3]
         default: 0
 
+      samsung,spi-chip-select-mode:
+        description: |
+          Select how the controller drives the native chip-select signal.
+          A value of 0 selects manual chip-select control and a value of 1
+          selects the controller's automatic chip-select control.
+        $ref: /schemas/types.yaml#/definitions/uint32
+        enum: [0, 1]
+
 additionalProperties: true
