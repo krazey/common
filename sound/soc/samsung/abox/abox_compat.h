@@ -7,6 +7,7 @@
 #include <linux/notifier.h>
 #include <linux/regmap.h>
 #include <linux/soc/samsung/exynos-pmu.h>
+#include <linux/shm_ipc.h>
 #include <linux/types.h>
 
 enum modem_event {
@@ -27,36 +28,6 @@ struct itmon_notifier {
 
 static inline void itmon_notifier_chain_register(struct notifier_block *nb)
 {
-}
-
-static inline void __iomem *shm_get_vss_region(void)
-{
-	return NULL;
-}
-
-static inline unsigned long shm_get_vss_base(void)
-{
-	return 0;
-}
-
-static inline u32 shm_get_vss_size(void)
-{
-	return 0;
-}
-
-static inline void __iomem *shm_get_vparam_region(void)
-{
-	return NULL;
-}
-
-static inline unsigned long shm_get_vparam_base(void)
-{
-	return 0;
-}
-
-static inline u32 shm_get_vparam_size(void)
-{
-	return 0;
 }
 
 static inline int exynos_pmu_read(unsigned int offset, unsigned int *value)

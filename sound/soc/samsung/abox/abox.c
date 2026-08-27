@@ -263,9 +263,13 @@ void *abox_addr_to_kernel_addr(struct abox_data *data, unsigned int addr)
 		ret = data->dram_base + (addr - IOVA_DRAM_FIRMWARE);
 	else if (addr >= IOVA_IVA_FIRMWARE && addr < IOVA_VSS_FIRMWARE)
 		ret = data->iva_base + (addr - IOVA_IVA_FIRMWARE);
-	else if (addr >= IOVA_VSS_FIRMWARE && addr <  IOVA_DUMP_BUFFER)
-		ret = phys_to_virt(shm_get_vss_base() +
-				(addr - IOVA_VSS_FIRMWARE));
+	else if (addr >= IOVA_VSS_FIRMWARE &&
+		 addr < IOVA_VSS_FIRMWARE + shm_get_vss_size())
+		ret = shm_get_vss_region() + (addr - IOVA_VSS_FIRMWARE);
+	else if (addr >= IOVA_VSS_PARAMETER &&
+		 addr < IOVA_VSS_PARAMETER + shm_get_vparam_size())
+		ret = shm_get_vparam_region() +
+				(addr - IOVA_VSS_PARAMETER);
 	else if (addr >= IOVA_DUMP_BUFFER)
 		ret = data->dump_base + (addr - IOVA_DUMP_BUFFER);
 	else
@@ -5195,7 +5199,7 @@ static void abox_download_extra_firmware(struct abox_data *data)
 			size = DRAM_FIRMWARE_SIZE;
 			break;
 		case 2:
-			base = phys_to_virt(shm_get_vss_base());
+			base = shm_get_vss_region();
 			size = shm_get_vss_size();
 			break;
 		default:
@@ -6097,6 +6101,11 @@ static int samsung_abox_probe(struct platform_device *pdev)
 
 	dev_info(dev, "%s\n", __func__);
 
+	if (!shm_get_vss_base() || !shm_get_vss_size() ||
+	    !shm_get_vparam_base() || !shm_get_vparam_size())
+		return dev_err_probe(dev, -EPROBE_DEFER,
+				"VSS shared memory is not ready\n");
+
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
@@ -6187,8 +6196,12 @@ static int samsung_abox_probe(struct platform_device *pdev)
 		return PTR_ERR(data->dram_base);
 	}
 	dev_info(dev, "%s(%#x) alloc\n", "dram firmware", DRAM_FIRMWARE_SIZE);
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_DRAM_FIRMWARE, data->dram_base_phys,
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_DRAM_FIRMWARE,
+				    data->dram_base_phys,
 			DRAM_FIRMWARE_SIZE, 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map DRAM firmware\n");
 
 	data->iva_base = dmam_alloc_coherent(dev, IVA_FIRMWARE_SIZE,
 			&data->iva_base_phys, GFP_KERNEL);
@@ -6198,22 +6211,38 @@ static int samsung_abox_probe(struct platform_device *pdev)
 		return PTR_ERR(data->iva_base);
 	}
 	dev_info(dev, "%s(%#x) alloc\n", "iva firmware", IVA_FIRMWARE_SIZE);
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_IVA_FIRMWARE, data->iva_base_phys,
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_IVA_FIRMWARE,
+				    data->iva_base_phys,
 			IVA_FIRMWARE_SIZE, 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map IVA firmware\n");
 
 	paddr = shm_get_vss_base();
 	dev_info(dev, "%s(%#x) alloc\n", "vss firmware", shm_get_vss_size());
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_FIRMWARE, paddr,
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_FIRMWARE,
+				    paddr,
 			shm_get_vss_size(), 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map VSS firmware\n");
 
 	paddr = shm_get_vparam_base();
 	dev_info(dev, "%s(%#x) alloc\n", "vss parameter",
 			shm_get_vparam_size());
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_PARAMETER, paddr,
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_PARAMETER,
+				    paddr,
 			shm_get_vparam_size(), 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map VSS parameters\n");
 
-	abox_iommu_map_legacy(data->iommu_domain, 0x10000000, 0x10000000,
+	ret = abox_iommu_map_legacy(data->iommu_domain, 0x10000000,
+				    0x10000000,
 			PAGE_SIZE, 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map ABOX mailbox page\n");
 	iommu_set_fault_handler(data->iommu_domain, abox_iommu_fault_handler,
 			data);
 	ret = iommu_attach_device(data->iommu_domain, dev);
