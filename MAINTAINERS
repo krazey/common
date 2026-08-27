@@ -15921,6 +15921,12 @@ S:	Maintained
 F:	Documentation/devicetree/bindings/media/i2c/maxim,max96717.yaml
 F:	drivers/media/i2c/max96717.c
 
+MAX98512 AUDIO AMPLIFIER DRIVER
+M:	Mathias Gluszczynski <admin@krazey.de>
+L:	linux-sound@vger.kernel.org
+S:	Maintained
+F:	sound/soc/codecs/max98512.*
+
 MAX9860 MONO AUDIO VOICE CODEC DRIVER
 M:	Peter Rosin <peda@lysator.liu.se>
 L:	linux-sound@vger.kernel.org
