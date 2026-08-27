@@ -422,7 +422,7 @@ static int star_init_links(struct platform_device *pdev,
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	struct device_node *abox, *codec, *dsif;
+	struct device_node *abox, *codec, *speaker_amp, *dsif;
 	struct device_node *rdma[STAR_NUM_RDMA];
 	struct device_node *wdma[STAR_NUM_WDMA];
 	struct device_node *uaif[STAR_NUM_UAIF];
@@ -431,8 +431,10 @@ static int star_init_links(struct platform_device *pdev,
 
 	abox = star_parse_phandle(dev, np, "samsung,abox", 0);
 	codec = star_parse_phandle(dev, np, "samsung,codec", 0);
+	speaker_amp = star_parse_phandle(dev, np, "samsung,codec", 1);
 	dsif = star_parse_phandle(dev, np, "samsung,dsif", 0);
-	if (IS_ERR(abox) || IS_ERR(codec) || IS_ERR(dsif))
+	if (IS_ERR(abox) || IS_ERR(codec) || IS_ERR(speaker_amp) ||
+	    IS_ERR(dsif))
 		return -EINVAL;
 
 	for (i = 0; i < STAR_NUM_RDMA; i++) {
@@ -462,8 +464,9 @@ static int star_init_links(struct platform_device *pdev,
 	priv->links[index].init = star_uaif0_init;
 	priv->links[index++].ops = &star_uaif0_ops;
 
-	star_init_be(priv, index++, "UAIF1", uaif[1], "UAIF1", NULL,
-			NULL, SND_SOC_DAIFMT_I2S, true, true);
+	star_init_be(priv, index++, "UAIF1", uaif[1], "UAIF1",
+		     speaker_amp, "max98512-aif1", SND_SOC_DAIFMT_I2S,
+			true, true);
 
 	star_init_be(priv, index, "UAIF2", uaif[2], "UAIF2", codec,
 			"cs47l92-aif3", SND_SOC_DAIFMT_I2S, true, true);
