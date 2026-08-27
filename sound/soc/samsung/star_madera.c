@@ -46,6 +46,8 @@ struct star_madera {
 	struct snd_soc_dai_link_component platforms[STAR_NUM_LINKS];
 	struct snd_soc_codec_conf codec_conf[STAR_NUM_ABOX_COMPONENTS];
 	struct regmap *pmu;
+	unsigned int fll2_ref_rate;
+	unsigned int async_rate;
 };
 
 static const char * const star_rdma_names[STAR_NUM_RDMA] = {
@@ -173,36 +175,75 @@ static int star_uaif0_hw_params(struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
-	struct snd_soc_component *component;
-	unsigned int async_rate;
-	unsigned int ref_rate;
-	int ret;
+	struct star_madera *priv = snd_soc_card_get_drvdata(rtd->card);
 
-	component = snd_soc_rtd_to_codec(rtd, 0)->component;
-	async_rate = params_rate(params) % 8000 ? 90316800 :
+	priv->async_rate = params_rate(params) % 8000 ? 90316800 :
 			STAR_SYSCLK_RATE;
-	ref_rate = params_rate(params) * params_width(params) * 2;
+	priv->fll2_ref_rate = params_rate(params) *
+			params_width(params) * 2;
 
-	ret = snd_soc_component_set_sysclk(component,
-			MADERA_CLK_ASYNCCLK_1, MADERA_CLK_SRC_FLL2,
-			async_rate, SND_SOC_CLOCK_IN);
-	if (ret)
-		return ret;
-
-	return snd_soc_component_set_pll(component, MADERA_FLL2_REFCLK,
-			MADERA_FLL_SRC_AIF1BCLK, ref_rate, async_rate);
+	return 0;
 }
 
 static int star_uaif0_prepare(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_dai *cpu_dai = snd_soc_rtd_to_cpu(rtd, 0);
+	struct snd_soc_component *component = codec_dai->component;
+	struct star_madera *priv = snd_soc_card_get_drvdata(rtd->card);
+	int ret;
 
-	return snd_soc_dai_set_tristate(snd_soc_rtd_to_cpu(rtd, 0), 0);
+	ret = snd_soc_dai_set_tristate(cpu_dai, 0);
+	if (ret)
+		return ret;
+
+	ret = snd_soc_component_set_sysclk(component,
+					   MADERA_CLK_ASYNCCLK_1, MADERA_CLK_SRC_FLL2,
+					   priv->async_rate, SND_SOC_CLOCK_IN);
+	if (ret)
+		goto err_tristate;
+
+	ret = snd_soc_component_set_pll(component, MADERA_FLL2_REFCLK,
+					MADERA_FLL_SRC_AIF1BCLK, priv->fll2_ref_rate,
+					priv->async_rate);
+	if (ret)
+		goto err_tristate;
+
+	return 0;
+
+err_tristate:
+	snd_soc_dai_set_tristate(cpu_dai, 1);
+	return ret;
 }
 
 static void star_uaif0_shutdown(struct snd_pcm_substream *substream)
 {
 	struct snd_soc_pcm_runtime *rtd = snd_soc_substream_to_rtd(substream);
+	struct snd_soc_dai *codec_dai = snd_soc_rtd_to_codec(rtd, 0);
+	struct snd_soc_component *component = codec_dai->component;
+	bool playback_active;
+	bool capture_active;
+	int ret;
+
+	playback_active = snd_soc_dai_stream_active(codec_dai,
+						    SNDRV_PCM_STREAM_PLAYBACK);
+	capture_active = snd_soc_dai_stream_active(codec_dai,
+						   SNDRV_PCM_STREAM_CAPTURE);
+
+	if (!playback_active && !capture_active &&
+	    !snd_soc_component_active(component)) {
+		ret = snd_soc_component_set_sysclk(component,
+						   MADERA_CLK_ASYNCCLK_1, 0, 0, 0);
+		if (ret)
+			dev_warn(rtd->dev,
+				 "failed to stop ASYNCCLK: %d\n", ret);
+
+		ret = snd_soc_component_set_pll(component,
+						MADERA_FLL2_REFCLK, 0, 0, 0);
+		if (ret)
+			dev_warn(rtd->dev, "failed to stop FLL2: %d\n", ret);
+	}
 
 	snd_soc_dai_set_tristate(snd_soc_rtd_to_cpu(rtd, 0), 1);
 }
