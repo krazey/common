@@ -7,6 +7,13 @@ menuconfig SOC_SAMSUNG
 
 if SOC_SAMSUNG
 
+config SOC_EXYNOS9810
+	bool "Samsung Exynos9810 SoC support"
+	depends on ARM64 && ARCH_EXYNOS
+	help
+	  Enable SoC-specific support required by Samsung's Exynos9810
+	  platform drivers.
+
 # There is no need to enable these drivers for ARMv8
 config EXYNOS_ASV_ARM
 	bool "Exynos ASV ARMv7-specific driver extensions" if COMPILE_TEST

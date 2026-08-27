@@ -11,6 +11,8 @@ menuconfig SND_SOC_SAMSUNG
 
 if SND_SOC_SAMSUNG
 
+source "sound/soc/samsung/abox/Kconfig"
+
 config SND_SAMSUNG_PCM
 	tristate "Samsung PCM interface support"
 
