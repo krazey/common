@@ -544,7 +544,7 @@
 			spi_2: spi@10470000 {
 				compatible = "samsung,exynos8895-spi",
 					     "samsung,exynos850-spi";
-				reg = <0x10470000 0x100>;
+				reg = <0x10470000 0xc0>;
 				interrupts = <GIC_SPI 400 IRQ_TYPE_LEVEL_HIGH>;
 				clocks = <&cmu_peric0 CLK_GOUT_PERIC0_USI1_PCLK>,
 					 <&cmu_peric0 CLK_GOUT_PERIC0_USI1_IPCLK>;
