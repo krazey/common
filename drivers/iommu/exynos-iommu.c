@@ -722,6 +722,22 @@ static void sysmmu_tlb_invalidate_entry(struct sysmmu_drvdata *data,
 	spin_unlock_irqrestore(&data->lock, flags);
 }
 
+static void sysmmu_tlb_invalidate_all(struct sysmmu_drvdata *data)
+{
+	unsigned long flags;
+
+	spin_lock_irqsave(&data->lock, flags);
+	if (data->active) {
+		clk_enable(data->clk_master);
+		if (sysmmu_block(data)) {
+			__sysmmu_tlb_invalidate(data);
+			sysmmu_unblock(data);
+		}
+		clk_disable(data->clk_master);
+	}
+	spin_unlock_irqrestore(&data->lock, flags);
+}
+
 static const struct iommu_ops exynos_iommu_ops;
 
 static int exynos_sysmmu_probe(struct platform_device *pdev)
@@ -1292,6 +1308,18 @@ static void exynos_iommu_tlb_invalidate_entry(struct exynos_iommu_domain *domain
 	spin_unlock_irqrestore(&domain->lock, flags);
 }
 
+static void exynos_iommu_flush_iotlb_all(struct iommu_domain *iommu_domain)
+{
+	struct exynos_iommu_domain *domain = to_exynos_domain(iommu_domain);
+	struct sysmmu_drvdata *data;
+	unsigned long flags;
+
+	spin_lock_irqsave(&domain->lock, flags);
+	list_for_each_entry(data, &domain->clients, domain_node)
+		sysmmu_tlb_invalidate_all(data);
+	spin_unlock_irqrestore(&domain->lock, flags);
+}
+
 static size_t exynos_iommu_unmap(struct iommu_domain *iommu_domain,
 				 unsigned long l_iova, size_t size, size_t count,
 				 struct iommu_iotlb_gather *gather)
@@ -1484,6 +1512,7 @@ static const struct iommu_ops exynos_iommu_ops = {
 		.attach_dev	= exynos_iommu_attach_device,
 		.map_pages	= exynos_iommu_map,
 		.unmap_pages	= exynos_iommu_unmap,
+		.flush_iotlb_all = exynos_iommu_flush_iotlb_all,
 		.iova_to_phys	= exynos_iommu_iova_to_phys,
 		.free		= exynos_iommu_domain_free,
 	}
