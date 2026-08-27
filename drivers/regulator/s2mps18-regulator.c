@@ -8,6 +8,8 @@
 #include <soc/samsung/acpm_mfd.h>
 
 #define S2MPS18_PMIC_ADDR	0x01
+#define S2MPS18_L33CTRL		0x6a
+#define S2MPS18_L34CTRL		0x6b
 #define S2MPS18_L35CTRL		0x6c
 #define S2MPS18_L43CTRL		0x74
 #define S2MPS18_ENABLE_MASK	GENMASK(7, 6)
@@ -76,6 +78,35 @@ static const struct regulator_ops s2mps18_reg_ops = {
 };
 
 static const struct regulator_desc s2mps18_regulators[] = {
+	{
+		.name = "LDO33",
+		.of_match = "LDO33",
+		.id = 33,
+		.ops = &s2mps18_reg_ops,
+		.type = REGULATOR_VOLTAGE,
+		.owner = THIS_MODULE,
+		.min_uV = 700000,
+		.uV_step = 25000,
+		.n_voltages = 64,
+		.vsel_reg = S2MPS18_L33CTRL,
+		.vsel_mask = S2MPS18_VSEL_MASK,
+		.enable_reg = S2MPS18_L33CTRL,
+		.enable_mask = S2MPS18_ENABLE_MASK,
+	}, {
+		.name = "LDO34",
+		.of_match = "LDO34",
+		.id = 34,
+		.ops = &s2mps18_reg_ops,
+		.type = REGULATOR_VOLTAGE,
+		.owner = THIS_MODULE,
+		.min_uV = 700000,
+		.uV_step = 12500,
+		.n_voltages = 64,
+		.vsel_reg = S2MPS18_L34CTRL,
+		.vsel_mask = S2MPS18_VSEL_MASK,
+		.enable_reg = S2MPS18_L34CTRL,
+		.enable_mask = S2MPS18_ENABLE_MASK,
+	},
 	{
 		.name = "LDO35",
 		.of_match = "LDO35",
