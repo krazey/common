@@ -352,6 +352,22 @@ static int s3c64xx_prepare_dma(struct s3c64xx_spi_dma_data *dma,
 	return 0;
 }
 
+static bool s3c64xx_spi_use_auto_cs(struct spi_device *spi)
+{
+	struct s3c64xx_spi_driver_data *sdd =
+					spi_controller_get_devdata(spi->controller);
+	const struct s3c64xx_spi_csinfo *cs = spi_get_ctldata(spi);
+
+	if (cs) {
+		if (cs->cs_mode == S3C64XX_SPI_CS_MODE_MANUAL)
+			return false;
+		if (cs->cs_mode == S3C64XX_SPI_CS_MODE_AUTO)
+			return true;
+	}
+
+	return sdd->port_conf->quirks & S3C64XX_SPI_QUIRK_CS_AUTO;
+}
+
 static void s3c64xx_spi_set_cs(struct spi_device *spi, bool enable)
 {
 	struct s3c64xx_spi_driver_data *sdd =
@@ -361,7 +377,7 @@ static void s3c64xx_spi_set_cs(struct spi_device *spi, bool enable)
 		return;
 
 	if (enable) {
-		if (!(sdd->port_conf->quirks & S3C64XX_SPI_QUIRK_CS_AUTO)) {
+		if (!s3c64xx_spi_use_auto_cs(spi)) {
 			writel(0, sdd->regs + S3C64XX_SPI_CS_REG);
 		} else {
 			u32 ssel = readl(sdd->regs + S3C64XX_SPI_CS_REG);
@@ -371,7 +387,7 @@ static void s3c64xx_spi_set_cs(struct spi_device *spi, bool enable)
 			writel(ssel, sdd->regs + S3C64XX_SPI_CS_REG);
 		}
 	} else {
-		if (!(sdd->port_conf->quirks & S3C64XX_SPI_QUIRK_CS_AUTO))
+		if (!s3c64xx_spi_use_auto_cs(spi))
 			writel(S3C64XX_SPI_CS_SIG_INACT,
 			       sdd->regs + S3C64XX_SPI_CS_REG);
 	}
@@ -776,7 +792,7 @@ static int s3c64xx_spi_prepare_message(struct spi_controller *host,
 {
 	struct s3c64xx_spi_driver_data *sdd = spi_controller_get_devdata(host);
 	struct spi_device *spi = msg->spi;
-	struct s3c64xx_spi_csinfo *cs = spi->controller_data;
+	struct s3c64xx_spi_csinfo *cs = spi_get_ctldata(spi);
 
 	/* Configure feedback delay */
 	if (!cs)
@@ -784,6 +800,18 @@ static int s3c64xx_spi_prepare_message(struct spi_controller *host,
 		writel(0, sdd->regs + S3C64XX_SPI_FB_CLK);
 	else
 		writel(cs->fb_delay & 0x3, sdd->regs + S3C64XX_SPI_FB_CLK);
+
+	if (!s3c64xx_spi_use_auto_cs(spi))
+		s3c64xx_spi_set_cs(spi, false);
+
+	return 0;
+}
+
+static int s3c64xx_spi_unprepare_message(struct spi_controller *host,
+					 struct spi_message *msg)
+{
+	if (!s3c64xx_spi_use_auto_cs(msg->spi))
+		s3c64xx_spi_set_cs(msg->spi, false);
 
 	return 0;
 }
@@ -877,10 +905,18 @@ static int s3c64xx_spi_transfer_one(struct spi_controller *host,
 		sdd->state &= ~RXBUSY;
 		sdd->state &= ~TXBUSY;
 
-		/* Start the signals */
-		s3c64xx_spi_set_cs(spi, true);
-
-		status = s3c64xx_enable_datapath(sdd, xfer, use_dma);
+		if (s3c64xx_spi_use_auto_cs(spi)) {
+			/* Automatic CS must be configured before the channels. */
+			s3c64xx_spi_set_cs(spi, true);
+			status = s3c64xx_enable_datapath(sdd, xfer,
+							 use_dma);
+		} else {
+			/* Manual CS is asserted after enabling the channels. */
+			status = s3c64xx_enable_datapath(sdd, xfer,
+							 use_dma);
+			if (!status)
+				s3c64xx_spi_set_cs(spi, true);
+		}
 
 		spin_unlock_irqrestore(&sdd->lock, flags);
 
@@ -954,6 +990,7 @@ static struct s3c64xx_spi_csinfo *s3c64xx_get_target_ctrldata(
 	struct s3c64xx_spi_csinfo *cs;
 	struct device_node *target_np;
 	u32 fb_delay = 0;
+	u32 cs_mode;
 
 	target_np = spi->dev.of_node;
 	if (!target_np) {
@@ -974,6 +1011,16 @@ static struct s3c64xx_spi_csinfo *s3c64xx_get_target_ctrldata(
 
 	of_property_read_u32(data_np, "samsung,spi-feedback-delay", &fb_delay);
 	cs->fb_delay = fb_delay;
+
+	if (!of_property_read_u32(data_np,
+				  "samsung,spi-chip-select-mode", &cs_mode)) {
+		if (cs_mode > 1) {
+			kfree(cs);
+			return ERR_PTR(-EINVAL);
+		}
+		cs->cs_mode = cs_mode ? S3C64XX_SPI_CS_MODE_AUTO :
+					     S3C64XX_SPI_CS_MODE_MANUAL;
+	}
 	return cs;
 }
 
@@ -1301,6 +1348,7 @@ static int s3c64xx_spi_probe(struct platform_device *pdev)
 	host->prepare_transfer_hardware = s3c64xx_spi_prepare_transfer;
 	host->unprepare_transfer_hardware = s3c64xx_spi_unprepare_transfer;
 	host->prepare_message = s3c64xx_spi_prepare_message;
+	host->unprepare_message = s3c64xx_spi_unprepare_message;
 	host->transfer_one = s3c64xx_spi_transfer_one;
 	host->max_transfer_size = s3c64xx_spi_max_transfer_size;
 	host->num_chipselect = sci->num_cs;
