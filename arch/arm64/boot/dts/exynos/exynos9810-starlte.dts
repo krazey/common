@@ -24,6 +24,13 @@
 	model_info-hw_rev_end = <255>;
 	chassis-type = "handset";
 
+	codec_mclk2: codec-mclk2-clock {
+		compatible = "fixed-clock";
+		#clock-cells = <0>;
+		clock-frequency = <32768>;
+		clock-output-names = "codec-mclk2";
+	};
+
 	battery_info: battery {
 		compatible = "simple-battery";
 		device-chemistry = "lithium-ion";
@@ -434,6 +441,8 @@ firmware_class.path=/vendor/firmware bootconfig";
 		interrupt-controller;
 		#interrupt-cells = <2>;
 		gpio-controller;
+		clocks = <&codec_mclk2>;
+		clock-names = "mclk2";
 		#gpio-cells = <2>;
 		#sound-dai-cells = <1>;
 
@@ -487,7 +496,8 @@ firmware_class.path=/vendor/firmware bootconfig";
 		};
 
 		controller-data {
-			samsung,spi-feedback-delay = <0>;
+			samsung,spi-feedback-delay = <1>;
+			samsung,spi-chip-select-mode = <0>;
 		};
 	};
 };
