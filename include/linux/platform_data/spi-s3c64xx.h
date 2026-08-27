@@ -12,10 +12,17 @@
 
 struct platform_device;
 
+enum s3c64xx_spi_cs_mode {
+	S3C64XX_SPI_CS_MODE_DEFAULT,
+	S3C64XX_SPI_CS_MODE_MANUAL,
+	S3C64XX_SPI_CS_MODE_AUTO,
+};
+
 /**
  * struct s3c64xx_spi_csinfo - ChipSelect description
  * @fb_delay: Slave specific feedback delay.
  *            Refer to FB_CLK_SEL register definition in SPI chapter.
+ * @cs_mode: Slave specific native chip-select mode.
  *
  * This is per SPI-Slave Chipselect information.
  * Allocate and initialize one in machine init code and make the
@@ -23,6 +30,7 @@ struct platform_device;
  */
 struct s3c64xx_spi_csinfo {
 	u8 fb_delay;
+	u8 cs_mode;
 };
 
 /**
