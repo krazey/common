@@ -2697,24 +2697,13 @@ exynos9810_bootfb_green_screen_recovery_locked(
 }
 
 static int
-exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
-				   bool enabled)
+exynos9810_bootfb_write_panel_locked(struct exynos9810_bootfb *bootfb,
+				     bool enabled)
 {
 	u8 command = enabled ? MIPI_DCS_SET_DISPLAY_ON :
 			       MIPI_DCS_SET_DISPLAY_OFF;
-	bool brightness_restored = false;
 	int disable_ret;
 	int ret;
-
-	if (bootfb->panel_enabled == enabled)
-		return 0;
-	if (enabled && bootfb->backlight &&
-	    READ_ONCE(bootfb->panel_greenfix)) {
-		ret = exynos9810_bootfb_green_screen_recovery_locked(bootfb);
-		if (ret)
-			return ret;
-		brightness_restored = true;
-	}
 
 	ret = exynos9810_bootfb_dsim_write(
 		bootfb, exynos9810_panel_key1_enable,
@@ -2732,13 +2721,58 @@ exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
 	bootfb->panel_enabled = enabled;
 	dev_info(bootfb->dev, "E981D: panel display %s\n",
 		 enabled ? "on" : "off");
-	if (disable_ret)
-		return disable_ret;
+	return disable_ret;
+}
+
+static int
+exynos9810_bootfb_set_panel_locked(struct exynos9810_bootfb *bootfb,
+				   bool enabled)
+{
+	bool brightness_restored = false;
+	int ret;
+
+	if (bootfb->panel_enabled == enabled)
+		return 0;
+	if (enabled && bootfb->backlight &&
+	    READ_ONCE(bootfb->panel_greenfix)) {
+		ret = exynos9810_bootfb_green_screen_recovery_locked(bootfb);
+		if (ret)
+			return ret;
+		brightness_restored = true;
+	}
+
+	ret = exynos9810_bootfb_write_panel_locked(bootfb, enabled);
+	if (ret)
+		return ret;
+
 	if (enabled && bootfb->backlight && !brightness_restored)
 		ret = exynos9810_bootfb_write_brightness_locked(
 			bootfb, bootfb->panel_brightness);
 
 	return ret;
+}
+
+static void
+exynos9810_bootfb_run_boot_greenfix(struct exynos9810_bootfb *bootfb)
+{
+	int display_ret;
+	int ret;
+
+	mutex_lock(&bootfb->lock);
+	ret = exynos9810_bootfb_green_screen_recovery_locked(bootfb);
+	display_ret = exynos9810_bootfb_write_panel_locked(bootfb, true);
+	mutex_unlock(&bootfb->lock);
+
+	if (!ret)
+		ret = display_ret;
+	if (ret) {
+		dev_warn(bootfb->dev,
+			 "STAR boot green-screen recovery failed: %d\n", ret);
+		return;
+	}
+
+	dev_info(bootfb->dev,
+		 "E981D: STAR boot green-screen recovery applied\n");
 }
 
 static void
@@ -4772,6 +4806,7 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 	bootfb->fbdev_refresh_enabled = false;
 	bootfb->fbdev_hwc_seen = false;
 	bootfb->panel_enabled = true;
+	bootfb->panel_greenfix = true;
 	bootfb->fbdev_refresh_logged = false;
 
 	bootfb->native_present_active_slot = -1;
@@ -5043,6 +5078,8 @@ static int exynos9810_bootfb_probe(struct platform_device *pdev)
 			dev_warn(&pdev->dev,
 				 "calibrated panel backlight unavailable: %d\n",
 				 ret);
+		else
+			exynos9810_bootfb_run_boot_greenfix(bootfb);
 	}
 
 	bootfb->prepare_iommu_error =
