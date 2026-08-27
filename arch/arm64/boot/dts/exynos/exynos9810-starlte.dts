@@ -24,6 +24,11 @@
 	model_info-hw_rev_end = <255>;
 	chassis-type = "handset";
 
+	aliases {
+		i2c1 = &hsi2c_40;
+		i2c18 = &speaker_amp_i2c;
+	};
+
 	codec_mclk2: codec-mclk2-clock {
 		compatible = "fixed-clock";
 		#clock-cells = <0>;
@@ -95,6 +100,35 @@ firmware_class.path=/vendor/firmware bootconfig";
 			label = "Camera";
 			linux,code = <KEY_CAMERA>;
 			gpios = <&gpa0 6 GPIO_ACTIVE_LOW>;
+		};
+	};
+
+	speaker_amp_i2c: i2c-18 {
+		compatible = "i2c-gpio";
+		sda-gpios = <&gpp4 5 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		scl-gpios = <&gpp4 4 (GPIO_ACTIVE_HIGH | GPIO_OPEN_DRAIN)>;
+		i2c-gpio,delay-us = <5>;
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		speaker_amp: amplifier@39 {
+			compatible = "maxim,max98512";
+			reg = <0x39>;
+			#sound-dai-cells = <0>;
+			maxim,secondary-address = <0x3a>;
+			maxim,spk-gain = <5>;
+			maxim,spk-gain-left = <5>;
+			maxim,spk-gain-right = <5>;
+			maxim,spk-gain-rcv = <1>;
+			maxim,digital-gain = <64>;
+			maxim,digital-gain-rcv = <52>;
+			maxim,current-limit-left = <22>;
+			maxim,current-limit-right = <62>;
+			maxim,sysclk-hz = <12288000>;
+			maxim,boost-step = <15 15 15 15 15 15 15 15
+					    15 15 15 15 15 15 2 0>;
+			maxim,adc-threshold = <7>;
+			maxim,interleave-mode;
 		};
 	};
 
@@ -270,7 +304,7 @@ firmware_class.path=/vendor/firmware bootconfig";
 
 		samsung,pmu-syscon = <&pmu_system_controller>;
 		samsung,abox = <&abox>;
-		samsung,codec = <&cs47l93>;
+		samsung,codec = <&cs47l93>, <&speaker_amp>;
 		samsung,rdma = <&abox_rdma_0>, <&abox_rdma_1>,
 				<&abox_rdma_2>, <&abox_rdma_3>,
 				<&abox_rdma_4>, <&abox_rdma_5>,
@@ -305,6 +339,7 @@ firmware_class.path=/vendor/firmware bootconfig";
 			"ABOX UAIF3 Capture", "BLUETOOTH MIC",
 			"VOUTPUT", "ABOX UAIF0 Playback",
 			"ABOX UAIF1 Capture", "VINPUT1",
+			"SPEAKER", "HiFi Playback",
 			"VOUTPUTCALL", "ABOX UAIF2 Playback",
 			"ABOX UAIF2 Capture", "VINPUTCALL";
 	};
