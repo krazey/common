@@ -131,8 +131,13 @@ firmware_class.path=/vendor/firmware bootconfig";
 			no-map;
 		};
 
-		memory@f0000000 {
-			reg = <0x0 0xf0000000 0xb200000>;
+		modem_if: memory@f0000000 {
+			reg = <0x0 0xf0000000 0x9200000>;
+			no-map;
+		};
+
+		memory@f9200000 {
+			reg = <0x0 0xf9200000 0x2000000>;
 			no-map;
 		};
 
@@ -158,6 +163,18 @@ firmware_class.path=/vendor/firmware bootconfig";
 			reg = <0x0 0xfed18000 0x12e8000>;
 			no-map;
 		};
+	};
+
+	shmem: shared-memory {
+		compatible = "samsung,exynos9810-shmem";
+		memory-region = <&modem_if>;
+		samsung,cp-size = <0x7900000>;
+		samsung,vss-size = <0x700000>;
+		samsung,ipc-offset = <0x8000000>;
+		samsung,ipc-size = <0x500000>;
+		samsung,zmb-offset = <0x8500000>;
+		samsung,zmb-size = <0xb00000>;
+		samsung,vparam-size = <0x200000>;
 	};
 
 	ufs_vcc: regulator-ufs-vcc {

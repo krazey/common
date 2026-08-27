@@ -14,6 +14,17 @@ config SOC_EXYNOS9810
 	  Enable SoC-specific support required by Samsung's Exynos9810
 	  platform drivers.
 
+config EXYNOS9810_SHMEM
+	bool "Samsung Exynos9810 shared memory layout"
+	depends on SOC_EXYNOS9810
+	default y
+	help
+	  Describe the reserved modem shared-memory layout used by firmware
+	  clients on Exynos9810. This provides the VSS and VSS parameter
+	  regions shared by the ABOX audio firmware and the modem.
+
+	  Say Y when building a kernel for an Exynos9810 device.
+
 # There is no need to enable these drivers for ARMv8
 config EXYNOS_ASV_ARM
 	bool "Exynos ASV ARMv7-specific driver extensions" if COMPILE_TEST
