@@ -531,7 +531,7 @@
 			compatible = "samsung,exynos9810-usi",
 				     "samsung,exynos850-usi";
 			reg = <0x104700c0 0x20>;
-			samsung,sysreg = <&sysreg_peric0 0x1014>;
+			samsung,sysreg = <&sysreg_peric0 0x100c>;
 			samsung,mode = <USI_MODE_SPI>;
 			#address-cells = <1>;
 			#size-cells = <1>;
