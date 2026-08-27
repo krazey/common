@@ -237,6 +237,53 @@ firmware_class.path=/vendor/firmware bootconfig";
 		width-mm = <64>;
 		height-mm = <132>;
 	};
+
+	sound {
+		compatible = "samsung,exynos9810-star-madera";
+		pinctrl-names = "default", "sleep";
+		pinctrl-0 = <&aud_codec_mclk>;
+		pinctrl-1 = <&aud_codec_mclk_idle>;
+
+		samsung,pmu-syscon = <&pmu_system_controller>;
+		samsung,abox = <&abox>;
+		samsung,codec = <&cs47l93>;
+		samsung,rdma = <&abox_rdma_0>, <&abox_rdma_1>,
+				<&abox_rdma_2>, <&abox_rdma_3>,
+				<&abox_rdma_4>, <&abox_rdma_5>,
+				<&abox_rdma_6>, <&abox_rdma_7>;
+		samsung,wdma = <&abox_wdma_0>, <&abox_wdma_1>,
+				<&abox_wdma_2>, <&abox_wdma_3>,
+				<&abox_wdma_4>;
+		samsung,uaif = <&abox_uaif_0>, <&abox_uaif_1>,
+				<&abox_uaif_2>, <&abox_uaif_3>;
+		samsung,dsif = <&abox_dsif>;
+
+		samsung,audio-routing =
+			"HEADSETMIC", "MICBIAS2A",
+			"IN1BLN", "HEADSETMIC",
+			"IN1BLP", "HEADSETMIC",
+			"DMIC1", "MICBIAS1A",
+			"IN3L", "DMIC1",
+			"DMIC2", "MICBIAS1B",
+			"IN2ALN", "DMIC2",
+			"IN2ALP", "DMIC2",
+			"DMIC3", "MICBIAS1C",
+			"IN3R", "DMIC3",
+			"DMIC4", "MICBIAS1B",
+			"IN4L", "DMIC4",
+			"IN2BL", "FM",
+			"IN2BR", "FM",
+			"RECEIVER", "HPOUT3L",
+			"RECEIVER", "HPOUT3R",
+			"HEADPHONE", "HPOUT2L",
+			"HEADPHONE", "HPOUT2R",
+			"BLUETOOTH SPK", "ABOX UAIF3 Playback",
+			"ABOX UAIF3 Capture", "BLUETOOTH MIC",
+			"VOUTPUT", "ABOX UAIF0 Playback",
+			"ABOX UAIF1 Capture", "VINPUT1",
+			"VOUTPUTCALL", "ABOX UAIF2 Playback",
+			"ABOX UAIF2 Capture", "VINPUTCALL";
+	};
 };
 
 &abox {
