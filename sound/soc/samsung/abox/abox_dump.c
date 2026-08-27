@@ -454,7 +454,8 @@ static void abox_dump_register_card_work_func(struct work_struct *work)
 
 	pr_debug("%s\n", __func__);
 
-	snd_soc_unregister_card(&abox_dump_card);
+	if (snd_soc_card_is_instantiated(&abox_dump_card))
+		snd_soc_unregister_card(&abox_dump_card);
 	for (i = 0; i < abox_dump_card.num_links; i++) {
 		struct snd_soc_dai_link *link = &abox_dump_card.dai_link[i];
 
