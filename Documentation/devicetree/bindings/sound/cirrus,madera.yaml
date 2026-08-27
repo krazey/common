@@ -48,7 +48,7 @@ properties:
     maxItems: 24
     items:
       minimum: 0
-      maximum: 1
+      maximum: 2
       default: 0
 
   cirrus,out-mono:
