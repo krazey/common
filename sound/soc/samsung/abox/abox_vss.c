@@ -52,19 +52,17 @@ static int samsung_abox_vss_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
 	struct device_node *np = dev->of_node;
-	void __iomem *magic_addr;
-	unsigned long base;
+	void __iomem *base;
 
 	dev_dbg(dev, "%s\n", __func__);
 
 	of_property_read_u32(np, "magic_offset", &VSS_MAGIC_OFFSET);
 	dev_info(dev, "magic_offset = 0x%08X\n", VSS_MAGIC_OFFSET);
-	base = shm_get_vss_base();
+	base = shm_get_vss_region();
 	if (!base)
-		return 0;
+		return -EPROBE_DEFER;
 
-	magic_addr = phys_to_virt(base + VSS_MAGIC_OFFSET);
-	writel(0, magic_addr);
+	writel(0, base + VSS_MAGIC_OFFSET);
 	return 0;
 }
 

@@ -1,5 +1,6 @@
 config SND_SOC_SAMSUNG_ABOX
 	tristate "ASoC support for Samsung ABOX Audio"
+	depends on EXYNOS9810_SHMEM
 	select REGMAP_MMIO
 	select SND_SOC_COMPRESS
 	select SND_HWDEP

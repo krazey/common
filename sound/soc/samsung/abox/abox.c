@@ -150,6 +150,57 @@ static void abox_iommu_domain_release(void *arg)
 	data->iommu_domain = NULL;
 }
 
+static int abox_iommu_sync_static(struct device *dev)
+{
+	struct abox_data *data = dev_get_drvdata(dev);
+	const struct {
+		const char *name;
+		unsigned long iova;
+		phys_addr_t paddr;
+		size_t size;
+	} regions[] = {
+		{ "mailbox", 0x10000000, 0x10000000, PAGE_SIZE },
+		{ "DRAM firmware", IOVA_DRAM_FIRMWARE,
+			data->dram_base_phys, DRAM_FIRMWARE_SIZE },
+		{ "IVA firmware", IOVA_IVA_FIRMWARE,
+			data->iva_base_phys, IVA_FIRMWARE_SIZE },
+		{ "VSS firmware", IOVA_VSS_FIRMWARE,
+			shm_get_vss_base(), shm_get_vss_size() },
+		{ "VSS parameters", IOVA_VSS_PARAMETER,
+			shm_get_vparam_base(), shm_get_vparam_size() },
+	};
+	phys_addr_t first, last, expected_last;
+	unsigned long last_iova;
+	size_t i;
+
+	if (!data->iommu_attached ||
+	    iommu_get_domain_for_dev(dev) != data->iommu_domain) {
+		dev_err(dev, "ABOX IOMMU domain is not active\n");
+		return -EIO;
+	}
+
+	for (i = 0; i < ARRAY_SIZE(regions); i++) {
+		if (!regions[i].size)
+			return -EINVAL;
+
+		last_iova = regions[i].iova + regions[i].size - 1;
+		expected_last = regions[i].paddr + regions[i].size - 1;
+		first = iommu_iova_to_phys(data->iommu_domain, regions[i].iova);
+		last = iommu_iova_to_phys(data->iommu_domain, last_iova);
+		if (first != regions[i].paddr || last != expected_last) {
+			dev_err(dev,
+				"%s IOMMU mapping invalid: %pa/%pa - %pa/%pa\n",
+				regions[i].name, &first, &regions[i].paddr,
+				&last, &expected_last);
+			return -EFAULT;
+		}
+	}
+
+	iommu_flush_iotlb_all(data->iommu_domain);
+	dev_info_once(dev, "ABOX IOMMU static mappings active\n");
+	return 0;
+}
+
 static void abox_cpu_power(bool on);
 static int abox_cpu_enable(bool enable);
 static int abox_cpu_pm_ipc(struct device *dev, bool resume);
@@ -263,9 +314,13 @@ void *abox_addr_to_kernel_addr(struct abox_data *data, unsigned int addr)
 		ret = data->dram_base + (addr - IOVA_DRAM_FIRMWARE);
 	else if (addr >= IOVA_IVA_FIRMWARE && addr < IOVA_VSS_FIRMWARE)
 		ret = data->iva_base + (addr - IOVA_IVA_FIRMWARE);
-	else if (addr >= IOVA_VSS_FIRMWARE && addr <  IOVA_DUMP_BUFFER)
-		ret = phys_to_virt(shm_get_vss_base() +
-				(addr - IOVA_VSS_FIRMWARE));
+	else if (addr >= IOVA_VSS_FIRMWARE &&
+		 addr < IOVA_VSS_FIRMWARE + shm_get_vss_size())
+		ret = shm_get_vss_region() + (addr - IOVA_VSS_FIRMWARE);
+	else if (addr >= IOVA_VSS_PARAMETER &&
+		 addr < IOVA_VSS_PARAMETER + shm_get_vparam_size())
+		ret = shm_get_vparam_region() +
+				(addr - IOVA_VSS_PARAMETER);
 	else if (addr >= IOVA_DUMP_BUFFER)
 		ret = data->dump_base + (addr - IOVA_DUMP_BUFFER);
 	else
@@ -5195,7 +5250,7 @@ static void abox_download_extra_firmware(struct abox_data *data)
 			size = DRAM_FIRMWARE_SIZE;
 			break;
 		case 2:
-			base = phys_to_virt(shm_get_vss_base());
+			base = shm_get_vss_region();
 			size = shm_get_vss_size();
 			break;
 		default:
@@ -5682,6 +5737,10 @@ static int abox_enable(struct device *dev)
 
 	dev_info(dev, "%s\n", __func__);
 
+	ret = abox_iommu_sync_static(dev);
+	if (ret)
+		return ret;
+
 	abox_gic_enable_irq(data->dev_gic);
 
 	abox_request_cpu_gear_sync(dev, data, DEFAULT_CPU_GEAR_ID,
@@ -6097,6 +6156,11 @@ static int samsung_abox_probe(struct platform_device *pdev)
 
 	dev_info(dev, "%s\n", __func__);
 
+	if (!shm_get_vss_base() || !shm_get_vss_size() ||
+	    !shm_get_vparam_base() || !shm_get_vparam_size())
+		return dev_err_probe(dev, -EPROBE_DEFER,
+				"VSS shared memory is not ready\n");
+
 	data = devm_kzalloc(dev, sizeof(*data), GFP_KERNEL);
 	if (!data)
 		return -ENOMEM;
@@ -6179,43 +6243,8 @@ static int samsung_abox_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	data->dram_base = dmam_alloc_coherent(dev, DRAM_FIRMWARE_SIZE,
-			&data->dram_base_phys, GFP_KERNEL);
-	if (IS_ERR_OR_NULL(data->dram_base)) {
-		dev_err(dev, "Failed to allocate coherent memory: %ld\n",
-				PTR_ERR(data->dram_base));
-		return PTR_ERR(data->dram_base);
-	}
-	dev_info(dev, "%s(%#x) alloc\n", "dram firmware", DRAM_FIRMWARE_SIZE);
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_DRAM_FIRMWARE, data->dram_base_phys,
-			DRAM_FIRMWARE_SIZE, 0);
-
-	data->iva_base = dmam_alloc_coherent(dev, IVA_FIRMWARE_SIZE,
-			&data->iva_base_phys, GFP_KERNEL);
-	if (IS_ERR_OR_NULL(data->iva_base)) {
-		dev_err(dev, "Failed to allocate coherent memory: %ld\n",
-				PTR_ERR(data->iva_base));
-		return PTR_ERR(data->iva_base);
-	}
-	dev_info(dev, "%s(%#x) alloc\n", "iva firmware", IVA_FIRMWARE_SIZE);
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_IVA_FIRMWARE, data->iva_base_phys,
-			IVA_FIRMWARE_SIZE, 0);
-
-	paddr = shm_get_vss_base();
-	dev_info(dev, "%s(%#x) alloc\n", "vss firmware", shm_get_vss_size());
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_FIRMWARE, paddr,
-			shm_get_vss_size(), 0);
-
-	paddr = shm_get_vparam_base();
-	dev_info(dev, "%s(%#x) alloc\n", "vss parameter",
-			shm_get_vparam_size());
-	abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_PARAMETER, paddr,
-			shm_get_vparam_size(), 0);
-
-	abox_iommu_map_legacy(data->iommu_domain, 0x10000000, 0x10000000,
-			PAGE_SIZE, 0);
 	iommu_set_fault_handler(data->iommu_domain, abox_iommu_fault_handler,
-			data);
+				data);
 	ret = iommu_attach_device(data->iommu_domain, dev);
 	if (ret < 0) {
 		dev_err(dev, "Unable to attach device to iommu (%d)\n", ret);
@@ -6227,6 +6256,65 @@ static int samsung_abox_probe(struct platform_device *pdev)
 		return -EIO;
 	}
 	data->iommu_attached = true;
+
+	data->dram_base = dmam_alloc_coherent(dev, DRAM_FIRMWARE_SIZE,
+			&data->dram_base_phys, GFP_KERNEL);
+	if (IS_ERR_OR_NULL(data->dram_base)) {
+		dev_err(dev, "Failed to allocate coherent memory: %ld\n",
+				PTR_ERR(data->dram_base));
+		return PTR_ERR(data->dram_base);
+	}
+	dev_info(dev, "%s(%#x) alloc\n", "dram firmware", DRAM_FIRMWARE_SIZE);
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_DRAM_FIRMWARE,
+				    data->dram_base_phys,
+			DRAM_FIRMWARE_SIZE, 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map DRAM firmware\n");
+
+	data->iva_base = dmam_alloc_coherent(dev, IVA_FIRMWARE_SIZE,
+			&data->iva_base_phys, GFP_KERNEL);
+	if (IS_ERR_OR_NULL(data->iva_base)) {
+		dev_err(dev, "Failed to allocate coherent memory: %ld\n",
+				PTR_ERR(data->iva_base));
+		return PTR_ERR(data->iva_base);
+	}
+	dev_info(dev, "%s(%#x) alloc\n", "iva firmware", IVA_FIRMWARE_SIZE);
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_IVA_FIRMWARE,
+				    data->iva_base_phys,
+			IVA_FIRMWARE_SIZE, 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map IVA firmware\n");
+
+	paddr = shm_get_vss_base();
+	dev_info(dev, "%s(%#x) alloc\n", "vss firmware", shm_get_vss_size());
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_FIRMWARE,
+				    paddr,
+			shm_get_vss_size(), 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map VSS firmware\n");
+
+	paddr = shm_get_vparam_base();
+	dev_info(dev, "%s(%#x) alloc\n", "vss parameter",
+			shm_get_vparam_size());
+	ret = abox_iommu_map_legacy(data->iommu_domain, IOVA_VSS_PARAMETER,
+				    paddr,
+			shm_get_vparam_size(), 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map VSS parameters\n");
+
+	ret = abox_iommu_map_legacy(data->iommu_domain, 0x10000000,
+				    0x10000000,
+			PAGE_SIZE, 0);
+	if (ret)
+		return dev_err_probe(dev, ret,
+				"failed to map ABOX mailbox page\n");
+	ret = abox_iommu_sync_static(dev);
+	if (ret)
+		return ret;
 
 	data->clk_pll = devm_clk_get_and_prepare(pdev, "pll");
 	if (IS_ERR(data->clk_pll))
