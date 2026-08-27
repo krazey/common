@@ -4562,7 +4562,7 @@ static bool abox_is_calliope_incompatible(struct device *dev)
 	ABOX_IPC_MSG msg;
 	struct IPC_SYSTEM_MSG *system_msg = &msg.msg.system;
 
-	memcpy(&msg, data->sram_base + 0x30040, 0x3C);
+	memcpy_fromio(&msg, data->sram_base + 0x30040, 0x3C);
 
 	return ((system_msg->param3 >> 24) == 'A');
 }
@@ -4956,7 +4956,8 @@ static irqreturn_t abox_irq_handler(int irq, void *dev_id)
 	if (abox_dma_irq_handler(irq, data) == IRQ_HANDLED)
 		goto out;
 
-	memcpy(&msg, data->sram_base + data->ipc_rx_offset, sizeof(msg));
+	memcpy_fromio(&msg, data->sram_base + data->ipc_rx_offset,
+		      sizeof(msg));
 	writel(0, data->sram_base + data->ipc_rx_ack_offset);
 
 	dev_dbg(dev, "%s: irq=%d, ipcid=%d\n", __func__, irq, msg.ipcid);
@@ -5179,7 +5180,8 @@ static void abox_download_extra_firmware(struct abox_data *data)
 {
 	struct device *dev = &data->pdev->dev;
 	struct abox_extra_firmware *ext_fw;
-	void __iomem *base;
+	void __iomem *io_base;
+	void *base;
 	size_t size;
 
 	dev_dbg(dev, "%s\n", __func__);
@@ -5191,14 +5193,17 @@ static void abox_download_extra_firmware(struct abox_data *data)
 
 		switch (ext_fw->area) {
 		case 0:
-			base = data->sram_base;
+			io_base = data->sram_base;
+			base = NULL;
 			size = data->sram_size;
 			break;
 		case 1:
+			io_base = NULL;
 			base = data->dram_base;
 			size = DRAM_FIRMWARE_SIZE;
 			break;
 		case 2:
+			io_base = NULL;
 			base = shm_get_vss_region();
 			size = shm_get_vss_size();
 			break;
@@ -5216,8 +5221,12 @@ static void abox_download_extra_firmware(struct abox_data *data)
 			continue;
 		}
 
-		memcpy(base + ext_fw->offset, ext_fw->firmware->data,
-				ext_fw->firmware->size);
+		if (io_base)
+			memcpy_toio(io_base + ext_fw->offset,
+				    ext_fw->firmware->data, ext_fw->firmware->size);
+		else
+			memcpy(base + ext_fw->offset, ext_fw->firmware->data,
+			       ext_fw->firmware->size);
 		dev_info(dev, "%s is downloaded at area %u offset %u\n",
 				ext_fw->name, ext_fw->area, ext_fw->offset);
 	}
