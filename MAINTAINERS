@@ -15925,6 +15925,7 @@ MAX98512 AUDIO AMPLIFIER DRIVER
 M:	Mathias Gluszczynski <admin@krazey.de>
 L:	linux-sound@vger.kernel.org
 S:	Maintained
+F:	Documentation/devicetree/bindings/sound/maxim,max98512.yaml
 F:	sound/soc/codecs/max98512.*
 
 MAX9860 MONO AUDIO VOICE CODEC DRIVER

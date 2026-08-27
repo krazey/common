@@ -1,0 +1,159 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/sound/maxim,max98512.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: Maxim Integrated MAX98512 Speaker Amplifier
+
+maintainers:
+  - Mathias Gluszczynski <admin@krazey.de>
+
+description: |
+  The MAX98512 is a mono digital-input class-D speaker amplifier.
+  A second MAX98512 at another I2C address can be controlled by the
+  same driver for stereo speaker configurations.
+
+allOf:
+  - $ref: dai-common.yaml#
+
+properties:
+  compatible:
+    const: maxim,max98512
+
+  reg:
+    maxItems: 1
+
+  '#sound-dai-cells':
+    const: 0
+
+  maxim,secondary-address:
+    description:
+      I2C address of an optional second amplifier. Its presence selects
+      the stereo speaker configuration.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    minimum: 8
+    maximum: 119
+
+  maxim,spk-gain:
+    description: Default PCM speaker gain register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 7
+
+  maxim,spk-gain-left:
+    description: Initial left speaker gain register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 7
+
+  maxim,spk-gain-right:
+    description: Initial right speaker gain register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 7
+
+  maxim,spk-gain-rcv:
+    description: Receiver-mode speaker gain register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 7
+
+  maxim,digital-gain:
+    description: Default digital gain register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 127
+
+  maxim,digital-gain-rcv:
+    description: Receiver-mode digital gain register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 127
+
+  maxim,current-limit-left:
+    description: Left amplifier brownout current-limit register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 63
+
+  maxim,current-limit-right:
+    description: Right amplifier brownout current-limit register value.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 63
+
+  maxim,sysclk-hz:
+    description: PCM master clock frequency.
+    enum:
+      - 5644800
+      - 6000000
+      - 6144000
+      - 6500000
+      - 9600000
+      - 11289600
+      - 12000000
+      - 12288000
+      - 13000000
+      - 19200000
+
+  maxim,boost-step:
+    description: Boost-voltage register values for the volume steps.
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 16
+    maxItems: 16
+    items:
+      maximum: 31
+
+  maxim,adc-threshold:
+    description: Volume step at which ADC-based boost control is enabled.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 15
+
+  maxim,interleave-mode:
+    description: Interleave voltage and current monitor samples.
+    type: boolean
+
+  maxim,vmon-left-slot:
+    description: Left amplifier voltage-monitor TDM slot.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 15
+
+  maxim,imon-left-slot:
+    description: Left amplifier current-monitor TDM slot.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 15
+
+  maxim,vmon-right-slot:
+    description: Right amplifier voltage-monitor TDM slot.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 15
+
+  maxim,imon-right-slot:
+    description: Right amplifier current-monitor TDM slot.
+    $ref: /schemas/types.yaml#/definitions/uint32
+    maximum: 15
+
+  maxim,no-dsm:
+    description: Disable voltage and current monitor feedback.
+    type: boolean
+
+required:
+  - compatible
+  - reg
+
+unevaluatedProperties: false
+
+examples:
+  - |
+    i2c {
+      #address-cells = <1>;
+      #size-cells = <0>;
+
+      amplifier@39 {
+        compatible = "maxim,max98512";
+        reg = <0x39>;
+        maxim,secondary-address = <0x3a>;
+        maxim,spk-gain = <5>;
+        maxim,spk-gain-rcv = <1>;
+        maxim,digital-gain-rcv = <52>;
+        maxim,sysclk-hz = <12288000>;
+        maxim,boost-step = <15 15 15 15 15 15 15 15
+                            15 15 15 15 15 15 2 0>;
+        maxim,adc-threshold = <7>;
+        maxim,interleave-mode;
+      };
+    };
+...
