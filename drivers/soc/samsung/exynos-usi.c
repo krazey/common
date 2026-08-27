@@ -58,6 +58,7 @@ struct exynos_usi_variant {
 	size_t max_mode;		/* last index in exynos_usi_modes[] */
 	size_t num_clks;		/* number of clocks to assert */
 	const char * const *clk_names;	/* clock names to assert */
+	bool direct_sw_conf;		/* write the complete SW_CONF value */
 };
 
 struct exynos_usi {
@@ -117,7 +118,21 @@ static const struct exynos_usi_variant exynos8895_usi_data = {
 	.clk_names	= exynos850_usi_clk_names,
 };
 
+static const struct exynos_usi_variant exynos9810_usi_data = {
+	.ver		= USI_VER2,
+	.sw_conf_mask	= USI_V2_SW_CONF_MASK,
+	.min_mode	= USI_MODE_NONE,
+	.max_mode	= USI_MODE_I2C,
+	.num_clks	= ARRAY_SIZE(exynos850_usi_clk_names),
+	.clk_names	= exynos850_usi_clk_names,
+	.direct_sw_conf = true,
+};
+
 static const struct of_device_id exynos_usi_dt_match[] = {
+	{
+		.compatible = "samsung,exynos9810-usi",
+		.data = &exynos9810_usi_data,
+	},
 	{
 		.compatible = "samsung,exynos850-usi",
 		.data = &exynos850_usi_data,
@@ -147,8 +162,11 @@ static int exynos_usi_set_sw_conf(struct exynos_usi *usi, size_t mode)
 		return -EINVAL;
 
 	val = exynos_usi_modes[usi->data->ver][mode].val;
-	ret = regmap_update_bits(usi->sysreg, usi->sw_conf,
-				 usi->data->sw_conf_mask, val);
+	if (usi->data->direct_sw_conf)
+		ret = regmap_write(usi->sysreg, usi->sw_conf, val);
+	else
+		ret = regmap_update_bits(usi->sysreg, usi->sw_conf,
+					 usi->data->sw_conf_mask, val);
 	if (ret)
 		return ret;
 
