@@ -4600,6 +4600,15 @@ static void abox_boot_done_work_func(struct work_struct *work)
 
 	dev_dbg(dev, "%s\n", __func__);
 
+	/*
+	 * Runtime suspend relies on the audio power domain to reset ABOX.
+	 * Keep Calliope resident until that domain is described by the port.
+	 */
+	if (IS_ENABLED(CONFIG_SOC_EXYNOS9810) && !dev->pm_domain) {
+		dev_info_once(dev, "keeping Calliope resident without pd-aud\n");
+		pm_runtime_forbid(dev);
+	}
+
 	abox_cpu_pm_ipc(dev, true);
 	abox_restore_data(dev);
 	abox_request_cpu_gear(dev, data, DEFAULT_CPU_GEAR_ID,
