@@ -1202,10 +1202,10 @@ static bool abox_rdma_trace_channel(struct abox_platform_data *data)
 		(data->id == 0 || data->id == 2 || data->id == 7);
 }
 
-static void abox_rdma_trace_state(struct device *dev,
-				  struct abox_platform_data *data,
-				  struct snd_pcm_substream *substream,
-				  const char *phase)
+void abox_rdma_trace_state(struct device *dev,
+			   struct abox_platform_data *data,
+			   struct snd_pcm_substream *substream,
+			   const char *phase)
 {
 	struct snd_pcm_runtime *runtime = substream->runtime;
 	unsigned int nonzero = 0;

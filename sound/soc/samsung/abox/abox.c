@@ -4760,6 +4760,10 @@ static irqreturn_t abox_dma_irq_handler(int irq, struct abox_data *data)
 
 	platform_data->pointer = 0;
 	atomic_inc(&platform_data->pointer_events);
+	if (READ_ONCE(platform_data->playback_trace_active) &&
+	    !xchg(&platform_data->playback_trace_pointer, true))
+		abox_rdma_trace_state(&pdev_dma[id]->dev, platform_data,
+				      platform_data->substream, "first-irq");
 	snd_pcm_period_elapsed(platform_data->substream);
 
 	return IRQ_HANDLED;

@@ -1065,6 +1065,11 @@ extern int abox_try_to_asrc_off(struct device *dev, struct abox_data *data,
 extern int abox_register_rdma(struct platform_device *pdev_abox,
 		struct platform_device *pdev_rdma, unsigned int id);
 
+void abox_rdma_trace_state(struct device *dev,
+			   struct abox_platform_data *data,
+			   struct snd_pcm_substream *substream,
+			   const char *phase);
+
 /**
  * Register wdma to abox
  * @param[in]	data		pointer to abox_data structure
