@@ -4709,10 +4709,65 @@ static void abox_boot_done(struct device *dev, unsigned int version)
 	wake_up(&data->ipc_wait_queue);
 }
 
+static void abox_trace_speaker_pipeline(struct abox_data *data)
+{
+	struct device *dev = &data->pdev->dev;
+	struct platform_device *pdev;
+	struct abox_platform_data *platform_data;
+	void __iomem *sfr = data->sfr_base;
+	unsigned int id;
+
+	if (!IS_ENABLED(CONFIG_SOC_EXYNOS9810))
+		return;
+
+	pdev = data->pdev_rdma[7];
+	if (pdev) {
+		platform_data = platform_get_drvdata(pdev);
+		if (platform_data && platform_data->substream)
+			abox_rdma_trace_state(&pdev->dev, platform_data,
+					      platform_data->substream,
+					      "RDMA0-eighth");
+	}
+
+	for (id = 0; id <= 4; id += 4) {
+		pdev = data->pdev_wdma[id];
+		if (!pdev)
+			continue;
+
+		platform_data = platform_get_drvdata(pdev);
+		if (platform_data && platform_data->substream)
+			abox_wdma_trace_state(&pdev->dev, platform_data,
+					      platform_data->substream,
+					      "RDMA0-eighth");
+	}
+
+	dev_info(dev,
+		 "E981D: speaker pipeline route=%#x/%#x/%#x spus=%#x/%#x spum=%#x/%#x\n",
+		 readl(sfr + ABOX_ROUTE_CTRL0),
+		 readl(sfr + ABOX_ROUTE_CTRL1),
+		 readl(sfr + ABOX_ROUTE_CTRL2),
+		 readl(sfr + ABOX_SPUS_CTRL0),
+		 readl(sfr + ABOX_SPUS_CTRL1),
+		 readl(sfr + ABOX_SPUM_CTRL0),
+		 readl(sfr + ABOX_SPUM_CTRL1));
+	dev_info(dev,
+		 "E981D: speaker pipeline sifs=%#x/%#x uaif0=%#x/%#x/%#x uaif1=%#x/%#x/%#x\n",
+		 readl(sfr + ABOX_SPUS_CTRL_SIFS_CNT0),
+		 readl(sfr + ABOX_SPUS_CTRL_SIFS_CNT1),
+		 readl(sfr + ABOX_UAIF_CTRL0(0)),
+		 readl(sfr + ABOX_UAIF_CTRL1(0)),
+		 readl(sfr + ABOX_UAIF_STATUS(0)),
+		 readl(sfr + ABOX_UAIF_CTRL0(1)),
+		 readl(sfr + ABOX_UAIF_CTRL1(1)),
+		 readl(sfr + ABOX_UAIF_STATUS(1)));
+}
+
 static irqreturn_t abox_dma_irq_handler(int irq, struct abox_data *data)
 {
 	struct device *dev = &data->pdev->dev;
 	int id;
+	int events;
+	bool playback;
 	struct platform_device **pdev_dma;
 	struct abox_platform_data *platform_data;
 
@@ -4722,26 +4777,32 @@ static irqreturn_t abox_dma_irq_handler(int irq, struct abox_data *data)
 	case RDMA0_BUF_EMPTY:
 		id = 0;
 		pdev_dma = data->pdev_rdma;
+		playback = true;
 		break;
 	case RDMA1_BUF_EMPTY:
 		id = 1;
 		pdev_dma = data->pdev_rdma;
+		playback = true;
 		break;
 	case RDMA2_BUF_EMPTY:
 		id = 2;
 		pdev_dma = data->pdev_rdma;
+		playback = true;
 		break;
 	case RDMA3_BUF_EMPTY:
 		id = 3;
 		pdev_dma = data->pdev_rdma;
+		playback = true;
 		break;
 	case WDMA0_BUF_FULL:
 		id = 0;
 		pdev_dma = data->pdev_wdma;
+		playback = false;
 		break;
 	case WDMA1_BUF_FULL:
 		id = 1;
 		pdev_dma = data->pdev_wdma;
+		playback = false;
 		break;
 	default:
 		return IRQ_NONE;
@@ -4759,11 +4820,19 @@ static irqreturn_t abox_dma_irq_handler(int irq, struct abox_data *data)
 	}
 
 	platform_data->pointer = 0;
-	atomic_inc(&platform_data->pointer_events);
-	if (READ_ONCE(platform_data->playback_trace_active) &&
+	events = atomic_inc_return(&platform_data->pointer_events);
+	if (playback && READ_ONCE(platform_data->playback_trace_active) &&
 	    !xchg(&platform_data->playback_trace_pointer, true))
 		abox_rdma_trace_state(&pdev_dma[id]->dev, platform_data,
 				      platform_data->substream, "first-irq");
+
+	/* Allow the internal speaker graph several periods to fill. */
+	if (playback && id == 0 && events == 8 &&
+	    READ_ONCE(platform_data->playback_trace_active)) {
+		abox_rdma_trace_state(&pdev_dma[id]->dev, platform_data,
+				      platform_data->substream, "eighth-irq");
+		abox_trace_speaker_pipeline(data);
+	}
 	snd_pcm_period_elapsed(platform_data->substream);
 
 	return IRQ_HANDLED;

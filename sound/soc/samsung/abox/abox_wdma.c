@@ -90,6 +90,54 @@ static irqreturn_t abox_wdma_irq_handler(int irq, void *dev_id,
 	return IRQ_HANDLED;
 }
 
+static bool abox_wdma_trace_channel(struct abox_platform_data *data)
+{
+	return IS_ENABLED(CONFIG_SOC_EXYNOS9810) &&
+		(data->id == 0 || data->id == 4);
+}
+
+void abox_wdma_trace_state(struct device *dev,
+			   struct abox_platform_data *data,
+			   struct snd_pcm_substream *substream,
+			   const char *phase)
+{
+	struct snd_pcm_runtime *runtime;
+	unsigned int nonzero = 0;
+	unsigned int sample_or = 0;
+	unsigned int i;
+
+	if (!abox_wdma_trace_channel(data) || !substream)
+		return;
+
+	runtime = substream->runtime;
+	if (!runtime || !runtime->dma_area)
+		return;
+
+	dma_rmb();
+	for (i = 0; i < runtime->dma_bytes; i++) {
+		u8 sample = READ_ONCE(runtime->dma_area[i]);
+
+		nonzero += !!sample;
+		sample_or |= sample;
+	}
+
+	dev_info(dev,
+		 "E981D: WDMA%d %s pointer=%#x alsa=%lu/%lu data=%u/%zu or=%#x\n",
+		 data->id, phase, READ_ONCE(data->pointer),
+		 runtime->status ? READ_ONCE(runtime->status->hw_ptr) : 0,
+		 runtime->control ? READ_ONCE(runtime->control->appl_ptr) : 0,
+		 nonzero, runtime->dma_bytes, sample_or);
+	dev_info(dev,
+		 "E981D: WDMA%d %s regs=%#x/%#x/%#x/%#x/%#x/%#x\n",
+		 data->id, phase,
+		 readl(data->sfr_base + ABOX_WDMA_CTRL),
+		 readl(data->sfr_base + ABOX_WDMA_BUF_STR),
+		 readl(data->sfr_base + ABOX_WDMA_BUF_END),
+		 readl(data->sfr_base + ABOX_WDMA_BUF_OFFSET),
+		 readl(data->sfr_base + ABOX_WDMA_STR_POINT),
+		 readl(data->sfr_base + ABOX_WDMA_STATUS));
+}
+
 static int abox_wdma_enabled(struct abox_platform_data *data)
 {
 	return readl(data->sfr_base + ABOX_WDMA_CTRL) & ABOX_WDMA_ENABLE_MASK;

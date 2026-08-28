@@ -1207,14 +1207,23 @@ void abox_rdma_trace_state(struct device *dev,
 			   struct snd_pcm_substream *substream,
 			   const char *phase)
 {
-	struct snd_pcm_runtime *runtime = substream->runtime;
+	struct snd_pcm_runtime *runtime;
+	u8 *firmware_area;
+	u32 firmware_start;
+	u32 firmware_end;
+	size_t firmware_bytes;
 	unsigned int nonzero = 0;
 	unsigned int sample_or = 0;
 	unsigned int i;
 
-	if (!abox_rdma_trace_channel(data) || !runtime || !runtime->dma_area)
+	if (!abox_rdma_trace_channel(data) || !substream)
 		return;
 
+	runtime = substream->runtime;
+	if (!runtime || !runtime->dma_area)
+		return;
+
+	dma_rmb();
 	for (i = 0; i < runtime->dma_bytes; i++) {
 		u8 sample = runtime->dma_area[i];
 
@@ -1238,6 +1247,35 @@ void abox_rdma_trace_state(struct device *dev,
 		 readl(data->sfr_base + ABOX_RDMA_BUF_OFFSET),
 		 readl(data->sfr_base + ABOX_RDMA_STR_POINT),
 		 readl(data->sfr_base + ABOX_RDMA_STATUS));
+	if (data->id != 7)
+		return;
+
+	firmware_start = readl(data->sfr_base + ABOX_RDMA_BUF_STR);
+	firmware_end = readl(data->sfr_base + ABOX_RDMA_BUF_END);
+	if (firmware_end <= firmware_start ||
+	    firmware_end - firmware_start > 64 * 1024) {
+		dev_info(dev,
+			 "E981D: RDMA7 %s invalid firmware buffer=%#x/%#x\n",
+			 phase, firmware_start, firmware_end);
+		return;
+	}
+
+	firmware_area = abox_addr_to_kernel_addr(data->abox_data,
+						 firmware_start);
+	firmware_bytes = firmware_end - firmware_start;
+	nonzero = 0;
+	sample_or = 0;
+	dma_rmb();
+	for (i = 0; i < firmware_bytes; i++) {
+		u8 sample = READ_ONCE(firmware_area[i]);
+
+		nonzero += !!sample;
+		sample_or |= sample;
+	}
+	dev_info(dev,
+		 "E981D: RDMA7 %s firmware=%u/%zu or=%#x range=%#x/%#x\n",
+		 phase, nonzero, firmware_bytes, sample_or,
+		 firmware_start, firmware_end);
 }
 
 static int abox_rdma_hw_params(struct snd_soc_component *component,
@@ -1455,7 +1493,9 @@ static int abox_rdma_trigger(struct snd_soc_component *component,
 		ret = abox_rdma_request_ipc(data, &msg, 1, 0);
 		if (READ_ONCE(data->playback_trace_active)) {
 			WRITE_ONCE(data->playback_trace_active, false);
-			WRITE_ONCE(data->playback_trace_done, true);
+			if (id != 0 ||
+			    atomic_read(&data->pointer_events) >= 8)
+				WRITE_ONCE(data->playback_trace_done, true);
 		}
 		switch (data->type) {
 		case PLATFORM_REALTIME:

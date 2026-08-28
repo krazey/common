@@ -1070,6 +1070,11 @@ void abox_rdma_trace_state(struct device *dev,
 			   struct snd_pcm_substream *substream,
 			   const char *phase);
 
+void abox_wdma_trace_state(struct device *dev,
+			   struct abox_platform_data *data,
+			   struct snd_pcm_substream *substream,
+			   const char *phase);
+
 /**
  * Register wdma to abox
  * @param[in]	data		pointer to abox_data structure
