@@ -241,7 +241,7 @@ static int abox_rdma_mailbox_send_cmd(struct device *dev, unsigned int cmd)
 	struct abox_platform_data *platform_data = dev_get_drvdata(dev);
 	struct device *dev_abox = &platform_data->pdev_abox->dev;
 	struct abox_compr_data *data = &platform_data->compr_data;
-	ABOX_IPC_MSG ipc;
+	ABOX_IPC_MSG ipc = { 0, };
 	u64 timeout;
 	int ret;
 
