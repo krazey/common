@@ -23,7 +23,7 @@
 #define CLKS_NR_PERIC0		(CLK_GOUT_PERIC0_USI1_PCLK + 1)
 #define CLKS_NR_CMGP		(CLK_GOUT_CMGP_USI3_PCLK + 1)
 #define CLKS_NR_DPU		(CLK_GOUT_DPU_SYSMMU_DPUD1_QCH + 1)
-#define CLKS_NR_AUD		(CLK_GOUT_AUD_CPU + 1)
+#define CLKS_NR_AUD		(CLK_GOUT_AUD_DSIF_RST + 1)
 
 /* ---- CMU_TOP ---------------------------------------------------------- */
 
@@ -327,6 +327,11 @@ static const struct samsung_cmu_info dpu_cmu_info __initconst = {
 #define CLK_CON_GAT_AUD_UAIF2				0x2024
 #define CLK_CON_GAT_AUD_UAIF3				0x2028
 #define CLK_CON_GAT_AUD_SYSMMU_PCLK			0x203c
+#define CLK_CON_GAT_AUD_DSIF_RST			0x208c
+#define CLK_CON_GAT_AUD_UAIF0_RST			0x2090
+#define CLK_CON_GAT_AUD_UAIF1_RST			0x2094
+#define CLK_CON_GAT_AUD_UAIF2_RST			0x2098
+#define CLK_CON_GAT_AUD_UAIF3_RST			0x209c
 #define DMYQCH_CON_ABOX_CPU				0x3000
 #define DMYQCH_CON_DMIC					0x3008
 #define QCH_CON_ABOX_ACLK				0x3024
@@ -362,6 +367,11 @@ static const unsigned long aud_clk_regs[] __initconst = {
 	CLK_CON_GAT_AUD_UAIF2,
 	CLK_CON_GAT_AUD_UAIF3,
 	CLK_CON_GAT_AUD_SYSMMU_PCLK,
+	CLK_CON_GAT_AUD_DSIF_RST,
+	CLK_CON_GAT_AUD_UAIF0_RST,
+	CLK_CON_GAT_AUD_UAIF1_RST,
+	CLK_CON_GAT_AUD_UAIF2_RST,
+	CLK_CON_GAT_AUD_UAIF3_RST,
 	DMYQCH_CON_ABOX_CPU,
 	DMYQCH_CON_DMIC,
 	QCH_CON_ABOX_ACLK,
@@ -474,6 +484,16 @@ static const struct samsung_gate_clock aud_gate_clks[] __initconst = {
 	     CLK_CON_GAT_AUD_UAIF3, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_DSIF, "gout_aud_dsif", "dout_aud_dsif",
 	     CLK_CON_GAT_AUD_DSIF, 21, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF0_RST, "gout_aud_uaif0_rst", "mout_aud_uaif0",
+	     CLK_CON_GAT_AUD_UAIF0_RST, 21, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF1_RST, "gout_aud_uaif1_rst", "mout_aud_uaif1",
+	     CLK_CON_GAT_AUD_UAIF1_RST, 21, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF2_RST, "gout_aud_uaif2_rst", "mout_aud_uaif2",
+	     CLK_CON_GAT_AUD_UAIF2_RST, 21, 0, 0),
+	GATE(CLK_GOUT_AUD_UAIF3_RST, "gout_aud_uaif3_rst", "mout_aud_uaif3",
+	     CLK_CON_GAT_AUD_UAIF3_RST, 21, 0, 0),
+	GATE(CLK_GOUT_AUD_DSIF_RST, "gout_aud_dsif_rst", "dout_aud_dsif",
+	     CLK_CON_GAT_AUD_DSIF_RST, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_ABOX_ACLK, "gout_aud_abox_aclk",
 	     "dout_aud_bus", QCH_CON_ABOX_ACLK, 1,
 	     CLK_IS_CRITICAL, 0),

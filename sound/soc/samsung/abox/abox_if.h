@@ -33,6 +33,7 @@ struct abox_if_data {
 	void __iomem *sfr_base;
 	struct clk *clk_bclk;
 	struct clk *clk_bclk_gate;
+	struct clk *clk_bclk_reset;
 	struct snd_soc_component *cmpnt;
 	struct snd_soc_dai_driver *dai_drv;
 	struct abox_data *abox_data;

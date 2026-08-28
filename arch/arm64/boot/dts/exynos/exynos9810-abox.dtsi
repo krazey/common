@@ -180,8 +180,9 @@
 			reg = <0x17c50500 0x10>;
 			id = <0>;
 			clocks = <&cmu_aud CLK_DOUT_AUD_UAIF0>,
-				 <&cmu_aud CLK_GOUT_AUD_UAIF0>;
-			clock-names = "bclk", "bclk_gate";
+				 <&cmu_aud CLK_GOUT_AUD_UAIF0>,
+				 <&cmu_aud CLK_GOUT_AUD_UAIF0_RST>;
+			clock-names = "bclk", "bclk_gate", "bclk_reset";
 			pinctrl-0 = <&aud_i2s0_bus>;
 			pinctrl-1 = <&aud_i2s0_idle>;
 			pinctrl-names = "default", "sleep";
@@ -192,8 +193,9 @@
 			reg = <0x17c50510 0x10>;
 			id = <1>;
 			clocks = <&cmu_aud CLK_DOUT_AUD_UAIF1>,
-				 <&cmu_aud CLK_GOUT_AUD_UAIF1>;
-			clock-names = "bclk", "bclk_gate";
+				 <&cmu_aud CLK_GOUT_AUD_UAIF1>,
+				 <&cmu_aud CLK_GOUT_AUD_UAIF1_RST>;
+			clock-names = "bclk", "bclk_gate", "bclk_reset";
 			pinctrl-0 = <&aud_i2s1_bus>;
 			pinctrl-1 = <&aud_i2s1_idle>;
 			pinctrl-names = "default", "sleep";
@@ -204,8 +206,9 @@
 			reg = <0x17c50520 0x10>;
 			id = <2>;
 			clocks = <&cmu_aud CLK_DOUT_AUD_UAIF2>,
-				 <&cmu_aud CLK_GOUT_AUD_UAIF2>;
-			clock-names = "bclk", "bclk_gate";
+				 <&cmu_aud CLK_GOUT_AUD_UAIF2>,
+				 <&cmu_aud CLK_GOUT_AUD_UAIF2_RST>;
+			clock-names = "bclk", "bclk_gate", "bclk_reset";
 			pinctrl-0 = <&aud_i2s2_bus>;
 			pinctrl-1 = <&aud_i2s2_idle>;
 			pinctrl-names = "default", "sleep";
@@ -216,8 +219,9 @@
 			reg = <0x17c50530 0x10>;
 			id = <3>;
 			clocks = <&cmu_aud CLK_DOUT_AUD_UAIF3>,
-				 <&cmu_aud CLK_GOUT_AUD_UAIF3>;
-			clock-names = "bclk", "bclk_gate";
+				 <&cmu_aud CLK_GOUT_AUD_UAIF3>,
+				 <&cmu_aud CLK_GOUT_AUD_UAIF3_RST>;
+			clock-names = "bclk", "bclk_gate", "bclk_reset";
 			pinctrl-0 = <&aud_i2s3_bus>;
 			pinctrl-1 = <&aud_i2s3_idle>;
 			pinctrl-names = "default", "sleep";
@@ -228,8 +232,9 @@
 			reg = <0x17c50550 0x10>;
 			id = <5>;
 			clocks = <&cmu_aud CLK_DOUT_AUD_DSIF>,
-				 <&cmu_aud CLK_GOUT_AUD_DSIF>;
-			clock-names = "bclk", "bclk_gate";
+				 <&cmu_aud CLK_GOUT_AUD_DSIF>,
+				 <&cmu_aud CLK_GOUT_AUD_DSIF_RST>;
+			clock-names = "bclk", "bclk_gate", "bclk_reset";
 		};
 
 		abox_effect: audio-effect@17d2e000 {

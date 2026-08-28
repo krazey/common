@@ -9,6 +9,7 @@
  * published by the Free Software Foundation.
  */
 #include <linux/clk.h>
+#include <linux/clk-provider.h>
 #include <linux/module.h>
 #include <linux/of.h>
 #include <linux/of_platform.h>
@@ -59,6 +60,7 @@ static void abox_uaif_trace_bclk(struct device *dev,
 {
 	struct clk *mux;
 	struct clk *source;
+	unsigned int ctrl0 = 0, ctrl1 = 0, qchannel = 0;
 
 	if (!IS_ENABLED(CONFIG_SOC_EXYNOS9810) || data->id != 1)
 		return;
@@ -66,12 +68,21 @@ static void abox_uaif_trace_bclk(struct device *dev,
 	mux = clk_get_parent(data->clk_bclk_gate);
 	source = mux ? clk_get_parent(mux) : NULL;
 	dev_info(dev,
-		 "E981D: UAIF1 clocks div=%lu gate=%lu mux=%lu source=%lu internal=%d\n",
+		 "E981D: UAIF1 clocks div=%lu gate=%lu reset=%lu mux=%lu source=%lu\n",
 		 clk_get_rate(data->clk_bclk),
 		 clk_get_rate(data->clk_bclk_gate),
+		 clk_get_rate(data->clk_bclk_reset),
 		 mux ? clk_get_rate(mux) : 0,
-		 source ? clk_get_rate(source) : 0,
-		 source && clk_is_match(source, data->clk_bclk));
+		 source ? clk_get_rate(source) : 0);
+	abox_component_read(data->cmpnt, ABOX_UAIF_CTRL0(data->id), &ctrl0);
+	abox_component_read(data->cmpnt, ABOX_UAIF_CTRL1(data->id), &ctrl1);
+	abox_component_read(data->cmpnt, ABOX_QCHANNEL_DISABLE, &qchannel);
+	dev_info(dev,
+		 "E981D: UAIF1 state enabled=%d/%d internal=%d ctrl=%#x/%#x qch=%#x\n",
+		 __clk_is_enabled(data->clk_bclk_gate),
+		 __clk_is_enabled(data->clk_bclk_reset),
+		 source && clk_is_match(source, data->clk_bclk),
+		 ctrl0, ctrl1, qchannel);
 }
 
 static int abox_if_startup(struct snd_pcm_substream *substream,
@@ -91,12 +102,17 @@ static int abox_if_startup(struct snd_pcm_substream *substream,
 	ret = clk_enable(data->clk_bclk);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable bclk: %d\n", ret);
-		goto err;
+		goto err_gear;
+	}
+	ret = clk_enable(data->clk_bclk_reset);
+	if (ret < 0) {
+		dev_err(dev, "Failed to enable bclk_reset: %d\n", ret);
+		goto err_bclk;
 	}
 	ret = clk_enable(data->clk_bclk_gate);
 	if (ret < 0) {
 		dev_err(dev, "Failed to enable bclk_gate: %d\n", ret);
-		goto err;
+		goto err_reset;
 	}
 
 	if (substream->stream == SNDRV_PCM_STREAM_CAPTURE)
@@ -104,7 +120,16 @@ static int abox_if_startup(struct snd_pcm_substream *substream,
 				ABOX_DATA_MODE_MASK | ABOX_IRQ_MODE_MASK,
 				(1 << ABOX_DATA_MODE_L) |
 				(0 << ABOX_IRQ_MODE_L));
-err:
+
+	return 0;
+
+err_reset:
+	clk_disable(data->clk_bclk_reset);
+err_bclk:
+	clk_disable(data->clk_bclk);
+err_gear:
+	abox_request_cpu_gear_dai(dev, abox_data, dai, ABOX_CPU_GEAR_MIN);
+
 	return ret;
 }
 
@@ -120,6 +145,7 @@ static void abox_if_shutdown(struct snd_pcm_substream *substream,
 			'C' : 'P');
 
 	clk_disable(data->clk_bclk_gate);
+	clk_disable(data->clk_bclk_reset);
 	clk_disable(data->clk_bclk);
 	abox_request_cpu_gear_dai(dev, abox_data, dai, ABOX_CPU_GEAR_MIN);
 }
@@ -515,6 +541,8 @@ static int abox_uaif_trigger(struct snd_pcm_substream *substream,
 	}
 	if (ret < 0)
 		dev_err(dev, "sfr access failed: %d\n", ret);
+	else
+		abox_uaif_trace_bclk(dev, data);
 
 	return ret;
 }
@@ -797,6 +825,11 @@ static int samsung_abox_if_probe(struct platform_device *pdev)
 	data->clk_bclk_gate = devm_clk_get_and_prepare(pdev, "bclk_gate");
 	if (IS_ERR(data->clk_bclk_gate))
 		return PTR_ERR(data->clk_bclk_gate);
+
+	data->clk_bclk_reset =
+		devm_clk_get_optional_prepared(dev, "bclk_reset");
+	if (IS_ERR(data->clk_bclk_reset))
+		return PTR_ERR(data->clk_bclk_reset);
 
 	data->of_data = of_match_node(samsung_abox_if_match,
 			pdev->dev.of_node)->data;
