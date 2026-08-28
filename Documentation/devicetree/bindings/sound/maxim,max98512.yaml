@@ -130,6 +130,15 @@ properties:
     description: Disable voltage and current monitor feedback.
     type: boolean
 
+  maxim,platform-info:
+    description:
+      Samsung ABOX DSM platform type, port and module identifiers,
+      filter selector, and algorithm version. Platform type 2 selects
+      the ABOX transport used by Exynos9810.
+    $ref: /schemas/types.yaml#/definitions/uint32-array
+    minItems: 6
+    maxItems: 6
+
 required:
   - compatible
   - reg
@@ -150,6 +159,7 @@ examples:
         maxim,spk-gain-rcv = <1>;
         maxim,digital-gain-rcv = <52>;
         maxim,sysclk-hz = <12288000>;
+        maxim,platform-info = <2 0 0 0 0 52>;
         maxim,boost-step = <15 15 15 15 15 15 15 15
                             15 15 15 15 15 15 2 0>;
         maxim,adc-threshold = <7>;
