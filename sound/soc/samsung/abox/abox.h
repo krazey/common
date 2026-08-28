@@ -815,6 +815,10 @@ struct abox_platform_data {
 	void __iomem *mailbox_base;
 	unsigned int id;
 	unsigned int pointer;
+	atomic_t pointer_events;
+	bool playback_trace_active;
+	bool playback_trace_done;
+	bool playback_trace_pointer;
 	int pm_qos_lit[RATE_COUNT];
 	int pm_qos_big[RATE_COUNT];
 	int pm_qos_hmp[RATE_COUNT];

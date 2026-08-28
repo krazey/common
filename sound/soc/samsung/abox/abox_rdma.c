@@ -1196,6 +1196,50 @@ static void abox_rdma_disable_barrier(struct device *dev,
 	}
 }
 
+static bool abox_rdma_trace_channel(struct abox_platform_data *data)
+{
+	return IS_ENABLED(CONFIG_SOC_EXYNOS9810) &&
+		(data->id == 0 || data->id == 2 || data->id == 7);
+}
+
+static void abox_rdma_trace_state(struct device *dev,
+				  struct abox_platform_data *data,
+				  struct snd_pcm_substream *substream,
+				  const char *phase)
+{
+	struct snd_pcm_runtime *runtime = substream->runtime;
+	unsigned int nonzero = 0;
+	unsigned int sample_or = 0;
+	unsigned int i;
+
+	if (!abox_rdma_trace_channel(data) || !runtime || !runtime->dma_area)
+		return;
+
+	for (i = 0; i < runtime->dma_bytes; i++) {
+		u8 sample = runtime->dma_area[i];
+
+		nonzero += !!sample;
+		sample_or |= sample;
+	}
+
+	dev_info(dev,
+		 "E981D: RDMA%d %s events=%d pointer=%#x alsa=%lu/%lu data=%u/%zu or=%#x\n",
+		 data->id, phase, atomic_read(&data->pointer_events),
+		 READ_ONCE(data->pointer),
+		 runtime->status ? READ_ONCE(runtime->status->hw_ptr) : 0,
+		 runtime->control ? READ_ONCE(runtime->control->appl_ptr) : 0,
+		 nonzero, runtime->dma_bytes, sample_or);
+	dev_info(dev, "E981D: RDMA%d %s regs=%#x/%#x/%#x/%#x/%#x/%#x/%#x\n",
+		 data->id, phase,
+		 readl(data->sfr_base + ABOX_RDMA_CTRL0),
+		 readl(data->sfr_base + ABOX_RDMA_CTRL1),
+		 readl(data->sfr_base + ABOX_RDMA_BUF_STR),
+		 readl(data->sfr_base + ABOX_RDMA_BUF_END),
+		 readl(data->sfr_base + ABOX_RDMA_BUF_OFFSET),
+		 readl(data->sfr_base + ABOX_RDMA_STR_POINT),
+		 readl(data->sfr_base + ABOX_RDMA_STATUS));
+}
+
 static int abox_rdma_hw_params(struct snd_soc_component *component,
 		struct snd_pcm_substream *substream,
 		struct snd_pcm_hw_params *params)
@@ -1391,14 +1435,28 @@ static int abox_rdma_trigger(struct snd_soc_component *component,
 	case SNDRV_PCM_TRIGGER_START:
 	case SNDRV_PCM_TRIGGER_RESUME:
 	case SNDRV_PCM_TRIGGER_PAUSE_RELEASE:
+		if (abox_rdma_trace_channel(data) &&
+		    !READ_ONCE(data->playback_trace_done)) {
+			atomic_set(&data->pointer_events, 0);
+			WRITE_ONCE(data->playback_trace_pointer, false);
+			WRITE_ONCE(data->playback_trace_active, true);
+		}
 		pcmtask_msg->param.trigger = 1;
 		ret = abox_rdma_request_ipc(data, &msg, 1, 0);
+		if (READ_ONCE(data->playback_trace_active))
+			abox_rdma_trace_state(dev, data, substream, "start");
 		break;
 	case SNDRV_PCM_TRIGGER_STOP:
 	case SNDRV_PCM_TRIGGER_SUSPEND:
 	case SNDRV_PCM_TRIGGER_PAUSE_PUSH:
+		if (READ_ONCE(data->playback_trace_active))
+			abox_rdma_trace_state(dev, data, substream, "stop");
 		pcmtask_msg->param.trigger = 0;
 		ret = abox_rdma_request_ipc(data, &msg, 1, 0);
+		if (READ_ONCE(data->playback_trace_active)) {
+			WRITE_ONCE(data->playback_trace_active, false);
+			WRITE_ONCE(data->playback_trace_done, true);
+		}
 		switch (data->type) {
 		case PLATFORM_REALTIME:
 			msg.ipcid = IPC_ERAP;
@@ -1897,6 +1955,7 @@ static int samsung_abox_rdma_probe(struct platform_device *pdev)
 
 	platform_set_drvdata(pdev, data);
 	data->pdev = pdev;
+	atomic_set(&data->pointer_events, 0);
 
 	data->sfr_base = devm_not_request_and_map(pdev, "sfr", 0, NULL, NULL);
 	if (IS_ERR(data->sfr_base))

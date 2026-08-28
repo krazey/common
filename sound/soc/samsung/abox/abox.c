@@ -4759,6 +4759,7 @@ static irqreturn_t abox_dma_irq_handler(int irq, struct abox_data *data)
 	}
 
 	platform_data->pointer = 0;
+	atomic_inc(&platform_data->pointer_events);
 	snd_pcm_period_elapsed(platform_data->substream);
 
 	return IRQ_HANDLED;
@@ -4966,6 +4967,13 @@ static void abox_playback_ipc_handler(struct device *dev,
 	switch (pcmtask_msg->msgtype) {
 	case PCM_PLTDAI_POINTER:
 		platform_data->pointer = pcmtask_msg->param.pointer;
+		atomic_inc(&platform_data->pointer_events);
+		if (READ_ONCE(platform_data->playback_trace_active) &&
+		    !xchg(&platform_data->playback_trace_pointer, true))
+			dev_info(dev,
+				 "E981D: RDMA%d first pointer=%#x status=%#x\n",
+				 id, pcmtask_msg->param.pointer,
+				 readl(platform_data->sfr_base + ABOX_RDMA_STATUS));
 		snd_pcm_period_elapsed(platform_data->substream);
 		break;
 	case PCM_PLTDAI_ACK:
