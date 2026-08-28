@@ -471,6 +471,23 @@ static const struct samsung_div_clock aud_div_clks[] __initconst = {
 
 static const struct samsung_gate_clock aud_gate_clks[] __initconst = {
 	/*
+	 * The downstream HWACG clocks leave the BCLK Q-channel in automatic
+	 * mode.  Their CCF enable callbacks are intentionally no-ops: the ABOX
+	 * interface asserts the hardware request when its SPK/MIC path starts.
+	 * Keep that mode enabled independently of the software-controlled
+	 * serial and reset gates below.
+	 */
+	GATE(0, "gout_aud_uaif0_qch", NULL, QCH_CON_ABOX_BCLK0, 0,
+	     CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_aud_uaif1_qch", NULL, QCH_CON_ABOX_BCLK1, 0,
+	     CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_aud_uaif2_qch", NULL, QCH_CON_ABOX_BCLK2, 0,
+	     CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_aud_uaif3_qch", NULL, QCH_CON_ABOX_BCLK3, 0,
+	     CLK_IS_CRITICAL, 0),
+	GATE(0, "gout_aud_dsif_qch", NULL, QCH_CON_ABOX_BCLK_DSIF, 0,
+	     CLK_IS_CRITICAL, 0),
+	/*
 	 * QCH_CON controls the handshake around each interface.  The serial
 	 * clock itself is gated by CG_VAL in CLK_CON_GAT at bit 21.
 	 */
