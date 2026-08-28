@@ -4102,6 +4102,32 @@ int abox_iommu_map_sg(struct device *dev, unsigned long iova,
 }
 EXPORT_SYMBOL(abox_iommu_map_sg);
 
+int abox_iommu_map_dma(struct device *dev, unsigned long iova,
+		       struct device *dma_dev, void *area,
+		       dma_addr_t dma_addr, size_t bytes)
+{
+	struct sg_table sgt;
+	int ret;
+
+	if (!area || !bytes)
+		return -EINVAL;
+
+	bytes = PAGE_ALIGN(bytes);
+	ret = dma_get_sgtable(dma_dev, &sgt, area, dma_addr, bytes);
+	if (ret < 0) {
+		dev_err(dev, "Failed to describe DMA buffer %#lx: %d\n",
+			iova, ret);
+		return ret;
+	}
+
+	ret = abox_iommu_map_sg(dev, iova, sgt.sgl, sgt.orig_nents,
+				0, bytes, area);
+	sg_free_table(&sgt);
+
+	return ret;
+}
+EXPORT_SYMBOL(abox_iommu_map_dma);
+
 int abox_iommu_unmap(struct device *dev, unsigned long iova,
 		phys_addr_t paddr, size_t size)
 {

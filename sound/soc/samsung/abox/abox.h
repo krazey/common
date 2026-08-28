@@ -839,6 +839,20 @@ struct abox_platform_data {
 extern struct abox_data *abox_get_abox_data(void);
 
 /**
+ * map a DMA allocation into the ABOX IOMMU domain
+ * @param[in]	dev		pointer to abox device
+ * @param[in]	iova		device virtual address
+ * @param[in]	dma_dev		device which allocated the DMA buffer
+ * @param[in]	area		kernel virtual address
+ * @param[in]	dma_addr	DMA address returned by the allocator
+ * @param[in]	bytes		size of the mapping area
+ * @return	error code if any
+ */
+int abox_iommu_map_dma(struct device *dev, unsigned long iova,
+		       struct device *dma_dev, void *area,
+		       dma_addr_t dma_addr, size_t bytes);
+
+/**
  * get physical address from abox virtual address
  * @param[in]	data	pointer to abox_data structure
  * @param[in]	addr	abox virtual address

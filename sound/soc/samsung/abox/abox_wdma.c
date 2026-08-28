@@ -545,6 +545,8 @@ static int abox_wdma_new(struct snd_soc_component *component,
 	struct snd_pcm_substream *substream = stream->substream;
 	struct device *dev = component->dev;
 	struct abox_platform_data *data = dev_get_drvdata(dev);
+	struct device *abox_dev = &data->abox_data->pdev->dev;
+	struct device *dma_dev = snd_soc_rtd_to_cpu(runtime, 0)->dev;
 	int id = data->id;
 	size_t buffer_bytes;
 	int ret;
@@ -581,15 +583,19 @@ static int abox_wdma_new(struct snd_soc_component *component,
 
 		snd_pcm_lib_preallocate_pages(substream,
 					      SNDRV_DMA_TYPE_DEV,
-					      snd_soc_rtd_to_cpu(runtime, 0)->dev,
-					      buffer_bytes, buffer_bytes);
+					      dma_dev, buffer_bytes, 0);
+		if (!substream->dma_buffer.area)
+			return -ENOMEM;
 		ret = 0;
 
 #ifdef USE_FIXED_MEMORY
-		ret = abox_iommu_map_legacy(data->abox_data->iommu_domain,
-					    IOVA_WDMA_BUFFER(id),
-					    substream->dma_buffer.addr,
-					    BUFFER_BYTES_MAX, 0);
+		ret = abox_iommu_map_dma(abox_dev,
+					 IOVA_WDMA_BUFFER(id), dma_dev,
+				substream->dma_buffer.area,
+				substream->dma_buffer.addr,
+				substream->dma_buffer.bytes);
+		if (ret < 0)
+			snd_pcm_lib_preallocate_free_for_all(pcm);
 #endif
 	}
 
@@ -599,6 +605,8 @@ static int abox_wdma_new(struct snd_soc_component *component,
 static void abox_wdma_free(struct snd_soc_component *component,
 		struct snd_pcm *pcm)
 {
+	struct snd_pcm_substream *substream =
+			pcm->streams[SNDRV_PCM_STREAM_CAPTURE].substream;
 	struct device *dev = component->dev;
 	struct abox_platform_data *data = dev_get_drvdata(dev);
 	int id = data->id;
@@ -616,8 +624,14 @@ static void abox_wdma_free(struct snd_soc_component *component,
 		}
 	} else {
 #ifdef USE_FIXED_MEMORY
-		iommu_unmap(data->abox_data->iommu_domain, IOVA_WDMA_BUFFER(id),
-				BUFFER_BYTES_MAX);
+		if (substream->dma_buffer.area) {
+			ret = abox_iommu_unmap(&data->abox_data->pdev->dev,
+					       IOVA_WDMA_BUFFER(id), 0,
+					       substream->dma_buffer.bytes);
+			if (ret < 0)
+				dev_warn(dev, "failed to unmap WDMA%d buffer: %d\n",
+					 id, ret);
+		}
 #endif
 		snd_pcm_lib_preallocate_free_for_all(pcm);
 	}
