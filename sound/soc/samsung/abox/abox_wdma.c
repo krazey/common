@@ -102,6 +102,10 @@ void abox_wdma_trace_state(struct device *dev,
 			   const char *phase)
 {
 	struct snd_pcm_runtime *runtime;
+	u8 *firmware_area;
+	u32 firmware_start;
+	u32 firmware_end;
+	size_t firmware_bytes;
 	unsigned int nonzero = 0;
 	unsigned int sample_or = 0;
 	unsigned int i;
@@ -136,6 +140,39 @@ void abox_wdma_trace_state(struct device *dev,
 		 readl(data->sfr_base + ABOX_WDMA_BUF_OFFSET),
 		 readl(data->sfr_base + ABOX_WDMA_STR_POINT),
 		 readl(data->sfr_base + ABOX_WDMA_STATUS));
+
+	firmware_start = readl(data->sfr_base + ABOX_WDMA_BUF_STR);
+	firmware_end = readl(data->sfr_base + ABOX_WDMA_BUF_END);
+	if (firmware_end <= firmware_start ||
+	    firmware_end - firmware_start > 64 * 1024) {
+		dev_info(dev,
+			 "E981D: WDMA%d %s invalid firmware buffer=%#x/%#x\n",
+			 data->id, phase, firmware_start, firmware_end);
+		return;
+	}
+
+	firmware_area = abox_addr_to_kernel_addr(data->abox_data,
+						 firmware_start);
+	if (!firmware_area) {
+		dev_info(dev, "E981D: WDMA%d %s firmware buffer unmapped\n",
+			 data->id, phase);
+		return;
+	}
+
+	firmware_bytes = firmware_end - firmware_start;
+	nonzero = 0;
+	sample_or = 0;
+	dma_rmb();
+	for (i = 0; i < firmware_bytes; i++) {
+		u8 sample = READ_ONCE(firmware_area[i]);
+
+		nonzero += !!sample;
+		sample_or |= sample;
+	}
+	dev_info(dev,
+		 "E981D: WDMA%d %s firmware=%u/%zu or=%#x range=%#x/%#x\n",
+		 data->id, phase, nonzero, firmware_bytes, sample_or,
+		 firmware_start, firmware_end);
 }
 
 static int abox_wdma_enabled(struct abox_platform_data *data)
