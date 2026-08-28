@@ -206,6 +206,142 @@ static int max98512_wrapper_update(struct max98512_priv *max98512,
 	return ret;
 }
 
+enum max98512_state_index {
+	MAX98512_STATE_RAW1,
+	MAX98512_STATE_RAW2,
+	MAX98512_STATE_RAW3,
+	MAX98512_STATE_INT1,
+	MAX98512_STATE_INT2,
+	MAX98512_STATE_INT3,
+	MAX98512_STATE_CLK_MON,
+	MAX98512_STATE_PCM_RX,
+	MAX98512_STATE_PCM_MODE,
+	MAX98512_STATE_PCM_MASTER,
+	MAX98512_STATE_PCM_CLK,
+	MAX98512_STATE_PCM_SR1,
+	MAX98512_STATE_PCM_SR2,
+	MAX98512_STATE_MONOMIX_A,
+	MAX98512_STATE_MONOMIX_B,
+	MAX98512_STATE_AMP_VOL,
+	MAX98512_STATE_AMP_DSP,
+	MAX98512_STATE_AMP_EN,
+	MAX98512_STATE_SPK_SRC,
+	MAX98512_STATE_SPK_GAIN,
+	MAX98512_STATE_MEAS_EN,
+	MAX98512_STATE_BOOST0,
+	MAX98512_STATE_BOOST3,
+	MAX98512_STATE_BOOST1,
+	MAX98512_STATE_BROWNOUT,
+	MAX98512_STATE_BROWNOUT_EN,
+	MAX98512_STATE_ENV_TRACK,
+	MAX98512_STATE_BYPASS1,
+	MAX98512_STATE_BYPASS2,
+	MAX98512_STATE_BYPASS3,
+	MAX98512_STATE_GLOBAL,
+	MAX98512_STATE_COUNT,
+};
+
+static const unsigned int max98512_state_registers[] = {
+	[MAX98512_STATE_RAW1] = MAX98512_R0001_INT_RAW1,
+	[MAX98512_STATE_RAW2] = MAX98512_R0002_INT_RAW2,
+	[MAX98512_STATE_RAW3] = MAX98512_R0003_INT_RAW3,
+	[MAX98512_STATE_INT1] = MAX98512_R0004_INT_STATE1,
+	[MAX98512_STATE_INT2] = MAX98512_R0005_INT_STATE2,
+	[MAX98512_STATE_INT3] = MAX98512_R0006_INT_STATE3,
+	[MAX98512_STATE_CLK_MON] = MAX98512_R0011_CLK_MON,
+	[MAX98512_STATE_PCM_RX] = MAX98512_R0018_PCM_RX_EN_A,
+	[MAX98512_STATE_PCM_MODE] = MAX98512_R0020_PCM_MODE_CFG,
+	[MAX98512_STATE_PCM_MASTER] = MAX98512_R0021_PCM_MASTER_MODE,
+	[MAX98512_STATE_PCM_CLK] = MAX98512_R0022_PCM_CLK_SETUP,
+	[MAX98512_STATE_PCM_SR1] = MAX98512_R0023_PCM_SR_SETUP1,
+	[MAX98512_STATE_PCM_SR2] = MAX98512_R0024_PCM_SR_SETUP2,
+	[MAX98512_STATE_MONOMIX_A] = MAX98512_R0025_PCM_TO_SPK_MONOMIX_A,
+	[MAX98512_STATE_MONOMIX_B] = MAX98512_R0026_PCM_TO_SPK_MONOMIX_B,
+	[MAX98512_STATE_AMP_VOL] = MAX98512_R0035_AMP_VOL_CTRL,
+	[MAX98512_STATE_AMP_DSP] = MAX98512_R0036_AMP_DSP_CFG,
+	[MAX98512_STATE_AMP_EN] = MAX98512_R0038_AMP_EN,
+	[MAX98512_STATE_SPK_SRC] = MAX98512_R0039_SPK_SRC_SEL,
+	[MAX98512_STATE_SPK_GAIN] = MAX98512_R003A_SPK_GAIN,
+	[MAX98512_STATE_MEAS_EN] = MAX98512_R003C_MEAS_EN,
+	[MAX98512_STATE_BOOST0] = MAX98512_R003E_BOOST_CTRL0,
+	[MAX98512_STATE_BOOST3] = MAX98512_R003F_BOOST_CTRL3,
+	[MAX98512_STATE_BOOST1] = MAX98512_R0040_BOOST_CTRL1,
+	[MAX98512_STATE_BROWNOUT] = MAX98512_R004F_BROWNOUT_STATUS,
+	[MAX98512_STATE_BROWNOUT_EN] = MAX98512_R0050_BROWNOUT_EN,
+	[MAX98512_STATE_ENV_TRACK] = MAX98512_R0084_ENV_TRACK_CTRL,
+	[MAX98512_STATE_BYPASS1] = MAX98512_R0086_BOOST_BYPASS_1,
+	[MAX98512_STATE_BYPASS2] = MAX98512_R0087_BOOST_BYPASS_2,
+	[MAX98512_STATE_BYPASS3] = MAX98512_R0088_BOOST_BYPASS_3,
+	[MAX98512_STATE_GLOBAL] = MAX98512_R0400_GLOBAL_SHDN,
+};
+
+static void max98512_log_amp_state(struct max98512_priv *max98512,
+				   int speaker, const char *name)
+{
+	unsigned int state[MAX98512_STATE_COUNT];
+	int i, ret;
+
+	for (i = 0; i < ARRAY_SIZE(max98512_state_registers); i++) {
+		ret = max98512_wrapper_read(max98512, speaker,
+					    max98512_state_registers[i],
+					    &state[i]);
+		if (ret) {
+			dev_warn(max98512->i2c_dev,
+				 "speaker state %s unavailable at %#x: %d\n",
+				 name, max98512_state_registers[i], ret);
+			return;
+		}
+	}
+
+	dev_info(max98512->i2c_dev,
+		 "speaker state %s raw=%02x/%02x/%02x int=%02x/%02x/%02x clk=%02x\n",
+		 name, state[MAX98512_STATE_RAW1], state[MAX98512_STATE_RAW2],
+		 state[MAX98512_STATE_RAW3], state[MAX98512_STATE_INT1],
+		 state[MAX98512_STATE_INT2], state[MAX98512_STATE_INT3],
+		 state[MAX98512_STATE_CLK_MON]);
+	dev_info(max98512->i2c_dev,
+		 "speaker state %s pcm=%02x/%02x/%02x/%02x sr=%02x/%02x mix=%02x/%02x\n",
+		 name, state[MAX98512_STATE_PCM_RX], state[MAX98512_STATE_PCM_MODE],
+		 state[MAX98512_STATE_PCM_MASTER], state[MAX98512_STATE_PCM_CLK],
+		 state[MAX98512_STATE_PCM_SR1], state[MAX98512_STATE_PCM_SR2],
+		 state[MAX98512_STATE_MONOMIX_A],
+		 state[MAX98512_STATE_MONOMIX_B]);
+	dev_info(max98512->i2c_dev,
+		 "speaker state %s output=%02x/%02x/%02x/%02x/%02x/%02x global=%02x\n",
+		 name, state[MAX98512_STATE_AMP_VOL], state[MAX98512_STATE_AMP_DSP],
+		 state[MAX98512_STATE_AMP_EN], state[MAX98512_STATE_SPK_SRC],
+		 state[MAX98512_STATE_SPK_GAIN], state[MAX98512_STATE_MEAS_EN],
+		 state[MAX98512_STATE_GLOBAL]);
+	dev_info(max98512->i2c_dev,
+		 "speaker state %s boost=%02x/%02x/%02x brownout=%02x/%02x env=%02x bypass=%02x/%02x/%02x\n",
+		 name, state[MAX98512_STATE_BOOST0], state[MAX98512_STATE_BOOST3],
+		 state[MAX98512_STATE_BOOST1], state[MAX98512_STATE_BROWNOUT],
+		 state[MAX98512_STATE_BROWNOUT_EN], state[MAX98512_STATE_ENV_TRACK],
+		 state[MAX98512_STATE_BYPASS1], state[MAX98512_STATE_BYPASS2],
+		 state[MAX98512_STATE_BYPASS3]);
+}
+
+static void max98512_state_work(struct work_struct *work)
+{
+	struct max98512_priv *max98512 =
+		container_of(to_delayed_work(work), struct max98512_priv,
+			     state_work);
+
+	if (!READ_ONCE(max98512->pca.playback_active))
+		return;
+
+	max98512_log_amp_state(max98512, MAX98512L, "L");
+	if (max98512->mono_stereo)
+		max98512_log_amp_state(max98512, MAX98512R, "R");
+}
+
+static void max98512_cancel_state_work(void *data)
+{
+	struct max98512_priv *max98512 = data;
+
+	cancel_delayed_work_sync(&max98512->state_work);
+}
+
 static int max98512_dai_set_fmt(struct snd_soc_dai *codec_dai,
 				unsigned int fmt)
 {
@@ -855,7 +991,10 @@ static void max98512_spk_enable(struct max98512_priv *max98512, int enable)
 	unsigned int rx_l = 0, rx_r = 0;
 	int ret = 0;
 
-	max98512->pca.playback_active = enable;
+	if (!enable)
+		cancel_delayed_work_sync(&max98512->state_work);
+
+	WRITE_ONCE(max98512->pca.playback_active, enable);
 	if (enable) {
 		ret = __max98512_spk_enable(max98512);
 	} else {
@@ -905,6 +1044,10 @@ static void max98512_spk_enable(struct max98512_priv *max98512, int enable)
 		 "speaker %s L=%02x/%02x/%02x R=%02x/%02x/%02x ret=%d\n",
 		 enable ? "on" : "off", rx_l, amp_l, global_l,
 		 rx_r, amp_r, global_r, ret);
+
+	if (enable && !ret)
+		mod_delayed_work(system_wq, &max98512->state_work,
+				 msecs_to_jiffies(150));
 }
 
 static void max98512_spk_enable_l(struct max98512_priv *max98512, int enable)
@@ -1829,6 +1972,7 @@ static int max98512_i2c_probe(struct i2c_client *i2c)
 
 	i2c_set_clientdata(i2c, max98512);
 	max98512->i2c_dev = &i2c->dev;
+	INIT_DELAYED_WORK(&max98512->state_work, max98512_state_work);
 	pdata = max98512->pdata;
 	vstep = &max98512->vstep;
 
@@ -2053,6 +2197,11 @@ static int max98512_i2c_probe(struct i2c_client *i2c)
 	if (ret)
 		return dev_err_probe(&i2c->dev, ret,
 				     "failed to register component\n");
+
+	ret = devm_add_action_or_reset(&i2c->dev,
+				       max98512_cancel_state_work, max98512);
+	if (ret)
+		return ret;
 
 	dev_info(&i2c->dev,
 		 "MAX98512 stereo amplifier registered, revisions %d/%d\n",

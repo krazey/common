@@ -9,6 +9,7 @@
 #ifndef _MAX98512_H
 #define _MAX98512_H
 
+#include <linux/workqueue.h>
 #include <sound/maxim_dsm.h>
 
 #define MAX98512  0
@@ -518,6 +519,7 @@ struct max98512_priv {
 	struct regmap *regmap;
 	struct snd_soc_component *component;
 	struct max98512_pdata *pdata;
+	struct delayed_work state_work;
 	struct max98512_pc_active pca;
 	struct max98512_volume_step_info vstep;
 	unsigned int spk_gain;
