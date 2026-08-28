@@ -539,6 +539,7 @@ struct max98512_priv {
 	unsigned int master;
 	unsigned int digital_gain;
 	unsigned int digital_gain_rcv;
+	bool test_tone;
 	unsigned int current_limit_left;
 	unsigned int current_limit_right;
 	unsigned int thres_hyste;

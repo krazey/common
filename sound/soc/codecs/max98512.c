@@ -19,6 +19,10 @@
 #include <sound/maxim_dsm.h>
 #include "max98512.h"
 
+#define MAX98512_TEST_TONE_CFG		0x06
+#define MAX98512_TEST_TONE_DIGITAL_GAIN	0x20
+#define MAX98512_TEST_TONE_ANALOG_GAIN	0x01
+
 #define msg_maxim(format, args...) \
 	pr_debug("max98512: %s: " format "\n", __func__, ##args)
 
@@ -204,6 +208,37 @@ static int max98512_wrapper_update(struct max98512_priv *max98512,
 		"Failed to update [0x%04x, 0x%02x][%d]", reg, val, ret);
 
 	return ret;
+}
+
+static int max98512_select_test_tone(struct max98512_priv *max98512,
+				     bool enable)
+{
+	int restore_ret;
+	int ret;
+
+	ret = max98512_wrapper_update(max98512, MAX98512B,
+				      MAX98512_R0050_BROWNOUT_EN,
+				      MAX98512_BROWNOUT_DSP_EN, 0);
+	if (ret)
+		return ret;
+
+	ret = max98512_wrapper_write(max98512, MAX98512B,
+				     MAX98512_R0037_TONE_GEN_DC_CFG,
+				     enable ? MAX98512_TEST_TONE_CFG : 0);
+	if (!ret)
+		ret = max98512_wrapper_update(max98512, MAX98512B,
+					      MAX98512_R0039_SPK_SRC_SEL,
+					      MAX98512_SPK_SRC_MASK,
+					      enable ?
+					      MAX98512_SPK_SOURCE_TONE_GEN :
+					      MAX98512_SPK_SOURCE_DIGITAL);
+
+	restore_ret = max98512_wrapper_update(max98512, MAX98512B,
+					      MAX98512_R0050_BROWNOUT_EN,
+					      MAX98512_BROWNOUT_DSP_EN,
+					      MAX98512_BROWNOUT_DSP_EN);
+
+	return ret ? ret : restore_ret;
 }
 
 enum max98512_state_index {
@@ -1014,6 +1049,15 @@ static void max98512_spk_enable(struct max98512_priv *max98512, int enable)
 		usleep_range(15000, 16000);
 	}
 
+	if (!enable && READ_ONCE(max98512->test_tone)) {
+		WRITE_ONCE(max98512->test_tone, false);
+		ret = max98512_select_test_tone(max98512, false);
+		if (ret)
+			dev_warn(max98512->i2c_dev,
+				 "failed to restore digital speaker source: %d\n",
+				 ret);
+	}
+
 #if IS_ENABLED(CONFIG_SND_SOC_MAXIM_DSM)
 	maxdsm_set_spk_state(enable, max98512->pdata->osm);
 	if (enable) {
@@ -1242,6 +1286,118 @@ max98512_set_thermal_min_gain_status(struct snd_kcontrol *kcontrol,
 				     struct snd_ctl_elem_value *ucontrol)
 {
 	return 0;
+}
+
+static int max98512_test_tone_get(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct max98512_priv *max98512 = snd_soc_component_get_drvdata(component);
+
+	ucontrol->value.integer.value[0] = READ_ONCE(max98512->test_tone);
+
+	return 0;
+}
+
+static int max98512_test_tone_apply(struct max98512_priv *max98512,
+				    bool enable)
+{
+	int ret;
+
+	if (enable && !READ_ONCE(max98512->pca.playback_active))
+		return -EBUSY;
+
+	cancel_delayed_work_sync(&max98512->state_work);
+
+	/*
+	 * The tone register has to be programmed while the output and the
+	 * brownout DSP are disabled. Keep the detector and amplifier limiter
+	 * enabled, and restore the stock DSP protection before enabling output.
+	 */
+	ret = max98512_wrapper_update(max98512, MAX98512B,
+				      MAX98512_R0400_GLOBAL_SHDN,
+				      MAX98512_GLOBAL_EN_MASK, 0);
+	if (ret)
+		return ret;
+
+	ret = max98512_wrapper_update(max98512, MAX98512B,
+				      MAX98512_R0038_AMP_EN,
+				      MAX98512_AMP_EN_MASK, 0);
+	if (ret)
+		return ret;
+
+	ret = max98512_select_test_tone(max98512, enable);
+	if (ret)
+		goto restore_playback;
+
+	if (enable) {
+		/*
+		 * Use a conservative -8 dB digital / +3 dB analogue level.
+		 * At 48 kHz, tone configuration 0x06 produces 750 Hz.
+		 */
+		ret = max98512_wrapper_update(max98512, MAX98512B,
+					      MAX98512_R0035_AMP_VOL_CTRL,
+					      MAX98512_AMP_VOL_MASK,
+					      MAX98512_TEST_TONE_DIGITAL_GAIN);
+		if (ret)
+			goto restore_playback;
+
+		ret = max98512_wrapper_update(max98512, MAX98512B,
+					      MAX98512_R003A_SPK_GAIN,
+					      MAX98512_SPK_PCM_GAIN_MASK,
+					      MAX98512_TEST_TONE_ANALOG_GAIN);
+		if (ret)
+			goto restore_playback;
+	}
+
+	WRITE_ONCE(max98512->test_tone, enable);
+	if (enable) {
+		ret = max98512_wrapper_update(max98512, MAX98512B,
+					      MAX98512_R0038_AMP_EN,
+					      MAX98512_AMP_EN_MASK,
+					      MAX98512_AMP_EN_MASK);
+		if (!ret)
+			ret = max98512_wrapper_update(max98512, MAX98512B,
+						      MAX98512_R0400_GLOBAL_SHDN,
+						      MAX98512_GLOBAL_EN_MASK,
+						      MAX98512_GLOBAL_EN_MASK);
+	} else {
+		ret = __max98512_spk_enable(max98512);
+	}
+
+	if (ret)
+		goto restore_playback;
+
+	dev_info(max98512->i2c_dev, "MAX98512 750 Hz test tone %s\n",
+		 enable ? "enabled" : "disabled");
+	mod_delayed_work(system_wq, &max98512->state_work,
+			 msecs_to_jiffies(150));
+
+	return 0;
+
+restore_playback:
+	WRITE_ONCE(max98512->test_tone, false);
+	max98512_select_test_tone(max98512, false);
+	if (READ_ONCE(max98512->pca.playback_active))
+		__max98512_spk_enable(max98512);
+
+	return ret;
+}
+
+static int max98512_test_tone_put(struct snd_kcontrol *kcontrol,
+				  struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_component *component = snd_kcontrol_chip(kcontrol);
+	struct max98512_priv *max98512 = snd_soc_component_get_drvdata(component);
+	bool enable = !!ucontrol->value.integer.value[0];
+	int ret;
+
+	if (enable == READ_ONCE(max98512->test_tone))
+		return 0;
+
+	ret = max98512_test_tone_apply(max98512, enable);
+
+	return ret ? ret : 1;
 }
 
 static const char *const pdm_1_text[] = {
@@ -1570,6 +1726,8 @@ static const struct snd_kcontrol_new max98512_snd_controls[] = {
 		     max98512_analog_gain_r_get, max98512_analog_gain_r_put),
 	SOC_SINGLE_EXT("Spk AmpL Power", SND_SOC_NOPM, 0, 1, 0,
 		       max98512_get_amp_l_status, max98512_set_amp_l_status),
+	SOC_SINGLE_EXT("MAX98512 Test Tone", SND_SOC_NOPM, 0, 1, 0,
+		       max98512_test_tone_get, max98512_test_tone_put),
 	SOC_SINGLE_EXT("Safety mode", SND_SOC_NOPM, 0, 1, 0,
 		       max98512_get_thermal_min_gain_status, max98512_set_thermal_min_gain_status),
 };
@@ -1618,6 +1776,8 @@ static const struct snd_kcontrol_new max98512b_snd_controls[] = {
 		     max98512_analog_gain_r_get, max98512_analog_gain_r_put),
 	SOC_SINGLE_EXT("Spk AmpL Power", SND_SOC_NOPM, 0, 1, 0,
 		       max98512_get_amp_l_status, max98512_set_amp_l_status),
+	SOC_SINGLE_EXT("MAX98512 Test Tone", SND_SOC_NOPM, 0, 1, 0,
+		       max98512_test_tone_get, max98512_test_tone_put),
 	SOC_SINGLE_EXT("Safety mode", SND_SOC_NOPM, 0, 1, 0,
 		       max98512_get_thermal_min_gain_status, max98512_set_thermal_min_gain_status),
 };
