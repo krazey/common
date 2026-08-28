@@ -125,6 +125,7 @@ firmware_class.path=/vendor/firmware bootconfig";
 			maxim,current-limit-left = <22>;
 			maxim,current-limit-right = <62>;
 			maxim,sysclk-hz = <12288000>;
+			maxim,platform-info = <2 0 0 0 0 52>;
 			maxim,boost-step = <15 15 15 15 15 15 15 15
 					    15 15 15 15 15 15 2 0>;
 			maxim,adc-threshold = <7>;
