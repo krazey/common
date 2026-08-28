@@ -460,16 +460,20 @@ static const struct samsung_div_clock aud_div_clks[] __initconst = {
 };
 
 static const struct samsung_gate_clock aud_gate_clks[] __initconst = {
+	/*
+	 * QCH_CON controls the handshake around each interface.  The serial
+	 * clock itself is gated by CG_VAL in CLK_CON_GAT at bit 21.
+	 */
 	GATE(CLK_GOUT_AUD_UAIF0, "gout_aud_uaif0", "mout_aud_uaif0",
-	     QCH_CON_ABOX_BCLK0, 1, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF0, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_UAIF1, "gout_aud_uaif1", "mout_aud_uaif1",
-	     QCH_CON_ABOX_BCLK1, 1, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF1, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_UAIF2, "gout_aud_uaif2", "mout_aud_uaif2",
-	     QCH_CON_ABOX_BCLK2, 1, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF2, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_UAIF3, "gout_aud_uaif3", "mout_aud_uaif3",
-	     QCH_CON_ABOX_BCLK3, 1, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF3, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_DSIF, "gout_aud_dsif", "dout_aud_dsif",
-	     QCH_CON_ABOX_BCLK_DSIF, 1, 0, 0),
+	     CLK_CON_GAT_AUD_DSIF, 21, 0, 0),
 	GATE(CLK_GOUT_AUD_ABOX_ACLK, "gout_aud_abox_aclk",
 	     "dout_aud_bus", QCH_CON_ABOX_ACLK, 1,
 	     CLK_IS_CRITICAL, 0),
