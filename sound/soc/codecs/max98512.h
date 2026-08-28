@@ -8,6 +8,9 @@
 
 #ifndef _MAX98512_H
 #define _MAX98512_H
+
+#include <sound/maxim_dsm.h>
+
 #define MAX98512  0
 #define MAX98512L 0
 #define MAX98512R 1
@@ -498,10 +501,12 @@ struct max98512_pc_active {
 };
 
 struct max98512_pdata {
+	u32 platform_info[PARAM_OFFSET_MAX];
 	u32 boostv;
 	int osm;
 	int boost_mode;
 	bool nodsm;
+	bool has_platform_info;
 	int sub_reg;
 };
 

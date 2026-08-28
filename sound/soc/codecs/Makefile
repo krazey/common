@@ -608,6 +608,7 @@ obj-$(CONFIG_SND_SOC_MAX98095)	+= snd-soc-max98095.o
 obj-$(CONFIG_SND_SOC_MAX98357A)	+= snd-soc-max98357a.o
 obj-$(CONFIG_SND_SOC_MAX98371)	+= snd-soc-max98371.o
 obj-$(CONFIG_SND_SOC_MAX98512)	+= max98512.o
+obj-$(CONFIG_SND_SOC_MAXIM_DSM)	+= maxim_dsm.o
 obj-$(CONFIG_SND_SOC_MAX9867)	+= snd-soc-max9867.o
 obj-$(CONFIG_SND_SOC_MAX98925)	+= snd-soc-max98925.o
 obj-$(CONFIG_SND_SOC_MAX98926)	+= snd-soc-max98926.o

@@ -1446,6 +1446,17 @@ config SND_SOC_MAX98512
 	  stereo speaker configurations.
 	  The device is controlled through an I2C register interface.
 
+config SND_SOC_MAXIM_DSM
+	bool "Maxim DSM controls for Samsung ABOX"
+	depends on SND_SOC_MAX98512
+	depends on SEC_SND_ADAPTATION
+	help
+	  Enable the Maxim DSM speaker-mode exchange used by Samsung ABOX
+	  firmware before audio is sent to MAX98512 amplifiers. The exchange
+	  selects the one-stop speaker mode used by the Calliope firmware.
+	  This is required on Exynos9810 devices using the downstream audio
+	  firmware and MAX98512 smart amplifiers.
+
 config SND_SOC_MAX9867
 	tristate "Maxim MAX9867 CODEC"
 	depends on I2C

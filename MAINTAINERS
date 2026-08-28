@@ -15926,7 +15926,11 @@ M:	Mathias Gluszczynski <admin@krazey.de>
 L:	linux-sound@vger.kernel.org
 S:	Maintained
 F:	Documentation/devicetree/bindings/sound/maxim,max98512.yaml
+F:	include/sound/maxim_dsm.h
+F:	include/sound/sec_adaptation.h
 F:	sound/soc/codecs/max98512.*
+F:	sound/soc/codecs/maxim_dsm.c
+F:	sound/soc/samsung/abox/abox_adaptation.c
 
 MAX9860 MONO AUDIO VOICE CODEC DRIVER
 M:	Peter Rosin <peda@lysator.liu.se>

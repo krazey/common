@@ -16,6 +16,7 @@
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
 #include <sound/tlv.h>
+#include <sound/maxim_dsm.h>
 #include "max98512.h"
 
 #define msg_maxim(format, args...) \
@@ -849,9 +850,14 @@ static int __max98512_spk_enable(struct max98512_priv *max98512)
 
 static void max98512_spk_enable(struct max98512_priv *max98512, int enable)
 {
+	unsigned int amp_l = 0, amp_r = 0;
+	unsigned int global_l = 0, global_r = 0;
+	unsigned int rx_l = 0, rx_r = 0;
+	int ret = 0;
+
 	max98512->pca.playback_active = enable;
 	if (enable) {
-		__max98512_spk_enable(max98512);
+		ret = __max98512_spk_enable(max98512);
 	} else {
 		max98512_wrapper_update(max98512, MAX98512B,
 					MAX98512_R0400_GLOBAL_SHDN,
@@ -868,6 +874,37 @@ static void max98512_spk_enable(struct max98512_priv *max98512, int enable)
 					0);
 		usleep_range(15000, 16000);
 	}
+
+#if IS_ENABLED(CONFIG_SND_SOC_MAXIM_DSM)
+	maxdsm_set_spk_state(enable, max98512->pdata->osm);
+	if (enable) {
+		ret = maxdsm_set_stereo_mode_configuration(max98512->pdata->osm);
+		if (ret)
+			dev_err(max98512->i2c_dev,
+				"failed to synchronize DSM speaker mode: %d\n",
+				ret);
+	}
+#endif
+
+	max98512_wrapper_read(max98512, MAX98512L,
+			      MAX98512_R0018_PCM_RX_EN_A, &rx_l);
+	max98512_wrapper_read(max98512, MAX98512L,
+			      MAX98512_R0038_AMP_EN, &amp_l);
+	max98512_wrapper_read(max98512, MAX98512L,
+			      MAX98512_R0400_GLOBAL_SHDN, &global_l);
+	if (max98512->mono_stereo) {
+		max98512_wrapper_read(max98512, MAX98512R,
+				      MAX98512_R0018_PCM_RX_EN_A, &rx_r);
+		max98512_wrapper_read(max98512, MAX98512R,
+				      MAX98512_R0038_AMP_EN, &amp_r);
+		max98512_wrapper_read(max98512, MAX98512R,
+				      MAX98512_R0400_GLOBAL_SHDN, &global_r);
+	}
+
+	dev_info(max98512->i2c_dev,
+		 "speaker %s L=%02x/%02x/%02x R=%02x/%02x/%02x ret=%d\n",
+		 enable ? "on" : "off", rx_l, amp_l, global_l,
+		 rx_r, amp_r, global_r, ret);
 }
 
 static void max98512_spk_enable_l(struct max98512_priv *max98512, int enable)
@@ -1796,6 +1833,12 @@ static int max98512_i2c_probe(struct i2c_client *i2c)
 	vstep = &max98512->vstep;
 
 	if (i2c->dev.of_node) {
+		ret = of_property_read_u32_array(i2c->dev.of_node,
+						 "maxim,platform-info",
+						 pdata->platform_info,
+						 ARRAY_SIZE(pdata->platform_info));
+		pdata->has_platform_info = !ret;
+
 		if (of_property_read_u32_array(i2c->dev.of_node,
 					       "maxim,boost-step",
 					       (u32 *)&vstep->boost_step,
@@ -1987,6 +2030,21 @@ static int max98512_i2c_probe(struct i2c_client *i2c)
 	if (max98512->regmap_l &&
 	    (!max98512->mono_stereo || max98512->regmap_r))
 		max98512_slot_config(i2c, max98512);
+
+#if IS_ENABLED(CONFIG_SND_SOC_MAXIM_DSM)
+	if (!pdata->nodsm) {
+		if (!pdata->has_platform_info)
+			return dev_err_probe(&i2c->dev, -EINVAL,
+					     "missing DSM platform information\n");
+
+		ret = maxdsm_init();
+		if (!ret)
+			ret = maxdsm_update_info(pdata->platform_info);
+		if (ret)
+			return dev_err_probe(&i2c->dev, ret,
+					     "failed to initialize DSM controls\n");
+	}
+#endif
 
 	ret = devm_snd_soc_register_component(&i2c->dev,
 					      &max98512_component_driver,
