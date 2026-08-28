@@ -22,6 +22,58 @@
 #include "abox.h"
 #include "abox_if.h"
 
+static int abox_uaif_select_internal_bclk(struct device *dev,
+		struct abox_if_data *data)
+{
+	struct clk *mux;
+	struct clk *source;
+	int ret;
+
+	mux = clk_get_parent(data->clk_bclk_gate);
+	if (!mux) {
+		dev_err(dev, "UAIF%d has no bclk source mux\n", data->id);
+		return -EINVAL;
+	}
+
+	/*
+	 * The downstream special clock combined the UAIF source mux and the
+	 * programmable divider. With the clocks represented separately, select
+	 * the divider explicitly instead of inheriting the bootloader's mux state.
+	 */
+	ret = clk_set_parent(mux, data->clk_bclk);
+	if (ret < 0) {
+		dev_err(dev, "failed to select UAIF%d bclk source: %d\n",
+			data->id, ret);
+		return ret;
+	}
+
+	source = clk_get_parent(mux);
+	dev_info(dev, "E981D: UAIF%d internal bclk selected=%d\n", data->id,
+		 source && clk_is_match(source, data->clk_bclk));
+
+	return 0;
+}
+
+static void abox_uaif_trace_bclk(struct device *dev,
+		struct abox_if_data *data)
+{
+	struct clk *mux;
+	struct clk *source;
+
+	if (!IS_ENABLED(CONFIG_SOC_EXYNOS9810) || data->id != 1)
+		return;
+
+	mux = clk_get_parent(data->clk_bclk_gate);
+	source = mux ? clk_get_parent(mux) : NULL;
+	dev_info(dev,
+		 "E981D: UAIF1 clocks div=%lu gate=%lu mux=%lu source=%lu internal=%d\n",
+		 clk_get_rate(data->clk_bclk),
+		 clk_get_rate(data->clk_bclk_gate),
+		 mux ? clk_get_rate(mux) : 0,
+		 source ? clk_get_rate(source) : 0,
+		 source && clk_is_match(source, data->clk_bclk));
+}
+
 static int abox_if_startup(struct snd_pcm_substream *substream,
 		struct snd_soc_dai *dai)
 {
@@ -380,6 +432,7 @@ static int abox_uaif_hw_params(struct snd_pcm_substream *substream,
 
 	dev_info(dev, "rate=%u, width=%d, channel=%u, bclk=%lu\n",
 			rate, width, channels, clk_get_rate(data->clk_bclk));
+	abox_uaif_trace_bclk(dev, data);
 
 	ret = abox_component_read(cmpnt, ABOX_UAIF_CTRL1(id), &ctrl1);
 	if (ret < 0)
@@ -747,6 +800,11 @@ static int samsung_abox_if_probe(struct platform_device *pdev)
 
 	data->of_data = of_match_node(samsung_abox_if_match,
 			pdev->dev.of_node)->data;
+	if (of_device_is_compatible(np, "samsung,abox-uaif")) {
+		ret = abox_uaif_select_internal_bclk(dev, data);
+		if (ret < 0)
+			return ret;
+	}
 	data->abox_data = dev_get_drvdata(dev_abox);
 	data->dai_drv = devm_kzalloc(dev, sizeof(struct snd_soc_dai_driver),
 			GFP_KERNEL);
