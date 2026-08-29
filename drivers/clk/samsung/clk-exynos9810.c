@@ -488,29 +488,33 @@ static const struct samsung_gate_clock aud_gate_clks[] __initconst = {
 	GATE(0, "gout_aud_dsif_qch", NULL, QCH_CON_ABOX_BCLK_DSIF, 0,
 	     CLK_IS_CRITICAL, 0),
 	/*
-	 * QCH_CON controls the handshake around each interface.  The serial
-	 * clock itself is gated by CG_VAL in CLK_CON_GAT at bit 21.
+	 * Keep the serial and reset clocks passing while a stream owns them.
+	 *
+	 * These CMU gates boot in automatic mode (MANUAL, bit 20, is clear).
+	 * In that mode CG_VAL at bit 21 is ignored.  Downstream CAL instead
+	 * clears ENABLE_AUTOMATIC_CLKGATING at bit 28 to force a clock through,
+	 * and sets it again when the clock can return to hardware control.
 	 */
 	GATE(CLK_GOUT_AUD_UAIF0, "gout_aud_uaif0", "mout_aud_uaif0",
-	     CLK_CON_GAT_AUD_UAIF0, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF0, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF1, "gout_aud_uaif1", "mout_aud_uaif1",
-	     CLK_CON_GAT_AUD_UAIF1, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF1, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF2, "gout_aud_uaif2", "mout_aud_uaif2",
-	     CLK_CON_GAT_AUD_UAIF2, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF2, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF3, "gout_aud_uaif3", "mout_aud_uaif3",
-	     CLK_CON_GAT_AUD_UAIF3, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF3, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_DSIF, "gout_aud_dsif", "dout_aud_dsif",
-	     CLK_CON_GAT_AUD_DSIF, 21, 0, 0),
+	     CLK_CON_GAT_AUD_DSIF, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF0_RST, "gout_aud_uaif0_rst", "mout_aud_uaif0",
-	     CLK_CON_GAT_AUD_UAIF0_RST, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF0_RST, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF1_RST, "gout_aud_uaif1_rst", "mout_aud_uaif1",
-	     CLK_CON_GAT_AUD_UAIF1_RST, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF1_RST, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF2_RST, "gout_aud_uaif2_rst", "mout_aud_uaif2",
-	     CLK_CON_GAT_AUD_UAIF2_RST, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF2_RST, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_UAIF3_RST, "gout_aud_uaif3_rst", "mout_aud_uaif3",
-	     CLK_CON_GAT_AUD_UAIF3_RST, 21, 0, 0),
+	     CLK_CON_GAT_AUD_UAIF3_RST, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_DSIF_RST, "gout_aud_dsif_rst", "dout_aud_dsif",
-	     CLK_CON_GAT_AUD_DSIF_RST, 21, 0, 0),
+	     CLK_CON_GAT_AUD_DSIF_RST, 28, 0, CLK_GATE_SET_TO_DISABLE),
 	GATE(CLK_GOUT_AUD_ABOX_ACLK, "gout_aud_abox_aclk",
 	     "dout_aud_bus", QCH_CON_ABOX_ACLK, 1,
 	     CLK_IS_CRITICAL, 0),
