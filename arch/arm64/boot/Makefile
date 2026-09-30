@@ -19,6 +19,32 @@ OBJCOPYFLAGS_Image :=-O binary -R .note -R .note.gnu.build-id -R .comment -S
 targets := Image Image.bz2 Image.gz Image.lz4 Image.lzma Image.lzo \
 	Image.zst Image.xz image.fit
 
+targets += dt.img Image.samsung
+
+# Only explicitly selected Samsung boards belong in the DTBH container.
+# Do not sweep this directory: ARCH_EXYNOS also builds unrelated SoCs.
+SAMSUNG_DTB_NAMES ?= exynos/exynos9810-starlte.dtb
+SAMSUNG_DTB_OBJS := $(addprefix $(obj)/dts/,$(SAMSUNG_DTB_NAMES))
+SAMSUNG_PYTHON3 ?= python3
+SAMSUNG_BOOT_PAGESIZE ?= 2048
+samsung_bootimg := $(srctree)/scripts/samsung_bootimg.py
+
+quiet_cmd_samsung_dtbh = DTBH    $@
+      cmd_samsung_dtbh = $(SAMSUNG_PYTHON3) $(samsung_bootimg) dtbh \
+		--pagesize $(SAMSUNG_BOOT_PAGESIZE) --output $@ \
+		$(SAMSUNG_DTB_OBJS)
+
+quiet_cmd_samsung_bundle = SAMSUNG $@
+      cmd_samsung_bundle = $(SAMSUNG_PYTHON3) $(samsung_bootimg) bundle \
+		--pagesize $(SAMSUNG_BOOT_PAGESIZE) --kernel $(obj)/Image \
+		--dt $(obj)/dt.img --output $@
+
+$(obj)/dt.img: $(SAMSUNG_DTB_OBJS) $(samsung_bootimg) FORCE
+	$(call if_changed,samsung_dtbh)
+
+$(obj)/Image.samsung: $(obj)/Image $(obj)/dt.img $(samsung_bootimg) FORCE
+	$(call if_changed,samsung_bundle)
+
 $(obj)/Image: vmlinux FORCE
 	$(call if_changed,objcopy)
 

@@ -164,7 +164,7 @@ libs-$(CONFIG_EFI_STUB) += $(objtree)/drivers/firmware/efi/libstub/lib.a
 # Default target when executing plain make
 boot		:= arch/arm64/boot
 
-BOOT_TARGETS	:= Image vmlinuz.efi image.fit
+BOOT_TARGETS	:= Image Image.samsung vmlinuz.efi image.fit
 
 PHONY += $(BOOT_TARGETS)
 
@@ -176,9 +176,9 @@ endif
 
 all:	$(notdir $(KBUILD_IMAGE))
 
-image.fit: dtbs
+Image.samsung image.fit: dtbs
 
-vmlinuz.efi image.fit: Image
+Image.samsung vmlinuz.efi image.fit: Image
 $(BOOT_TARGETS): vmlinux
 	$(Q)$(MAKE) $(build)=$(boot) $(boot)/$@
 
